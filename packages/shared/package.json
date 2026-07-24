@@ -9,9 +9,11 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "demo:resurface": "tsx scripts/resurface-demo.ts"
   },
   "devDependencies": {
+    "tsx": "^4.23.1",
     "typescript": "^5.7.3"
   }
 }

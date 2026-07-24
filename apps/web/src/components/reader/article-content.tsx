@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Highlight, HighlightColor, TextPositionAnchor, TextQuoteAnchor } from "@booklet/shared";
-import { computeAnchor, resolveAnchor } from "@booklet/shared";
+import type { Highlight, HighlightColor, TextPosition } from "@booklet/shared";
+import { computeTextPosition, resolveTextPosition } from "@booklet/shared";
 import {
   plainTextOf,
   rangeForTextOffsets,
@@ -10,6 +10,7 @@ import {
   wrapRangeInElements,
 } from "@/lib/reader/dom-range";
 import { HighlightPopover } from "./highlight-popover";
+import { HighlightManagePopover } from "./highlight-manage-popover";
 import type { ReaderSize } from "./reader-toolbar";
 
 const HIGHLIGHT_CLASS: Record<HighlightColor, string> = {
@@ -33,20 +34,37 @@ interface PendingSelection {
   rect: DOMRect;
 }
 
+interface ManagingHighlight {
+  highlight: Highlight;
+  rect: DOMRect;
+}
+
 interface ArticleContentProps {
   html: string;
   highlights: Highlight[];
   size: ReaderSize;
-  onCreateHighlight: (anchor: TextQuoteAnchor & TextPositionAnchor, color: HighlightColor, note: string) => void;
+  onCreateHighlight: (position: TextPosition, color: HighlightColor, note: string) => void;
+  onDeleteHighlight: (highlightId: string) => void;
+  onSaveNote: (highlightId: string, noteText: string) => void;
+  onDeleteNote: (highlightId: string) => void;
 }
 
-export function ArticleContent({ html, highlights, size, onCreateHighlight }: ArticleContentProps) {
+export function ArticleContent({
+  html,
+  highlights,
+  size,
+  onCreateHighlight,
+  onDeleteHighlight,
+  onSaveNote,
+  onDeleteNote,
+}: ArticleContentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingSelection | null>(null);
+  const [managing, setManaging] = useState<ManagingHighlight | null>(null);
 
   // Re-apply highlight marks whenever the highlight list or underlying html changes.
-  // This is the same resolveAnchor() used server-side-adjacent (packages/shared),
-  // so drift-tolerant re-anchoring is exercised for real, not simulated.
+  // This is the same resolveTextPosition() from packages/shared, so
+  // drift-tolerant re-anchoring is exercised for real, not simulated.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -67,13 +85,11 @@ export function ArticleContent({ html, highlights, size, onCreateHighlight }: Ar
     // `fullText` stay valid across iterations within this pass.
     const marksByHighlight = new Map<string, HTMLElement[]>();
     for (const highlight of highlights) {
-      const resolution = resolveAnchor(fullText, {
-        exact: highlight.selectedText,
-        prefix: highlight.prefix,
-        suffix: highlight.suffix,
-        start: highlight.startOffset,
-        end: highlight.endOffset,
-      });
+      // This renderer only knows how to place "text" positions -- a PDF/EPUB
+      // highlight has no meaning inside an HTML article's DOM.
+      if (highlight.position.type !== "text") continue;
+
+      const resolution = resolveTextPosition(fullText, highlight.position);
       if (resolution.status === "unresolved") continue;
 
       const range = rangeForTextOffsets(container, resolution.start, resolution.end);
@@ -82,7 +98,7 @@ export function ArticleContent({ html, highlights, size, onCreateHighlight }: Ar
       const marks = wrapRangeInElements(container, range, () => {
         const mark = document.createElement("mark");
         mark.dataset.highlightId = highlight.id;
-        mark.className = `${HIGHLIGHT_CLASS[highlight.color]} rounded-[3px] text-inherit`;
+        mark.className = `${HIGHLIGHT_CLASS[highlight.color]} cursor-pointer rounded-[3px] text-inherit`;
         (mark.style as CSSStyleDeclaration & { boxDecorationBreak?: string }).boxDecorationBreak = "clone";
         mark.style.setProperty("-webkit-box-decoration-break", "clone");
         return mark;
@@ -99,8 +115,9 @@ export function ArticleContent({ html, highlights, size, onCreateHighlight }: Ar
       if (!marks || marks.length === 0) continue;
 
       const pill = document.createElement("span");
+      pill.dataset.highlightId = highlight.id;
       pill.className =
-        "note-pill inline-flex items-center gap-1 ml-1.5 rounded-full border border-border bg-surface px-2 py-0.5 align-middle font-sans text-xs font-medium text-accent whitespace-nowrap";
+        "note-pill inline-flex cursor-pointer items-center gap-1 ml-1.5 rounded-full border border-border bg-surface px-2 py-0.5 align-middle font-sans text-xs font-medium text-accent whitespace-nowrap";
       pill.title = highlight.annotation.noteText;
       pill.innerHTML =
         '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 3h12M2 8h8M2 13h5"/></svg>';
@@ -133,10 +150,22 @@ export function ArticleContent({ html, highlights, size, onCreateHighlight }: Ar
     const container = containerRef.current;
     if (!pending || !container) return;
     const fullText = plainTextOf(container);
-    const anchor = computeAnchor(fullText, pending.start, pending.end);
-    onCreateHighlight(anchor, color, note);
+    const position = computeTextPosition(fullText, pending.start, pending.end);
+    onCreateHighlight(position, color, note);
     setPending(null);
     window.getSelection()?.removeAllRanges();
+  }
+
+  function handleContainerClick(e: React.MouseEvent) {
+    const target = e.target as HTMLElement;
+    const marker = target.closest<HTMLElement>("mark[data-highlight-id], .note-pill[data-highlight-id]");
+    if (!marker) return;
+
+    const highlightId = marker.dataset.highlightId;
+    const highlight = highlights.find((h) => h.id === highlightId);
+    if (!highlight) return;
+
+    setManaging({ highlight, rect: marker.getBoundingClientRect() });
   }
 
   const { fontSize, lineHeight } = SIZE_STYLE[size];
@@ -153,6 +182,7 @@ export function ArticleContent({ html, highlights, size, onCreateHighlight }: Ar
         ref={containerRef}
         data-article-content
         onMouseUp={handleMouseUp}
+        onClick={handleContainerClick}
         className="font-serif text-ink [&_p]:mb-5 [&_em]:italic [&_strong]:font-semibold"
         style={{ fontSize, lineHeight }}
         dangerouslySetInnerHTML={dangerousHtml}
@@ -162,6 +192,25 @@ export function ArticleContent({ html, highlights, size, onCreateHighlight }: Ar
           anchorRect={pending.rect}
           onConfirm={handleConfirm}
           onDismiss={() => setPending(null)}
+        />
+      )}
+      {managing && (
+        <HighlightManagePopover
+          anchorRect={managing.rect}
+          noteText={managing.highlight.annotation?.noteText ?? ""}
+          onSaveNote={(text) => {
+            onSaveNote(managing.highlight.id, text);
+            setManaging(null);
+          }}
+          onDeleteNote={() => {
+            onDeleteNote(managing.highlight.id);
+            setManaging(null);
+          }}
+          onDeleteHighlight={() => {
+            onDeleteHighlight(managing.highlight.id);
+            setManaging(null);
+          }}
+          onDismiss={() => setManaging(null)}
         />
       )}
     </div>

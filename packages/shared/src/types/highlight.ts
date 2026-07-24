@@ -1,19 +1,8 @@
 import type { Annotation } from "./annotation";
+import type { HighlightPosition } from "./highlight-position";
 
 export type HighlightColor = "YELLOW" | "GREEN" | "BLUE" | "PINK" | "ORANGE";
-
-/** W3C Web Annotation TextQuoteSelector -- content-based, survives offset drift. */
-export interface TextQuoteAnchor {
-  exact: string;
-  prefix: string;
-  suffix: string;
-}
-
-/** W3C Web Annotation TextPositionSelector -- fast path, refined by the quote above. */
-export interface TextPositionAnchor {
-  start: number;
-  end: number;
-}
+export type ResurfaceFeedback = "REMEMBERED" | "FORGOT";
 
 export interface Highlight {
   id: string;
@@ -21,15 +10,16 @@ export interface Highlight {
   userId: string;
 
   selectedText: string;
-  prefix: string;
-  suffix: string;
-  startOffset: number;
-  endOffset: number;
+  position: HighlightPosition;
 
   color: HighlightColor;
 
   lastSurfacedAt: string | null;
   surfaceCount: number;
+
+  lastFeedback: ResurfaceFeedback | null;
+  lastFeedbackAt: string | null;
+  resurfaceArchivedAt: string | null;
 
   createdAt: string;
   updatedAt: string;

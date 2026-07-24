@@ -35,6 +35,16 @@ enum HighlightColor {
   ORANGE
 }
 
+enum ResurfaceFeedback {
+  REMEMBERED
+  FORGOT
+}
+
+enum ResurfaceFrequency {
+  DAILY
+  WEEKLY
+}
+
 // ---------- Models ----------
 
 model User {
@@ -50,6 +60,10 @@ model User {
   annotations Annotation[]
   collections Collection[]
   sessions    Session[]
+  digests     Digest[]
+
+  resurfaceFrequency  ResurfaceFrequency @default(DAILY)
+  highlightsPerDigest Int                @default(5)
 }
 
 // Refresh-token store behind the JWT auth. Access tokens are short-lived,
@@ -75,20 +89,22 @@ model Article {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  url      String
+  url      String? // null for PDF/EPUB uploads -- there's no source URL for those
   title    String?
   author   String?
   siteName String?
   excerpt  String?
 
-  sourceType        SourceType       @default(HTML) // reserved for PDF/EPUB later
+  sourceType        SourceType       @default(HTML)
   extractionStatus  ExtractionStatus @default(PENDING)
   extractionError   String?
-  extractedHtml     String?          @db.Text
-  extractedText     String?          @db.Text
-  rawHtmlStorageKey String?          // key into StorageService (filesystem now, S3 later) -- raw fetched HTML, for re-extraction/debugging, not read on hot paths
+  extractedHtml     String?          @db.Text // HTML only -- Readability output rendered in the reader
+  extractedText     String?          @db.Text // all types -- HTML/PDF full text, EPUB full book text; search + reading-time estimate
+  fileStorageKey    String?          // key into StorageService (filesystem now, S3 later) -- raw fetched HTML snapshot (HTML) or the uploaded file itself (PDF/EPUB), not read on hot paths
+  originalFilename  String?          // PDF/EPUB upload's original filename -- fallback title source when metadata extraction comes up empty
 
-  readingTimeEstimate Int? // minutes, computed from extractedText at save time
+  readingTimeEstimate Int?   // minutes, computed from extractedText at save time
+  progressFraction    Float  @default(0) // 0.0-1.0, normalized regardless of sourceType (page/total, CFI/total, or scroll position)
 
   status     ArticleStatus @default(UNREAD)
   savedAt    DateTime      @default(now())
@@ -115,27 +131,43 @@ model Highlight {
 
   selectedText String @db.Text
 
-  // TextQuoteSelector (W3C Web Annotation) -- robust, content-based re-anchoring
-  prefix String @default("")
-  suffix String @default("")
-
-  // TextPositionSelector -- fast-path offsets into Article.extractedText, refined by quote above
-  startOffset Int
-  endOffset   Int
+  /// Discriminated by position.type: "text" (HTML, W3C TextQuote+TextPosition
+  /// selectors against Article.extractedText) | "pdf" (page + rects, PDF
+  /// user-space units) | "epub" (a CFI range). See packages/shared
+  /// HighlightPosition for the exact shape per type.
+  position Json
 
   color HighlightColor @default(YELLOW)
 
-  // unused this phase -- reserved so "highlights not shown recently" is a plain query later
   lastSurfacedAt DateTime?
   surfaceCount   Int       @default(0)
+
+  lastFeedback        ResurfaceFeedback? // set by "remembered this" / "forgot this"
+  lastFeedbackAt      DateTime?
+  resurfaceArchivedAt DateTime?          // "archive this highlight" -- null = still eligible
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   annotation Annotation?
+  digests    Digest[] // which resurfacing batches this highlight has appeared in
 
   @@index([articleId])
   @@index([userId, createdAt])
+}
+
+model Digest {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  generatedAt DateTime  @default(now())
+  viewedAt    DateTime? // in-app "seen" marker
+  emailSentAt DateTime? // stub -- set when the logged-not-sent email step runs
+
+  highlights Highlight[]
+
+  @@index([userId, generatedAt])
 }
 
 model Annotation {
