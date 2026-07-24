@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+/* ---- Paper (light) -- default ---- */
+:root {
+  --color-paper: #EDEBE2;
+  --color-surface: #FAF9F4;
+  --color-surface-2: #F3F1E9;
+  --color-ink: #211F1A;
+  --color-ink-muted: #5C584D;
+  --color-ink-faint: #86816F;
+  --color-border: #DBD6C8;
+  --color-accent: #1F6F6B;
+  --color-accent-strong: #14514E;
+  --color-accent-contrast: #FBFAF6;
+
+  --color-highlight-yellow: #F3DE9C;
+  --color-highlight-green: #BCDFC4;
+  --color-highlight-blue: #BBD6E8;
+  --color-highlight-pink: #EFCCDA;
+  --color-highlight-orange: #F1CB9E;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}
+
+/* ---- Night (dark) ---- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: #14181A;
+    --color-surface: #1C2124;
+    --color-surface-2: #20272A;
+    --color-ink: #E8E4DA;
+    --color-ink-muted: #A6A093;
+    --color-ink-faint: #767065;
+    --color-border: #2D3336;
+    --color-accent: #55C4B8;
+    --color-accent-strong: #7ED8CD;
+    --color-accent-contrast: #0B1413;
+
+    --color-highlight-yellow: #55461D;
+    --color-highlight-green: #2A4834;
+    --color-highlight-blue: #25415A;
+    --color-highlight-pink: #482C3A;
+    --color-highlight-orange: #4E3620;
+  }
+}
+:root[data-theme="dark"] {
+  --color-paper: #14181A;
+  --color-surface: #1C2124;
+  --color-surface-2: #20272A;
+  --color-ink: #E8E4DA;
+  --color-ink-muted: #A6A093;
+  --color-ink-faint: #767065;
+  --color-border: #2D3336;
+  --color-accent: #55C4B8;
+  --color-accent-strong: #7ED8CD;
+  --color-accent-contrast: #0B1413;
+
+  --color-highlight-yellow: #55461D;
+  --color-highlight-green: #2A4834;
+  --color-highlight-blue: #25415A;
+  --color-highlight-pink: #482C3A;
+  --color-highlight-orange: #4E3620;
+}
+:root[data-theme="light"] {
+  --color-paper: #EDEBE2;
+  --color-surface: #FAF9F4;
+  --color-surface-2: #F3F1E9;
+  --color-ink: #211F1A;
+  --color-ink-muted: #5C584D;
+  --color-ink-faint: #86816F;
+  --color-border: #DBD6C8;
+  --color-accent: #1F6F6B;
+  --color-accent-strong: #14514E;
+  --color-accent-contrast: #FBFAF6;
+
+  --color-highlight-yellow: #F3DE9C;
+  --color-highlight-green: #BCDFC4;
+  --color-highlight-blue: #BBD6E8;
+  --color-highlight-pink: #EFCCDA;
+  --color-highlight-orange: #F1CB9E;
+}
+/* ---- Lamp (sepia) ---- */
+:root[data-theme="sepia"] {
+  --color-paper: #E7D8B2;
+  --color-surface: #DDCB9C;
+  --color-surface-2: #D6C08C;
+  --color-ink: #392E1C;
+  --color-ink-muted: #6B5A3C;
+  --color-ink-faint: #8A7752;
+  --color-border: #C9B481;
+  --color-accent: #0F5A54;
+  --color-accent-strong: #0B4A45;
+  --color-accent-contrast: #F5EFDC;
+
+  --color-highlight-yellow: #E2C56A;
+  --color-highlight-green: #B5D0A0;
+  --color-highlight-blue: #A9C4D1;
+  --color-highlight-pink: #DDB8C3;
+  --color-highlight-orange: #DEAC76;
+}
+
+@theme inline {
+  --color-paper: var(--color-paper);
+  --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
+  --color-ink: var(--color-ink);
+  --color-ink-muted: var(--color-ink-muted);
+  --color-ink-faint: var(--color-ink-faint);
+  --color-border: var(--color-border);
+  --color-accent: var(--color-accent);
+  --color-accent-strong: var(--color-accent-strong);
+  --color-accent-contrast: var(--color-accent-contrast);
+
+  --color-highlight-yellow: var(--color-highlight-yellow);
+  --color-highlight-green: var(--color-highlight-green);
+  --color-highlight-blue: var(--color-highlight-blue);
+  --color-highlight-pink: var(--color-highlight-pink);
+  --color-highlight-orange: var(--color-highlight-orange);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+
+  --font-serif: var(--font-literata);
+  --font-sans: var(--font-work-sans);
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+::selection {
+  background: var(--color-highlight-yellow);
+}
