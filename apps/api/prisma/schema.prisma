@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Enums ----------
+
+enum ArticleStatus {
+  UNREAD
+  READING
+  ARCHIVED
+}
+
+enum SourceType {
+  HTML
+  PDF
+  EPUB
+}
+
+enum ExtractionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum HighlightColor {
+  YELLOW
+  GREEN
+  BLUE
+  PINK
+  ORANGE
+}
+
+// ---------- Models ----------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  articles    Article[]
+  highlights  Highlight[]
+  annotations Annotation[]
+  collections Collection[]
+  sessions    Session[]
+}
+
+// Refresh-token store behind the JWT auth. Access tokens are short-lived,
+// stateless JWTs; this table exists so "log out" and revocation actually
+// work, and so we have a real user-session concept to hand off to
+// Clerk/Auth0 later without touching anything below this model.
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  userAgent        String?
+  ipAddress        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Article {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  url      String
+  title    String?
+  author   String?
+  siteName String?
+  excerpt  String?
+
+  sourceType        SourceType       @default(HTML) // reserved for PDF/EPUB later
+  extractionStatus  ExtractionStatus @default(PENDING)
+  extractionError   String?
+  extractedHtml     String?          @db.Text
+  extractedText     String?          @db.Text
+  rawHtmlStorageKey String?          // key into StorageService (filesystem now, S3 later) -- raw fetched HTML, for re-extraction/debugging, not read on hot paths
+
+  readingTimeEstimate Int? // minutes, computed from extractedText at save time
+
+  status     ArticleStatus @default(UNREAD)
+  savedAt    DateTime      @default(now())
+  readAt     DateTime?
+  archivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  highlights  Highlight[]
+  collections ArticleCollection[]
+
+  @@unique([userId, url])
+  @@index([userId, status])
+  @@index([userId, savedAt])
+}
+
+model Highlight {
+  id        String  @id @default(cuid())
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  userId    String  // denormalized from article.userId -- keeps the cross-article
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade) // Highlights Dashboard query and ownership checks a single-table lookup
+
+  selectedText String @db.Text
+
+  // TextQuoteSelector (W3C Web Annotation) -- robust, content-based re-anchoring
+  prefix String @default("")
+  suffix String @default("")
+
+  // TextPositionSelector -- fast-path offsets into Article.extractedText, refined by quote above
+  startOffset Int
+  endOffset   Int
+
+  color HighlightColor @default(YELLOW)
+
+  // unused this phase -- reserved so "highlights not shown recently" is a plain query later
+  lastSurfacedAt DateTime?
+  surfaceCount   Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  annotation Annotation?
+
+  @@index([articleId])
+  @@index([userId, createdAt])
+}
+
+model Annotation {
+  id          String    @id @default(cuid())
+  highlightId String    @unique // one optional note per highlight, per the spec ("a note attached to a highlight")
+  highlight   Highlight @relation(fields: [highlightId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  noteText String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Collection {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name  String
+  color String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  articles ArticleCollection[]
+
+  @@unique([userId, name])
+}
+
+model ArticleCollection {
+  articleId    String
+  article      Article    @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  addedAt DateTime @default(now())
+
+  @@id([articleId, collectionId])
+}
