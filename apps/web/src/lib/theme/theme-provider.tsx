@@ -13,25 +13,31 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function currentDomTheme(): Theme {
-  const attr = document.documentElement.getAttribute("data-theme");
-  return attr === "dark" || attr === "sepia" ? attr : "light";
-}
-
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // A blocking inline script (see layout.tsx) already set data-theme before
-  // hydration, so read it back rather than guessing -- this avoids a
-  // server/client mismatch without needing a "mounted" loading flash.
-  const [theme, setThemeState] = useState<Theme>(() =>
-    typeof document !== "undefined" ? currentDomTheme() : "light",
-  );
+  // Must match what the server renders -- the server has no `document` at
+  // all, so it always renders "light". Branching on `typeof document` here
+  // doesn't fix that: on the client this runs during hydration, *after* the
+  // blocking inline script (layout.tsx) has already changed data-theme, so
+  // it would read back something the server couldn't possibly have rendered
+  // and React would flag a hydration mismatch on every attribute that reads
+  // `theme` (e.g. aria-pressed on the theme buttons).
+  const [theme, setThemeState] = useState<Theme>("light");
 
+  // Sync React's state from the DOM once, right after hydration. This is a
+  // client-only correction (not a hydration mismatch): the *visual* theme
+  // was already applied via the data-theme attribute before this ever runs,
+  // so there's no color flash -- only React-rendered attributes that read
+  // `theme` update, one frame after mount.
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
+    const attr = document.documentElement.getAttribute("data-theme");
+    if (attr === "dark" || attr === "sepia" || attr === "light") {
+      setThemeState(attr);
+    }
+  }, []);
 
   function setTheme(next: Theme) {
     setThemeState(next);
+    document.documentElement.setAttribute("data-theme", next);
     try {
       localStorage.setItem(STORAGE_KEY, next);
     } catch {

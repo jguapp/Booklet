@@ -1,18 +1,16 @@
-import type { TextPositionAnchor, TextQuoteAnchor } from "./types/highlight";
+import type { TextPosition } from "./types/highlight-position";
 
 const CONTEXT_LENGTH = 32;
 
 /**
- * Derive a TextQuote + TextPosition anchor from a plain-text offset range.
+ * Derive a `text`-type highlight position from a plain-text offset range.
  * `fullText` must be the same string the offsets will later be resolved against
- * (Article.extractedText).
+ * (Article.extractedText). Only meaningful for HTML articles -- PDF/EPUB
+ * positions are constructed directly from PDF.js/epub.js APIs, not this.
  */
-export function computeAnchor(
-  fullText: string,
-  start: number,
-  end: number,
-): TextQuoteAnchor & TextPositionAnchor {
+export function computeTextPosition(fullText: string, start: number, end: number): TextPosition {
   return {
+    type: "text",
     exact: fullText.slice(start, end),
     prefix: fullText.slice(Math.max(0, start - CONTEXT_LENGTH), start),
     suffix: fullText.slice(end, end + CONTEXT_LENGTH),
@@ -26,7 +24,10 @@ export type AnchorResolution =
   | { status: "unresolved" };
 
 /**
- * Re-find a highlight's range inside the current extractedText.
+ * Re-find a `text`-type highlight's range inside the current extractedText.
+ * PDF/EPUB positions don't need this: they're anchored against an immutable
+ * uploaded file, so they either resolve directly or fail outright -- there's
+ * no drift to search for the way a re-extracted web article can have.
  *
  * 1. Fast path: trust the stored offsets if the text there still matches exactly.
  * 2. Search for prefix+exact+suffix (disambiguates repeated phrases).
@@ -35,11 +36,8 @@ export type AnchorResolution =
  * 4. Give up -- caller should render the highlight as unresolved rather than
  *    guessing at a wrong position.
  */
-export function resolveAnchor(
-  fullText: string,
-  anchor: TextQuoteAnchor & TextPositionAnchor,
-): AnchorResolution {
-  const { exact, prefix, suffix, start, end } = anchor;
+export function resolveTextPosition(fullText: string, position: TextPosition): AnchorResolution {
+  const { exact, prefix, suffix, start, end } = position;
 
   if (fullText.slice(start, end) === exact) {
     return { status: "resolved", start, end, driftedOffsets: false };
