@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import type { Collection } from "@booklet/shared";
 import { IconHighlights, IconLibrary, IconLogout, IconPlus, IconResurface, IconSettings } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
@@ -18,6 +18,17 @@ const NAV_ITEMS = [
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  // useSearchParams() forces this subtree to opt out of static prerendering
+  // unless it's wrapped in Suspense -- isolated into its own component so
+  // the boundary sits above it, per Next's own guidance for this error.
+  return (
+    <Suspense fallback={null}>
+      <AppLayoutInner>{children}</AppLayoutInner>
+    </Suspense>
+  );
+}
+
+function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
