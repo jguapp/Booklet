@@ -1,4 +1,4 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyError } from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
@@ -11,6 +11,7 @@ import { registerHighlightRoutes } from "./routes/highlights.js";
 import { registerDigestRoutes } from "./routes/digests.js";
 import { registerSyncRoutes } from "./routes/sync.js";
 import { registerCollectionRoutes } from "./routes/collections.js";
+import { captureException, initErrorMonitoring } from "./lib/error-monitoring.js";
 
 try {
   process.loadEnvFile();
@@ -18,7 +19,19 @@ try {
   // no .env file present -- fine in environments where real env vars are set directly
 }
 
+initErrorMonitoring();
+
 const app = Fastify({ logger: true });
+
+app.setErrorHandler((err: FastifyError, request, reply) => {
+  captureException(err);
+  app.log.error(err);
+  const statusCode = err.statusCode ?? 500;
+  reply.code(statusCode).send({
+    error: statusCode === 500 ? "internal_error" : (err.code ?? "error"),
+    message: statusCode === 500 ? "Something went wrong." : err.message,
+  });
+});
 
 const isDev = process.env.NODE_ENV !== "production";
 
