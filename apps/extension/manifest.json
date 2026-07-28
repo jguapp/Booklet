@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Booklet",
+  "version": "0.1.0",
+  "description": "Save the page you're on straight to your Booklet library.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Save to Booklet"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "contextMenus", "activeTab"],
+  "host_permissions": ["http://localhost:4000/*"]
+}
