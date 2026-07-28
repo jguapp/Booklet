@@ -6,13 +6,15 @@ import { selectHighlightsToResurface } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
 import { loadArticles } from "@/lib/data/articles";
-import { loadHighlights, updateHighlightFeedback } from "@/lib/data/highlights";
+import { updateHighlightFeedback } from "@/lib/data/highlights";
+import { loadCurrentDigest } from "@/lib/data/digests";
+import { loadHighlights as loadLocalHighlights } from "@/lib/data/highlights";
 import { loadUserSettings } from "@/lib/mock/store";
 import { compileDigestEmail, sendDigestEmail } from "@/lib/mock/digest-email";
 import { useAuth } from "@/lib/auth/auth-provider";
 
 export default function ResurfacePage() {
-  const { status, isAuthenticated, user } = useAuth();
+  const { status, isAuthenticated } = useAuth();
   const [articles, setArticles] = useState<Article[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
@@ -21,11 +23,23 @@ export default function ResurfacePage() {
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
-    Promise.all([loadArticles(isAuthenticated), loadHighlights(isAuthenticated)]).then(([loadedArticles, loadedHighlights]) => {
+    loadArticles(isAuthenticated).then(async (loadedArticles) => {
       setArticles(loadedArticles);
-      setHighlights(loadedHighlights);
 
-      const highlightsPerDigest = isAuthenticated && user ? user.highlightsPerDigest : loadUserSettings().highlightsPerDigest;
+      if (isAuthenticated) {
+        // Server picks and persists the batch (see GET /api/digests/current),
+        // so a reload -- or a second device -- sees the same highlights
+        // instead of a freshly re-rolled random selection.
+        const digest = await loadCurrentDigest();
+        const batchHighlights = digest.highlights ?? [];
+        setHighlights(batchHighlights);
+        setBatchIds(batchHighlights.map((h) => h.id));
+        return;
+      }
+
+      const loadedHighlights = await loadLocalHighlights(false);
+      setHighlights(loadedHighlights);
+      const highlightsPerDigest = loadUserSettings().highlightsPerDigest;
       const candidates: ResurfaceCandidate[] = loadedHighlights.map((h) => ({
         id: h.id,
         lastSurfacedAt: h.lastSurfacedAt,
@@ -36,7 +50,7 @@ export default function ResurfacePage() {
       const selected = selectHighlightsToResurface(candidates, highlightsPerDigest);
       setBatchIds(selected.map((c) => c.id));
     });
-  }, [status, isAuthenticated, user]);
+  }, [status, isAuthenticated]);
 
   useEffect(() => {
     refresh();
