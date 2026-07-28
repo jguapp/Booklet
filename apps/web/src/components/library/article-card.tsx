@@ -1,16 +1,32 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import type { Article } from "@booklet/shared";
 import { formatReadingTime, formatRelativeDate } from "@/lib/format";
 import { SourceIcon } from "./source-icon";
 import { StatusBadge } from "./status-badge";
-import { IconArchive, IconInbox } from "@/components/ui/icons";
+import { IconArchive, IconInbox, IconTrash } from "@/components/ui/icons";
+import { cn } from "@/lib/cn";
+
+const CONFIRM_WINDOW_MS = 3000;
 
 interface ArticleCardProps {
   article: Article;
   onToggleArchived?: (article: Article) => void;
+  onDelete?: (article: Article) => void;
 }
 
-export function ArticleCard({ article, onToggleArchived }: ArticleCardProps) {
+export function ArticleCard({ article, onToggleArchived, onDelete }: ArticleCardProps) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (confirmTimeout.current) clearTimeout(confirmTimeout.current);
+    };
+  }, []);
+
   const metaParts = [
     article.siteName ?? article.author,
     formatReadingTime(article.readingTimeEstimate),
@@ -18,6 +34,18 @@ export function ArticleCard({ article, onToggleArchived }: ArticleCardProps) {
   ].filter(Boolean);
 
   const isArchived = article.status === "ARCHIVED";
+
+  function handleDeleteClick(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      confirmTimeout.current = setTimeout(() => setConfirmingDelete(false), CONFIRM_WINDOW_MS);
+      return;
+    }
+    if (confirmTimeout.current) clearTimeout(confirmTimeout.current);
+    onDelete?.(article);
+  }
 
   return (
     <Link
@@ -42,6 +70,23 @@ export function ArticleCard({ article, onToggleArchived }: ArticleCardProps) {
               className="flex h-6 w-6 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface-2 hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
             >
               {isArchived ? <IconInbox className="h-3.5 w-3.5" /> : <IconArchive className="h-3.5 w-3.5" />}
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              title={confirmingDelete ? "Click again to permanently delete" : "Delete"}
+              onClick={handleDeleteClick}
+              onBlur={() => setConfirmingDelete(false)}
+              className={cn(
+                "flex h-6 items-center justify-center rounded-full px-1.5 transition-all",
+                confirmingDelete
+                  ? "w-auto gap-1 bg-red-500/15 text-red-500 opacity-100"
+                  : "w-6 text-ink-faint opacity-0 hover:bg-surface-2 hover:text-ink group-hover:opacity-100 focus-visible:opacity-100",
+              )}
+            >
+              <IconTrash className="h-3.5 w-3.5 shrink-0" />
+              {confirmingDelete && <span className="whitespace-nowrap font-sans text-[11px] font-medium">Confirm?</span>}
             </button>
           )}
         </div>
