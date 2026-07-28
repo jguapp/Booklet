@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { IconHighlights, IconLibrary, IconLogout, IconResurface, IconSettings } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
-import { mockUser } from "@/lib/mock/data";
+import { useAuth } from "@/lib/auth/auth-provider";
 
 const NAV_ITEMS = [
   { href: "/library", label: "Library", Icon: IconLibrary },
@@ -15,6 +15,13 @@ const NAV_ITEMS = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { status, user, logout } = useAuth();
+
+  async function handleLogout() {
+    await logout();
+    router.push("/login");
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -45,19 +52,32 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="border-t border-border px-3 py-4">
-          <div className="flex items-center justify-between gap-2 rounded-sm px-3 py-2">
-            <div className="min-w-0">
-              <div className="truncate font-sans text-sm font-medium text-ink">{mockUser.name}</div>
-              <div className="truncate font-sans text-xs text-ink-faint">{mockUser.email}</div>
+          {status === "authenticated" && user ? (
+            <div className="flex items-center justify-between gap-2 rounded-sm px-3 py-2">
+              <div className="min-w-0">
+                <div className="truncate font-sans text-sm font-medium text-ink">
+                  {user.name ?? user.email}
+                </div>
+                <div className="truncate font-sans text-xs text-ink-faint">{user.email}</div>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                title="Log out"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                <IconLogout className="h-4 w-4" />
+              </button>
             </div>
+          ) : (
             <Link
-              href="/login"
-              title="Log out"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              href="/signup"
+              className="block rounded-sm px-3 py-2 font-sans text-xs text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
             >
-              <IconLogout className="h-4 w-4" />
+              Saved locally on this device.
+              <span className="block font-medium text-accent">Sync across devices →</span>
             </Link>
-          </div>
+          )}
         </div>
       </aside>
 
