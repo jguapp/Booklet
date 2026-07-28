@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, ArticleStatus } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,8 @@ import { IconSearch } from "@/components/ui/icons";
 import { ArticleCard } from "@/components/library/article-card";
 import { SaveArticleModal } from "@/components/library/save-article-modal";
 import { cn } from "@/lib/cn";
-import { loadArticles, saveArticles } from "@/lib/mock/store";
+import { loadArticles } from "@/lib/data/articles";
+import { useAuth } from "@/lib/auth/auth-provider";
 
 type FilterTab = "ALL" | ArticleStatus;
 
@@ -20,14 +21,24 @@ const TABS: { value: FilterTab; label: string }[] = [
 ];
 
 export default function LibraryPage() {
+  const { status, isAuthenticated } = useAuth();
   const [articles, setArticles] = useState<Article[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState<FilterTab>("ALL");
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
 
+  const refresh = useCallback(() => {
+    if (status === "loading") return;
+    loadArticles(isAuthenticated).then((loadedArticles) => {
+      setArticles(loadedArticles);
+      setLoaded(true);
+    });
+  }, [status, isAuthenticated]);
+
   useEffect(() => {
-    setArticles(loadArticles());
-  }, []);
+    refresh();
+  }, [refresh]);
 
   const visible = useMemo(() => {
     return articles
@@ -37,13 +48,11 @@ export default function LibraryPage() {
   }, [articles, tab, search]);
 
   function handleSaved(article: Article) {
-    setArticles((prev) => {
-      const next = [article, ...prev];
-      saveArticles(next);
-      return next;
-    });
+    setArticles((prev) => [article, ...prev]);
     setModalOpen(false);
   }
+
+  if (!loaded) return null;
 
   return (
     <div className="mx-auto max-w-4xl px-8 py-10">
@@ -97,7 +106,9 @@ export default function LibraryPage() {
         </div>
       )}
 
-      {modalOpen && <SaveArticleModal onClose={() => setModalOpen(false)} onSaved={handleSaved} />}
+      {modalOpen && (
+        <SaveArticleModal authenticated={isAuthenticated} onClose={() => setModalOpen(false)} onSaved={handleSaved} />
+      )}
     </div>
   );
 }

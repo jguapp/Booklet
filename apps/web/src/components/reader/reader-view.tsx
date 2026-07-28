@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, ArticleStatus, Highlight, HighlightColor, TextPosition } from "@booklet/shared";
 import { useTheme } from "@/lib/theme/theme-provider";
-import { loadArticles, loadHighlights, saveArticles, saveHighlights } from "@/lib/mock/store";
-import { mockUser } from "@/lib/mock/data";
+import { loadArticle, updateArticleStatus } from "@/lib/data/articles";
+import { loadHighlights, saveHighlights, LOCAL_USER_ID } from "@/lib/data/highlights";
+import { useAuth } from "@/lib/auth/auth-provider";
 import { formatReadingTime } from "@/lib/format";
 import { ReaderToolbar, type ReaderSize } from "./reader-toolbar";
 import { ArticleContent } from "./article-content";
@@ -21,19 +22,26 @@ const STATUS_TABS: { value: ArticleStatus; label: string }[] = [
 
 export function ReaderView({ articleId }: { articleId: string }) {
   const { theme, setTheme } = useTheme();
+  const { status: authStatus, isAuthenticated } = useAuth();
   const [size, setSize] = useState<ReaderSize>("md");
-  const [articles, setArticles] = useState<Article[]>([]);
+  const [article, setArticle] = useState<Article | null>(null);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [progress, setProgress] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => {
-    setArticles(loadArticles());
-    setHighlights(loadHighlights());
-    setLoaded(true);
-  }, []);
+  const refresh = useCallback(() => {
+    if (authStatus === "loading") return;
+    Promise.all([loadArticle(articleId, isAuthenticated), loadHighlights()]).then(([a, h]) => {
+      setArticle(a);
+      setHighlights(h);
+      setLoaded(true);
+    });
+  }, [authStatus, isAuthenticated, articleId]);
 
-  const article = articles.find((a) => a.id === articleId);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
   const articleHighlights = useMemo(
     () => highlights.filter((h) => h.articleId === articleId),
     [highlights, articleId],
@@ -59,7 +67,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
     const highlight: Highlight = {
       id,
       articleId: article.id,
-      userId: mockUser.id,
+      userId: LOCAL_USER_ID,
       selectedText: position.exact,
       position,
       color,
@@ -74,7 +82,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
         ? {
             id: `local-${crypto.randomUUID()}`,
             highlightId: id,
-            userId: mockUser.id,
+            userId: LOCAL_USER_ID,
             noteText: trimmedNote,
             createdAt: now,
             updatedAt: now,
@@ -109,7 +117,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
             : {
                 id: `local-${crypto.randomUUID()}`,
                 highlightId,
-                userId: mockUser.id,
+                userId: LOCAL_USER_ID,
                 noteText,
                 createdAt: now,
                 updatedAt: now,
@@ -129,24 +137,10 @@ export function ReaderView({ articleId }: { articleId: string }) {
     });
   }
 
-  function handleStatusChange(status: ArticleStatus) {
+  async function handleStatusChange(nextStatus: ArticleStatus) {
     if (!article) return;
-    const now = new Date().toISOString();
-    setArticles((prev) => {
-      const next = prev.map((a) =>
-        a.id !== article.id
-          ? a
-          : {
-              ...a,
-              status,
-              readAt: status === "READING" && !a.readAt ? now : a.readAt,
-              archivedAt: status === "ARCHIVED" ? (a.archivedAt ?? now) : null,
-              updatedAt: now,
-            },
-      );
-      saveArticles(next);
-      return next;
-    });
+    const updated = await updateArticleStatus(article, nextStatus, isAuthenticated);
+    setArticle(updated);
   }
 
   if (!loaded) return null;
@@ -226,9 +220,16 @@ export function ReaderView({ articleId }: { articleId: string }) {
               <p className="font-sans text-sm text-ink-muted">
                 {article.sourceType === "PDF"
                   ? "In-browser PDF rendering (PDF.js) is a follow-up phase."
-                  : "In-browser EPUB rendering (epub.js) is a follow-up phase."}
+                  : article.sourceType === "EPUB"
+                    ? "In-browser EPUB rendering (epub.js) is a follow-up phase."
+                    : "Couldn't extract readable content for this article."}
               </p>
-              <p className="mt-1 font-sans text-xs text-ink-faint">{article.originalFilename}</p>
+              {article.originalFilename && (
+                <p className="mt-1 font-sans text-xs text-ink-faint">{article.originalFilename}</p>
+              )}
+              {article.extractionError && (
+                <p className="mt-1 font-sans text-xs text-ink-faint">{article.extractionError}</p>
+              )}
             </div>
 
             {article.extractedText && (

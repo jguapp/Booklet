@@ -1,37 +1,46 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, Highlight, ResurfaceCandidate, ResurfaceFeedback } from "@booklet/shared";
 import { selectHighlightsToResurface } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
-import { loadArticles, loadHighlights, loadUserSettings, saveHighlights } from "@/lib/mock/store";
+import { loadArticles } from "@/lib/data/articles";
+import { loadHighlights, saveHighlights } from "@/lib/data/highlights";
+import { loadUserSettings } from "@/lib/mock/store";
 import { compileDigestEmail, sendDigestEmail } from "@/lib/mock/digest-email";
+import { useAuth } from "@/lib/auth/auth-provider";
 
 export default function ResurfacePage() {
+  const { status, isAuthenticated, user } = useAuth();
   const [articles, setArticles] = useState<Article[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadedArticles = loadArticles();
-    const loadedHighlights = loadHighlights();
-    setArticles(loadedArticles);
-    setHighlights(loadedHighlights);
+  const refresh = useCallback(() => {
+    if (status === "loading") return;
+    Promise.all([loadArticles(isAuthenticated), loadHighlights()]).then(([loadedArticles, loadedHighlights]) => {
+      setArticles(loadedArticles);
+      setHighlights(loadedHighlights);
 
-    const settings = loadUserSettings();
-    const candidates: ResurfaceCandidate[] = loadedHighlights.map((h) => ({
-      id: h.id,
-      lastSurfacedAt: h.lastSurfacedAt,
-      hasAnnotation: !!h.annotation,
-      lastFeedback: h.lastFeedback,
-      resurfaceArchivedAt: h.resurfaceArchivedAt,
-    }));
-    const selected = selectHighlightsToResurface(candidates, settings.highlightsPerDigest);
-    setBatchIds(selected.map((c) => c.id));
-  }, []);
+      const highlightsPerDigest = isAuthenticated && user ? user.highlightsPerDigest : loadUserSettings().highlightsPerDigest;
+      const candidates: ResurfaceCandidate[] = loadedHighlights.map((h) => ({
+        id: h.id,
+        lastSurfacedAt: h.lastSurfacedAt,
+        hasAnnotation: !!h.annotation,
+        lastFeedback: h.lastFeedback,
+        resurfaceArchivedAt: h.resurfaceArchivedAt,
+      }));
+      const selected = selectHighlightsToResurface(candidates, highlightsPerDigest);
+      setBatchIds(selected.map((c) => c.id));
+    });
+  }, [status, isAuthenticated, user]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const articleById = useMemo(() => new Map(articles.map((a) => [a.id, a])), [articles]);
 
