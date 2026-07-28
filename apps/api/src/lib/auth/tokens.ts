@@ -40,3 +40,16 @@ export function generateRefreshToken(): string {
 export function hashRefreshToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
+
+/**
+ * Same shape as the refresh token (opaque, only the hash stored server-side)
+ * -- reused for password-reset and email-verification links so a leaked DB
+ * row is never enough on its own to reset a password or confirm an email.
+ */
+export function generateOpaqueToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
+export function hashOpaqueToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
