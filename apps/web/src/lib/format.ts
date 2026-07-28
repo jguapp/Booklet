@@ -12,3 +12,32 @@ export function formatReadingTime(minutes: number | null): string {
   if (minutes < 1) return "< 1 min read";
   return `${minutes} min read`;
 }
+
+/** Rough, dependency-free summary -- good enough to tell sessions apart, not a real UA parser. */
+export function summarizeUserAgent(userAgent: string | null): string {
+  if (!userAgent) return "Unknown device";
+
+  const browser = /Edg\//.test(userAgent)
+    ? "Edge"
+    : /Chrome\//.test(userAgent)
+      ? "Chrome"
+      : /Firefox\//.test(userAgent)
+        ? "Firefox"
+        : /Safari\//.test(userAgent)
+          ? "Safari"
+          : "Browser";
+
+  const os = /Windows/.test(userAgent)
+    ? "Windows"
+    : /Mac OS X/.test(userAgent)
+      ? "macOS"
+      : /Android/.test(userAgent)
+        ? "Android"
+        : /iPhone|iPad/.test(userAgent)
+          ? "iOS"
+          : /Linux/.test(userAgent)
+            ? "Linux"
+            : "";
+
+  return os ? `${browser} on ${os}` : browser;
+}

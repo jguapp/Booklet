@@ -5,6 +5,7 @@ import type {
   LoginRequest,
   RefreshResponse,
   ResetPasswordRequest,
+  SessionInfo,
   SignupRequest,
   UpdateSettingsRequest,
   UserProfile,
@@ -343,4 +344,55 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(200).send({ ok: true });
     },
   );
+
+  app.get("/api/auth/sessions", { preHandler: requireAuth }, async (request, reply) => {
+    const currentTokenHash = request.cookies[REFRESH_COOKIE_NAME]
+      ? hashRefreshToken(request.cookies[REFRESH_COOKIE_NAME])
+      : null;
+
+    const sessions = await prisma.session.findMany({
+      where: { userId: request.userId!, revokedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const body: SessionInfo[] = sessions.map((s) => ({
+      id: s.id,
+      userAgent: s.userAgent,
+      ipAddress: s.ipAddress,
+      createdAt: s.createdAt.toISOString(),
+      expiresAt: s.expiresAt.toISOString(),
+      current: s.refreshTokenHash === currentTokenHash,
+    }));
+    return reply.send(body);
+  });
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/auth/sessions/:id",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const session = await prisma.session.findFirst({
+        where: { id: request.params.id, userId: request.userId! },
+      });
+      if (!session) return reply.code(404).send({ error: "not_found", message: "Session not found." });
+
+      await prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+      return reply.code(204).send();
+    },
+  );
+
+  app.post("/api/auth/sessions/revoke-others", { preHandler: requireAuth }, async (request, reply) => {
+    const currentTokenHash = request.cookies[REFRESH_COOKIE_NAME]
+      ? hashRefreshToken(request.cookies[REFRESH_COOKIE_NAME])
+      : null;
+
+    const { count } = await prisma.session.updateMany({
+      where: {
+        userId: request.userId!,
+        revokedAt: null,
+        ...(currentTokenHash ? { refreshTokenHash: { not: currentTokenHash } } : {}),
+      },
+      data: { revokedAt: new Date() },
+    });
+    return reply.send({ revokedCount: count });
+  });
 }
