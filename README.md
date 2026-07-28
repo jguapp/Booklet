@@ -70,7 +70,8 @@ packages/
 
 ## Getting started
 
-Requires Node 20+, pnpm, and a PostgreSQL database.
+Requires Node 20+ and pnpm. You also need a PostgreSQL database -- either a
+real one, or the bundled dev database (no install required, see below).
 
 ```bash
 pnpm install
@@ -78,13 +79,24 @@ pnpm install
 cp apps/api/.env.example apps/api/.env        # fill in DATABASE_URL, etc.
 cp apps/web/.env.example apps/web/.env.local
 
+pnpm dev:db    # local Postgres-compatible dev database (skip if using real Postgres)
 pnpm dev:api   # Fastify API on :4000
 pnpm dev:web   # Next.js app on :3000 (or the next free port)
 ```
 
-The Prisma client regenerates automatically on install. Once you have a
-Postgres database reachable at `DATABASE_URL`, `pnpm --filter @booklet/api
-exec prisma migrate dev` will create the schema.
+The Prisma client regenerates automatically on install.
+
+**Using a real Postgres:** point `DATABASE_URL` at it and run
+`pnpm --filter @booklet/api exec prisma migrate deploy` (or `migrate dev`
+while iterating on the schema).
+
+**Using the bundled dev database:** `pnpm dev:db` starts a small
+[PGlite](https://pglite.dev)-backed server that speaks the Postgres wire
+protocol on `localhost:5432` and persists to `apps/api/.pglite-data/` --
+useful for local development without installing Postgres or Docker. Prisma's
+own migration engine doesn't talk to it reliably, so apply schema changes
+with `pnpm --filter @booklet/api migrate:pglite` instead of `migrate dev`/
+`migrate deploy` when using this database.
 
 ## License
 
