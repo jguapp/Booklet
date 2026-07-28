@@ -8,7 +8,7 @@ import { IconSearch } from "@/components/ui/icons";
 import { ArticleCard } from "@/components/library/article-card";
 import { SaveArticleModal } from "@/components/library/save-article-modal";
 import { cn } from "@/lib/cn";
-import { loadArticles } from "@/lib/data/articles";
+import { loadArticles, updateArticleStatus } from "@/lib/data/articles";
 import { useAuth } from "@/lib/auth/auth-provider";
 
 type FilterTab = "ALL" | ArticleStatus;
@@ -50,6 +50,12 @@ export default function LibraryPage() {
   function handleSaved(article: Article) {
     setArticles((prev) => [article, ...prev]);
     setModalOpen(false);
+  }
+
+  async function handleToggleArchived(article: Article) {
+    const nextStatus = article.status === "ARCHIVED" ? "UNREAD" : "ARCHIVED";
+    const updated = await updateArticleStatus(article, nextStatus, isAuthenticated);
+    setArticles((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
   }
 
   if (!loaded) return null;
@@ -101,7 +107,7 @@ export default function LibraryPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {visible.map((article) => (
-            <ArticleCard key={article.id} article={article} />
+            <ArticleCard key={article.id} article={article} onToggleArchived={handleToggleArchived} />
           ))}
         </div>
       )}
