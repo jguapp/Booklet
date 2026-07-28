@@ -10,10 +10,12 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
+    "test": "vitest run",
     "demo:resurface": "tsx scripts/resurface-demo.ts"
   },
   "devDependencies": {
     "tsx": "^4.23.1",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.10"
   }
 }

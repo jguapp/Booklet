@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # Dummy value -- signing access tokens is the only thing that reads this
+  # in a way that matters for typecheck/lint/test, and none of those need a
+  # real secret.
+  JWT_ACCESS_SECRET: ci-test-secret-not-for-production
+
+jobs:
+  typecheck-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @booklet/shared build
+      - run: pnpm --filter @booklet/api exec tsc --noEmit
+      - run: pnpm --filter @booklet/web exec tsc --noEmit
+      - run: pnpm --filter @booklet/web lint
+
+  test-shared:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @booklet/shared test
+
+  test-api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: booklet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/booklet?schema=public
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # A real Postgres service container, unlike the pglite dev database
+      # this repo also supports -- so the normal Prisma migration engine
+      # (which doesn't reliably talk to pglite, see apps/api/README notes)
+      # works fine here.
+      - run: pnpm --filter @booklet/api exec prisma migrate deploy
+      - run: pnpm --filter @booklet/api test
+
+  test-web-e2e:
+    runs-on: ubuntu-latest
+    needs: [test-api]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: booklet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/booklet?schema=public
+      WEB_ORIGIN: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @booklet/api exec prisma migrate deploy
+      - run: pnpm --filter @booklet/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @booklet/api dev &
+      - run: pnpm --filter @booklet/web dev &
+      - name: Wait for API and web to be ready
+        run: |
+          npx wait-on http://localhost:4000/api/health http://localhost:3000 --timeout 60000
+      # Needs real network access -- it saves a real Wikipedia URL through
+      # the actual extraction service rather than a mocked one. If outbound
+      # network is ever restricted for this runner, this job needs a stub
+      # extraction endpoint instead of skipping coverage silently.
+      - run: pnpm --filter @booklet/web test:e2e
