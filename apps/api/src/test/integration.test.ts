@@ -1,0 +1,375 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { buildApp } from "../app.js";
+import { prisma } from "../lib/prisma.js";
+
+const TEST_EMAIL = `vitest-${Date.now()}@test.local`;
+const TEST_PASSWORD = "hunter22222";
+
+describe("API integration", () => {
+  let app: FastifyInstance;
+  let accessToken: string;
+  let refreshCookie: string;
+  let articleId: string;
+  let highlightId: string;
+  let collectionId: string;
+
+  beforeAll(async () => {
+    app = await buildApp();
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await prisma.user.deleteMany({ where: { email: TEST_EMAIL } });
+    await app.close();
+  });
+
+  describe("auth", () => {
+    it("rejects signup with a too-short password", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/auth/signup",
+        payload: { email: TEST_EMAIL, password: "short" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("signs up, returning an access token and an unverified user", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/auth/signup",
+        payload: { email: TEST_EMAIL, password: TEST_PASSWORD, name: "Vitest" },
+      });
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.user.email).toBe(TEST_EMAIL);
+      expect(body.user.emailVerified).toBe(false);
+      expect(body.accessToken).toBeTypeOf("string");
+
+      accessToken = body.accessToken;
+      const setCookie = res.cookies.find((c) => c.name === "booklet_refresh");
+      expect(setCookie).toBeDefined();
+      refreshCookie = `${setCookie!.name}=${setCookie!.value}`;
+    });
+
+    it("rejects a duplicate signup", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/auth/signup",
+        payload: { email: TEST_EMAIL, password: TEST_PASSWORD },
+      });
+      expect(res.statusCode).toBe(409);
+    });
+
+    it("rejects login with the wrong password", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: { email: TEST_EMAIL, password: "wrong-password" },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("GET /api/auth/me requires a valid access token", async () => {
+      const unauthed = await app.inject({ method: "GET", url: "/api/auth/me" });
+      expect(unauthed.statusCode).toBe(401);
+
+      const authed = await app.inject({
+        method: "GET",
+        url: "/api/auth/me",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(authed.statusCode).toBe(200);
+      expect(authed.json().email).toBe(TEST_EMAIL);
+    });
+
+    it("rotates the refresh token and rejects reuse of the old one", async () => {
+      const first = await app.inject({
+        method: "POST",
+        url: "/api/auth/refresh",
+        headers: { cookie: refreshCookie },
+      });
+      expect(first.statusCode).toBe(200);
+      expect(first.json().accessToken).toBeTypeOf("string");
+
+      const reused = await app.inject({
+        method: "POST",
+        url: "/api/auth/refresh",
+        headers: { cookie: refreshCookie },
+      });
+      expect(reused.statusCode).toBe(401);
+
+      const newCookie = first.cookies.find((c) => c.name === "booklet_refresh");
+      refreshCookie = `${newCookie!.name}=${newCookie!.value}`;
+      accessToken = first.json().accessToken;
+    });
+  });
+
+  describe("articles", () => {
+    it("rejects article creation without auth", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/articles",
+        payload: { url: "https://example.com/a" },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("creates an article, recording a failed extraction gracefully for an unreachable URL", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/articles",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { url: "http://127.0.0.1:1/definitely-unreachable" },
+      });
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.extractionStatus).toBe("FAILED");
+      articleId = body.id;
+    });
+
+    it("rejects saving the same URL twice", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/articles",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { url: "http://127.0.0.1:1/definitely-unreachable" },
+      });
+      expect(res.statusCode).toBe(409);
+    });
+
+    it("lists articles for the authenticated user", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/articles",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.articles.some((a: { id: string }) => a.id === articleId)).toBe(true);
+    });
+
+    it("updates article status, setting readAt on transition to READING", async () => {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { status: "READING" },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.status).toBe("READING");
+      expect(body.readAt).not.toBeNull();
+    });
+
+    it("404s for another user's (or nonexistent) article id", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/articles/not-a-real-id",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe("highlights + annotations", () => {
+    it("creates a highlight with a note in one request", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/highlights",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articleId,
+          selectedText: "a passage",
+          position: { type: "text", exact: "a passage", prefix: "", suffix: "", start: 0, end: 9 },
+          color: "YELLOW",
+          noteText: "a thought",
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.annotation?.noteText).toBe("a thought");
+      expect(body.easinessFactor).toBe(2.5);
+      expect(body.nextDueAt).toBeNull();
+      highlightId = body.id;
+    });
+
+    it("updates SM-2 fields via PATCH", async () => {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/highlights/${highlightId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { easinessFactor: 2.6, intervalDays: 6, repetitions: 2, nextDueAt: "2099-01-01T00:00:00.000Z" },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.intervalDays).toBe(6);
+      expect(body.nextDueAt).toBe("2099-01-01T00:00:00.000Z");
+    });
+
+    it("updates the note via the annotation endpoint", async () => {
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/highlights/${highlightId}/annotation`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { noteText: "an updated thought" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().annotation.noteText).toBe("an updated thought");
+    });
+
+    it("excludes a not-yet-due highlight from the resurfacing digest", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/digests/current",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      // nextDueAt is 2099 (set above) -- shouldn't be selected.
+      expect(body.highlights.some((h: { id: string }) => h.id === highlightId)).toBe(false);
+    });
+  });
+
+  describe("collections", () => {
+    it("creates a collection and rejects a duplicate name", async () => {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/collections",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { name: "Vitest Collection" },
+      });
+      expect(created.statusCode).toBe(201);
+      collectionId = created.json().id;
+
+      const dup = await app.inject({
+        method: "POST",
+        url: "/api/collections",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { name: "Vitest Collection" },
+      });
+      expect(dup.statusCode).toBe(409);
+    });
+
+    it("adds and lists an article in a collection", async () => {
+      const add = await app.inject({
+        method: "PUT",
+        url: `/api/collections/${collectionId}/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(add.statusCode).toBe(204);
+
+      const list = await app.inject({
+        method: "GET",
+        url: `/api/collections/${collectionId}/articles`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(list.statusCode).toBe(200);
+      expect(list.json().some((a: { id: string }) => a.id === articleId)).toBe(true);
+    });
+  });
+
+  describe("sync/import", () => {
+    it("imports a local article, skips it on a repeat import (same URL), and attaches highlights", async () => {
+      const first = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [
+            {
+              localId: "local-1",
+              url: "https://example.com/vitest-import",
+              title: "Imported",
+              author: null,
+              siteName: null,
+              excerpt: null,
+              sourceType: "HTML",
+              extractionStatus: "SUCCESS",
+              extractionError: null,
+              extractedHtml: "<p>hi</p>",
+              extractedText: "hi",
+              readingTimeEstimate: 1,
+              progressFraction: 0,
+              status: "UNREAD",
+              savedAt: new Date().toISOString(),
+              readAt: null,
+              archivedAt: null,
+            },
+          ],
+          highlights: [
+            {
+              localArticleId: "local-1",
+              selectedText: "hi",
+              position: { type: "text", exact: "hi", prefix: "", suffix: "", start: 0, end: 2 },
+              color: "BLUE",
+              lastSurfacedAt: null,
+              surfaceCount: 0,
+              lastFeedback: null,
+              lastFeedbackAt: null,
+              resurfaceArchivedAt: null,
+              createdAt: new Date().toISOString(),
+              noteText: null,
+            },
+          ],
+          collections: [],
+          articleCollections: [],
+        },
+      });
+      expect(first.statusCode).toBe(200);
+      expect(first.json()).toMatchObject({ importedArticles: 1, importedHighlights: 1 });
+
+      const second = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [
+            {
+              localId: "local-1",
+              url: "https://example.com/vitest-import",
+              title: "Imported",
+              author: null,
+              siteName: null,
+              excerpt: null,
+              sourceType: "HTML",
+              extractionStatus: "SUCCESS",
+              extractionError: null,
+              extractedHtml: "<p>hi</p>",
+              extractedText: "hi",
+              readingTimeEstimate: 1,
+              progressFraction: 0,
+              status: "UNREAD",
+              savedAt: new Date().toISOString(),
+              readAt: null,
+              archivedAt: null,
+            },
+          ],
+          highlights: [],
+          collections: [],
+          articleCollections: [],
+        },
+      });
+      expect(second.statusCode).toBe(200);
+      expect(second.json()).toMatchObject({ importedArticles: 0, skippedArticles: 1 });
+    });
+  });
+
+  describe("logout", () => {
+    it("revokes the session so a subsequent refresh fails", async () => {
+      const logout = await app.inject({
+        method: "POST",
+        url: "/api/auth/logout",
+        headers: { cookie: refreshCookie },
+      });
+      expect(logout.statusCode).toBe(204);
+
+      const refresh = await app.inject({
+        method: "POST",
+        url: "/api/auth/refresh",
+        headers: { cookie: refreshCookie },
+      });
+      expect(refresh.statusCode).toBe(401);
+    });
+  });
+});
