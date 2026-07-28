@@ -5,30 +5,46 @@ they read. Save an article, read it in a clean distraction-free view,
 highlight and annotate as you go, and have those highlights resurface later
 instead of disappearing into a list you never reopen.
 
+No account is required to use any of this — saves and highlights live in
+the browser (IndexedDB) by default. Creating an account is opt-in and exists
+for one reason: syncing your library and highlights across devices.
+
 **This is proprietary software.** Booklet is not open source. No license is
 granted for use, modification, or redistribution of any part of this
 repository — see [License](#license).
 
 ## Status
 
-Booklet is early and under active development. Phase 1 (this repo, today) is
-a web app + API + core data model, built one screen at a time:
+Phase 1 — a web app + API + core data model with the full save → read →
+highlight → resurface loop working end to end — is done:
 
 - [x] Monorepo scaffold — Fastify API, Next.js web app, shared types package,
       end-to-end "hello world"
 - [x] Core data model — Prisma schema for User, Article, Highlight,
-      Annotation, and Collection (drafted and reviewed; not yet migrated to a
-      live database)
+      Annotation, Collection, and Digest, migrated to a live database
 - [x] Visual identity — type pairing, three-theme color system (Paper / Night
       / Lamp), spacing scale
 - [x] Reader view — light/dark/sepia theming, adjustable type size,
       select-to-highlight with optional notes, drift-tolerant highlight
-      re-anchoring (built against mock data; not yet wired to a real API)
-- [ ] Auth (sign up / log in / log out)
-- [ ] Save article by URL (server-side fetch + Readability extraction)
-- [ ] Reading list / library view
-- [ ] Highlights dashboard
-- [ ] Mark article read / archived
+      re-anchoring
+- [x] Auth (sign up / log in / log out) — **entirely optional.** Booklet
+      works fully offline with no account; signing in only adds sync across
+      devices. Email/password, short-lived JWT access tokens, rotated opaque
+      refresh tokens stored hashed server-side
+- [x] Save article by URL — server-side fetch + Readability extraction, with
+      SSRF hardening (blocks private/loopback/link-local targets on every
+      redirect hop)
+- [x] Reading list / library view — IndexedDB-backed when signed out, synced
+      via the API when signed in, same UI either way
+- [x] Highlights dashboard
+- [x] Mark article read / archived
+- [x] Resurfacing — digest generation (`GET /api/digests/current`) persists
+      and reuses a batch per the user's DAILY/WEEKLY frequency instead of
+      re-rolling one on every visit; "remembered" / "forgot" / archive
+      feedback recorded per highlight
+
+Digest emailing is still a stub (logs to console) — no email provider is
+wired up yet. PDF/EPUB upload is UI-only (disabled) — see Roadmap.
 
 ## Roadmap
 
@@ -38,9 +54,12 @@ Where this is headed after Phase 1:
   extraction service and API as the web app
 - **Mobile app** — the goal is a real iOS/Android release on the App Store,
   reusing the same API and data model rather than a rewrite
-- **Spaced-repetition resurfacing** — the point of highlighting something is
-  to see it again later; `Highlight` already tracks per-highlight surface
-  history so this can be added without a data model change
+- **Real spaced-repetition resurfacing** — today's selection is a weighted
+  random pick favoring overdue/annotated/forgotten highlights, not a true
+  SM-2-style scheduler; `Highlight` already tracks the surface history
+  (`lastSurfacedAt`, `surfaceCount`, `lastFeedback`) a real algorithm needs,
+  so swapping it in is a change to `selectHighlightsToResurface`, not the
+  data model
 - **PDF / EPUB support** — `Article.sourceType` is already reserved for this
 - Exports, sharing, and other later-stage features are intentionally out of
   scope until the core loop (save → read → highlight → resurface) is solid
@@ -54,7 +73,8 @@ Where this is headed after Phase 1:
 | Database | PostgreSQL via Prisma ORM (v7, driver adapters) |
 | Web app | Next.js (App Router), TypeScript, Tailwind CSS v4 |
 | Article extraction | Mozilla Readability + jsdom |
-| Auth | Email/password, JWT access + refresh tokens (structured to swap in Clerk/Auth0 later without a rewrite) |
+| Auth | Email/password, JWT access + refresh tokens (structured to swap in Clerk/Auth0 later without a rewrite); optional -- only needed for sync |
+| Local storage | IndexedDB (no-account mode is the default, not a fallback) |
 | Fonts | Literata (serif, reading) + Work Sans (sans, UI chrome) |
 
 ## Project structure
