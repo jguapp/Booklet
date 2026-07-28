@@ -8,9 +8,10 @@ import { loadArticle, updateArticleStatus } from "@/lib/data/articles";
 import { createHighlight, deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { formatReadingTime } from "@/lib/format";
+import { textToParagraphHtml } from "@/lib/reader/text-to-html";
+import { localFiles } from "@/lib/local/db";
 import { ReaderToolbar, type ReaderSize } from "./reader-toolbar";
 import { ArticleContent } from "./article-content";
-import { HighlightListItem } from "@/components/highlights/highlight-list-item";
 import { SourceIcon } from "@/components/library/source-icon";
 import { cn } from "@/lib/cn";
 
@@ -28,6 +29,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [progress, setProgress] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     if (authStatus === "loading") return;
@@ -43,6 +45,32 @@ export function ReaderView({ articleId }: { articleId: string }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Local (no-account) uploads keep the raw file in IndexedDB -- offer a
+  // "download original" link when it's there. Authenticated mode's file
+  // lives server-side behind an auth header a plain <a> can't send, so this
+  // is local-only for now.
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    async function loadLocalFile() {
+      if (isAuthenticated || !article || (article.sourceType !== "PDF" && article.sourceType !== "EPUB")) {
+        if (!cancelled) setDownloadUrl(null);
+        return;
+      }
+      const file = await localFiles.get(article.id);
+      if (cancelled || !file) return;
+      objectUrl = URL.createObjectURL(file.blob);
+      setDownloadUrl(objectUrl);
+    }
+
+    loadLocalFile();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [article, isAuthenticated]);
 
   useEffect(() => {
     function handleScroll() {
@@ -106,7 +134,11 @@ export function ReaderView({ articleId }: { articleId: string }) {
     ? Math.max(0, Math.round(article.readingTimeEstimate * (1 - progress)))
     : null;
   const label = article.siteName ?? article.author ?? article.originalFilename ?? "Reader";
-  const isRenderable = article.sourceType === "HTML" && article.extractedHtml;
+  // PDF/EPUB render through the same text-selection highlighter as HTML --
+  // extracted text wrapped in <p> tags instead of Readability's own markup.
+  // Page/chapter layout doesn't survive that, but selecting and highlighting does.
+  const renderHtml = article.extractedHtml ?? (article.extractedText ? textToParagraphHtml(article.extractedText) : null);
+  const isRenderable = renderHtml !== null;
 
   return (
     <div className="min-h-screen bg-paper">
@@ -149,9 +181,24 @@ export function ReaderView({ articleId }: { articleId: string }) {
           ))}
         </div>
 
+        {article.sourceType !== "HTML" && (
+          <p className="mb-6 font-sans text-xs text-ink-faint">
+            {article.sourceType === "PDF" ? "PDF" : "EPUB"} · shown as extracted text, not the original page layout
+            {article.originalFilename ? ` · ${article.originalFilename}` : ""}
+            {downloadUrl && (
+              <>
+                {" · "}
+                <a href={downloadUrl} download={article.originalFilename ?? undefined} className="text-accent">
+                  Download original
+                </a>
+              </>
+            )}
+          </p>
+        )}
+
         {isRenderable ? (
           <ArticleContent
-            html={article.extractedHtml ?? ""}
+            html={renderHtml ?? ""}
             highlights={highlights}
             size={size}
             onCreateHighlight={handleCreateHighlight}
@@ -160,43 +207,13 @@ export function ReaderView({ articleId }: { articleId: string }) {
             onDeleteNote={handleDeleteNote}
           />
         ) : (
-          <div className="flex flex-col gap-6">
-            <div className="rounded-md border border-dashed border-border px-5 py-8 text-center">
-              <SourceIcon sourceType={article.sourceType} className="mx-auto mb-3 h-6 w-6 text-ink-faint" />
-              <p className="font-sans text-sm text-ink-muted">
-                {article.sourceType === "PDF"
-                  ? "In-browser PDF rendering (PDF.js) is a follow-up phase."
-                  : article.sourceType === "EPUB"
-                    ? "In-browser EPUB rendering (epub.js) is a follow-up phase."
-                    : "Couldn't extract readable content for this article."}
-              </p>
-              {article.originalFilename && (
-                <p className="mt-1 font-sans text-xs text-ink-faint">{article.originalFilename}</p>
-              )}
-              {article.extractionError && (
-                <p className="mt-1 font-sans text-xs text-ink-faint">{article.extractionError}</p>
-              )}
-            </div>
-
-            {article.extractedText && (
-              <p className="font-serif text-lg leading-relaxed text-ink">{article.extractedText}</p>
-            )}
-
-            {highlights.length > 0 && (
-              <div className="flex flex-col gap-3">
-                <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
-                  Highlights in this document
-                </h2>
-                {highlights.map((h) => (
-                  <HighlightListItem
-                    key={h.id}
-                    highlight={h}
-                    onDelete={handleDeleteHighlight}
-                    onSaveNote={handleSaveNote}
-                    onDeleteNote={handleDeleteNote}
-                  />
-                ))}
-              </div>
+          <div className="rounded-md border border-dashed border-border px-5 py-8 text-center">
+            <SourceIcon sourceType={article.sourceType} className="mx-auto mb-3 h-6 w-6 text-ink-faint" />
+            <p className="font-sans text-sm text-ink-muted">
+              {article.extractionError ?? "Couldn't extract readable content for this article."}
+            </p>
+            {article.originalFilename && (
+              <p className="mt-1 font-sans text-xs text-ink-faint">{article.originalFilename}</p>
             )}
           </div>
         )}

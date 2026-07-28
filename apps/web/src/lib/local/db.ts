@@ -7,11 +7,17 @@
 import type { Article, Collection, Highlight } from "@booklet/shared";
 
 const DB_NAME = "booklet";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const ARTICLES_STORE = "articles";
 const HIGHLIGHTS_STORE = "highlights";
 const COLLECTIONS_STORE = "collections";
 const ARTICLE_COLLECTIONS_STORE = "articleCollections";
+const FILES_STORE = "files";
+
+interface LocalFile {
+  id: string; // articleId
+  blob: Blob;
+}
 
 export interface LocalArticleCollection {
   id: string; // `${articleId}:${collectionId}`
@@ -48,6 +54,9 @@ function openDb(): Promise<IDBDatabase> {
         const store = db.createObjectStore(ARTICLE_COLLECTIONS_STORE, { keyPath: "id" });
         store.createIndex("articleId", "articleId");
         store.createIndex("collectionId", "collectionId");
+      }
+      if (!db.objectStoreNames.contains(FILES_STORE)) {
+        db.createObjectStore(FILES_STORE, { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -124,6 +133,13 @@ export const localCollections = {
   put: (collection: Collection) => put(COLLECTIONS_STORE, collection),
   delete: (id: string) => remove(COLLECTIONS_STORE, id),
   clear: () => clear(COLLECTIONS_STORE),
+};
+
+export const localFiles = {
+  get: (articleId: string) => getOne<LocalFile>(FILES_STORE, articleId),
+  put: (articleId: string, blob: Blob) => put(FILES_STORE, { id: articleId, blob } satisfies LocalFile),
+  delete: (articleId: string) => remove(FILES_STORE, articleId),
+  clear: () => clear(FILES_STORE),
 };
 
 export const localArticleCollections = {
