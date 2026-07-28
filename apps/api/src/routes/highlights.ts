@@ -32,6 +32,10 @@ function toHighlight(row: HighlightRow): Highlight {
     lastFeedback: row.lastFeedback,
     lastFeedbackAt: row.lastFeedbackAt?.toISOString() ?? null,
     resurfaceArchivedAt: row.resurfaceArchivedAt?.toISOString() ?? null,
+    easinessFactor: row.easinessFactor,
+    intervalDays: row.intervalDays,
+    repetitions: row.repetitions,
+    nextDueAt: row.nextDueAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     annotation: row.annotation
@@ -118,8 +122,18 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
       });
       if (!existing) return reply.code(404).send({ error: "not_found", message: "Highlight not found." });
 
-      const { color, resurfaceArchivedAt, lastSurfacedAt, surfaceCount, lastFeedback, lastFeedbackAt } =
-        request.body ?? {};
+      const {
+        color,
+        resurfaceArchivedAt,
+        lastSurfacedAt,
+        surfaceCount,
+        lastFeedback,
+        lastFeedbackAt,
+        easinessFactor,
+        intervalDays,
+        repetitions,
+        nextDueAt,
+      } = request.body ?? {};
 
       if (color !== undefined && !COLORS.includes(color)) {
         return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
@@ -129,6 +143,15 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
       }
       if (surfaceCount !== undefined && (!Number.isInteger(surfaceCount) || surfaceCount < 0)) {
         return reply.code(400).send({ error: "invalid_surface_count", message: "surfaceCount must be a non-negative integer." });
+      }
+      if (easinessFactor !== undefined && (typeof easinessFactor !== "number" || easinessFactor < 1.3)) {
+        return reply.code(400).send({ error: "invalid_easiness_factor", message: "easinessFactor must be >= 1.3." });
+      }
+      if (intervalDays !== undefined && (!Number.isInteger(intervalDays) || intervalDays < 0)) {
+        return reply.code(400).send({ error: "invalid_interval", message: "intervalDays must be a non-negative integer." });
+      }
+      if (repetitions !== undefined && (!Number.isInteger(repetitions) || repetitions < 0)) {
+        return reply.code(400).send({ error: "invalid_repetitions", message: "repetitions must be a non-negative integer." });
       }
 
       const updated = await prisma.highlight.update({
@@ -142,6 +165,10 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
           ...(surfaceCount !== undefined ? { surfaceCount } : {}),
           ...(lastFeedback !== undefined ? { lastFeedback } : {}),
           ...(lastFeedbackAt !== undefined ? { lastFeedbackAt: new Date(lastFeedbackAt) } : {}),
+          ...(easinessFactor !== undefined ? { easinessFactor } : {}),
+          ...(intervalDays !== undefined ? { intervalDays } : {}),
+          ...(repetitions !== undefined ? { repetitions } : {}),
+          ...(nextDueAt !== undefined ? { nextDueAt: new Date(nextDueAt) } : {}),
         },
         include: { annotation: true },
       });

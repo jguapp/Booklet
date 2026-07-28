@@ -21,6 +21,10 @@ function toHighlight(row: Awaited<ReturnType<typeof getHighlightsToResurface>>[n
     lastFeedback: row.lastFeedback,
     lastFeedbackAt: row.lastFeedbackAt?.toISOString() ?? null,
     resurfaceArchivedAt: row.resurfaceArchivedAt?.toISOString() ?? null,
+    easinessFactor: row.easinessFactor,
+    intervalDays: row.intervalDays,
+    repetitions: row.repetitions,
+    nextDueAt: row.nextDueAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     annotation: row.annotation

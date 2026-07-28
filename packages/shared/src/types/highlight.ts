@@ -21,6 +21,12 @@ export interface Highlight {
   lastFeedbackAt: string | null;
   resurfaceArchivedAt: string | null;
 
+  /** SM-2 spaced-repetition state -- see packages/shared/resurface.ts. */
+  easinessFactor: number;
+  intervalDays: number;
+  repetitions: number;
+  nextDueAt: string | null;
+
   createdAt: string;
   updatedAt: string;
 
@@ -43,4 +49,8 @@ export interface UpdateHighlightRequest {
   surfaceCount?: number;
   lastFeedback?: ResurfaceFeedback;
   lastFeedbackAt?: string;
+  easinessFactor?: number;
+  intervalDays?: number;
+  repetitions?: number;
+  nextDueAt?: string;
 }
