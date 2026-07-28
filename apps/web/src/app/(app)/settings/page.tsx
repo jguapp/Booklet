@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ResurfaceFrequency } from "@booklet/shared";
+import type { ResurfaceFrequency, SessionInfo } from "@booklet/shared";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTheme, type Theme } from "@/lib/theme/theme-provider";
 import { loadUserSettings, saveUserSettings } from "@/lib/mock/store";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { loadSessions, revokeOtherSessions, revokeSession } from "@/lib/data/sessions";
+import { formatRelativeDate, summarizeUserAgent } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
 const FREQUENCIES: { value: ResurfaceFrequency; label: string }[] = [
@@ -29,6 +31,7 @@ export default function SettingsPage() {
   const [perDigest, setPerDigest] = useState(5);
   const [saved, setSaved] = useState(false);
   const [resendStatus, setResendStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
 
   useEffect(() => {
     if (status === "authenticated" && user) {
@@ -54,9 +57,28 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2000);
   }
 
+  const refreshSessions = useCallback(() => {
+    if (status !== "authenticated") return;
+    loadSessions().then(setSessions);
+  }, [status]);
+
+  useEffect(() => {
+    refreshSessions();
+  }, [refreshSessions]);
+
   async function handleLogout() {
     await logout();
     router.push("/login");
+  }
+
+  async function handleRevokeSession(id: string) {
+    await revokeSession(id);
+    setSessions((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
+  }
+
+  async function handleRevokeOthers() {
+    await revokeOtherSessions();
+    refreshSessions();
   }
 
   async function handleResendVerification() {
@@ -177,6 +199,52 @@ export default function SettingsPage() {
           </>
         )}
       </section>
+
+      {status === "authenticated" && sessions && sessions.length > 0 && (
+        <section className="mt-10 border-t border-border pt-6">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              Signed-in devices
+            </h2>
+            {sessions.length > 1 && (
+              <button
+                type="button"
+                onClick={handleRevokeOthers}
+                className="font-sans text-xs font-medium text-accent"
+              >
+                Log out other devices
+              </button>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            {sessions.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center justify-between gap-3 rounded-sm border border-border px-3 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-sans text-sm text-ink">
+                    {summarizeUserAgent(s.userAgent)}
+                    {s.current && <span className="ml-2 font-sans text-xs text-accent">This device</span>}
+                  </p>
+                  <p className="font-sans text-xs text-ink-faint">
+                    {s.ipAddress ?? "Unknown IP"} · signed in {formatRelativeDate(s.createdAt)}
+                  </p>
+                </div>
+                {!s.current && (
+                  <button
+                    type="button"
+                    onClick={() => handleRevokeSession(s.id)}
+                    className="shrink-0 font-sans text-xs font-medium text-ink-muted hover:text-red-500"
+                  >
+                    Log out
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
