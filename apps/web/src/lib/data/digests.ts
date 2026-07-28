@@ -10,3 +10,7 @@ import { apiFetch } from "@/lib/api/client";
 export async function loadCurrentDigest(): Promise<Digest> {
   return apiFetch<Digest>("/api/digests/current");
 }
+
+export async function emailDigest(digestId: string): Promise<{ ok: true; emailSentAt: string }> {
+  return apiFetch(`/api/digests/${digestId}/email`, { method: "POST" });
+}

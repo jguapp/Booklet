@@ -7,10 +7,9 @@ import { Button } from "@/components/ui/button";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
 import { loadArticles } from "@/lib/data/articles";
 import { updateHighlightFeedback } from "@/lib/data/highlights";
-import { loadCurrentDigest } from "@/lib/data/digests";
+import { emailDigest, loadCurrentDigest } from "@/lib/data/digests";
 import { loadHighlights as loadLocalHighlights } from "@/lib/data/highlights";
 import { loadUserSettings } from "@/lib/mock/store";
-import { compileDigestEmail, sendDigestEmail } from "@/lib/mock/digest-email";
 import { useAuth } from "@/lib/auth/auth-provider";
 
 export default function ResurfacePage() {
@@ -18,6 +17,7 @@ export default function ResurfacePage() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
+  const [digestId, setDigestId] = useState<string | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
 
@@ -34,6 +34,7 @@ export default function ResurfacePage() {
         const batchHighlights = digest.highlights ?? [];
         setHighlights(batchHighlights);
         setBatchIds(batchHighlights.map((h) => h.id));
+        setDigestId(digest.id);
         return;
       }
 
@@ -82,10 +83,15 @@ export default function ResurfacePage() {
     setReviewedIds((prev) => new Set(prev).add(highlightId));
   }
 
-  function handleEmailDigest() {
-    const content = compileDigestEmail(batch, articleById);
-    sendDigestEmail(content);
-    setEmailStatus("Logged to console — email sending isn't wired up yet.");
+  async function handleEmailDigest() {
+    if (!digestId) return;
+    setEmailStatus("Sending…");
+    try {
+      await emailDigest(digestId);
+      setEmailStatus("Sent to your email.");
+    } catch {
+      setEmailStatus("Couldn't send that email. Try again in a moment.");
+    }
   }
 
   const isDone = batchIds !== null && batch.length === 0;
@@ -94,7 +100,7 @@ export default function ResurfacePage() {
     <div className="mx-auto max-w-2xl px-8 py-10">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-4">
         <h1 className="font-serif text-2xl font-semibold text-ink">Daily Review</h1>
-        {batchIds && batchIds.length > 0 && (
+        {isAuthenticated && digestId && batchIds && batchIds.length > 0 && (
           <Button variant="secondary" onClick={handleEmailDigest}>
             Email me this digest
           </Button>

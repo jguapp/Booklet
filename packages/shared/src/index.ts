@@ -9,3 +9,4 @@ export * from "./types/sync";
 export * from "./types/collection";
 export * from "./highlight-anchor";
 export * from "./resurface";
+export * from "./digest-email";
