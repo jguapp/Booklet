@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
+import rateLimit from "@fastify/rate-limit";
 import type { HealthResponse } from "@booklet/shared";
 import { setupAuthContext } from "./lib/auth/context.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -33,6 +34,16 @@ await app.register(cors, {
 });
 
 await app.register(cookie);
+
+// In-memory store -- fine for a single instance. A horizontally-scaled
+// production deployment needs a shared store (e.g. Redis via
+// @fastify/rate-limit's `redis` option) so limits are enforced across
+// instances instead of separately per-process.
+await app.register(rateLimit, {
+  max: 300,
+  timeWindow: "1 minute",
+});
+
 await setupAuthContext(app);
 
 app.get("/api/health", async (): Promise<HealthResponse> => {

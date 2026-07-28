@@ -55,8 +55,15 @@ async function issueSession(
   return { accessToken: token, accessTokenExpiresAt: expiresAt };
 }
 
+// Credential guessing and signup spam are the concerns here, not general
+// traffic -- much tighter than the API-wide default.
+const AUTH_ATTEMPT_LIMIT = { max: 10, timeWindow: "15 minutes" };
+
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: SignupRequest }>("/api/auth/signup", async (request, reply) => {
+  app.post<{ Body: SignupRequest }>(
+    "/api/auth/signup",
+    { config: { rateLimit: AUTH_ATTEMPT_LIMIT } },
+    async (request, reply) => {
     const { email, password, name } = request.body ?? {};
 
     if (typeof email !== "string" || !EMAIL_RE.test(email)) {
@@ -94,9 +101,13 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       accessTokenExpiresAt: accessTokenExpiresAt.toISOString(),
     };
     return reply.code(201).send(body);
-  });
+    },
+  );
 
-  app.post<{ Body: LoginRequest }>("/api/auth/login", async (request, reply) => {
+  app.post<{ Body: LoginRequest }>(
+    "/api/auth/login",
+    { config: { rateLimit: AUTH_ATTEMPT_LIMIT } },
+    async (request, reply) => {
     const { email, password } = request.body ?? {};
     const invalid = () =>
       reply.code(401).send({ error: "invalid_credentials", message: "Incorrect email or password." });
@@ -117,9 +128,13 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       accessTokenExpiresAt: accessTokenExpiresAt.toISOString(),
     };
     return reply.send(body);
-  });
+    },
+  );
 
-  app.post("/api/auth/refresh", async (request, reply) => {
+  app.post(
+    "/api/auth/refresh",
+    { config: { rateLimit: AUTH_ATTEMPT_LIMIT } },
+    async (request, reply) => {
     const token = request.cookies[REFRESH_COOKIE_NAME];
     const unauthorized = () => {
       clearRefreshCookie(reply);
@@ -146,7 +161,8 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       accessTokenExpiresAt: accessTokenExpiresAt.toISOString(),
     };
     return reply.send(body);
-  });
+    },
+  );
 
   app.post("/api/auth/logout", async (request, reply) => {
     const token = request.cookies[REFRESH_COOKIE_NAME];
