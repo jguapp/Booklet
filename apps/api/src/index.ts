@@ -4,6 +4,8 @@ import cookie from "@fastify/cookie";
 import type { HealthResponse } from "@booklet/shared";
 import { setupAuthContext } from "./lib/auth/context.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerExtractRoute } from "./routes/extract.js";
+import { registerArticleRoutes } from "./routes/articles.js";
 
 try {
   process.loadEnvFile();
@@ -34,6 +36,8 @@ app.get("/api/health", async (): Promise<HealthResponse> => {
 });
 
 await registerAuthRoutes(app);
+await registerExtractRoute(app);
+await registerArticleRoutes(app);
 
 const port = Number(process.env.PORT ?? 4000);
 

@@ -1,28 +1,29 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Article, SourceType } from "@booklet/shared";
+import type { Article } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { IconLink, IconUpload } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
-import { mockUser } from "@/lib/mock/data";
-
-const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100MB
+import { ApiError, saveArticleFromUrl } from "@/lib/data/articles";
 
 type Mode = "url" | "file";
 type Status = "idle" | "loading" | "error";
 
 interface SaveArticleModalProps {
+  authenticated: boolean;
   onClose: () => void;
   onSaved: (article: Article) => void;
 }
 
-export function SaveArticleModal({ onClose, onSaved }: SaveArticleModalProps) {
+function ensureProtocol(value: string): string {
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+export function SaveArticleModal({ authenticated, onClose, onSaved }: SaveArticleModalProps) {
   const [mode, setMode] = useState<Mode>("url");
   const [url, setUrl] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [dragOver, setDragOver] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -36,90 +37,31 @@ export function SaveArticleModal({ onClose, onSaved }: SaveArticleModalProps) {
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  function validateFile(candidate: File): string | null {
-    const isPdf = candidate.name.toLowerCase().endsWith(".pdf");
-    const isEpub = candidate.name.toLowerCase().endsWith(".epub");
-    if (!isPdf && !isEpub) return "Only .pdf and .epub files are supported.";
-    if (candidate.size > MAX_FILE_BYTES) return "That file is over the 100MB limit.";
-    return null;
-  }
-
-  function handleFileChosen(candidate: File) {
-    const validationError = validateFile(candidate);
-    if (validationError) {
-      setError(validationError);
-      setFile(null);
-      return;
-    }
-    setError(null);
-    setFile(candidate);
-  }
-
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    if (mode === "url" && !url.trim()) {
+    if (!url.trim()) {
       setError("Paste a URL first.");
-      return;
-    }
-    if (mode === "file" && !file) {
-      setError("Choose a .pdf or .epub file first.");
       return;
     }
 
     setStatus("loading");
-
-    // No save/extraction backend yet -- this is where POST /api/articles
-    // (or the upload equivalent) will go. Type "fail" into the URL, or pick
-    // a file named with "fail" in it, to see the failure state below.
-    const willFail =
-      (mode === "url" && url.toLowerCase().includes("fail")) ||
-      (mode === "file" && (file?.name.toLowerCase().includes("fail") ?? false));
-
-    setTimeout(() => {
-      if (willFail) {
+    try {
+      const article = await saveArticleFromUrl(ensureProtocol(url.trim()), authenticated);
+      if (article.extractionStatus === "FAILED") {
         setStatus("error");
         setError(
-          mode === "url"
-            ? "Couldn't extract that page. It may be behind a login or block automated fetches."
-            : "Couldn't read that file. It may be corrupted or password-protected.",
+          article.extractionError ??
+            "Couldn't extract that page. It may be behind a login or block automated fetches.",
         );
         return;
       }
-
-      const now = new Date().toISOString();
-      const id = `local-article-${crypto.randomUUID()}`;
-      const sourceType: SourceType = mode === "url" ? "HTML" : file!.name.toLowerCase().endsWith(".pdf") ? "PDF" : "EPUB";
-      const hostname = mode === "url" ? hostnameOf(url.trim()) : null;
-
-      const article: Article = {
-        id,
-        userId: mockUser.id,
-        url: mode === "url" ? url.trim() : null,
-        title: mode === "url" ? (hostname ?? url.trim()) : file!.name.replace(/\.(pdf|epub)$/i, ""),
-        author: null,
-        siteName: mode === "url" ? hostname : null,
-        excerpt: null,
-        sourceType,
-        extractionStatus: "SUCCESS",
-        extractionError: null,
-        extractedHtml: mode === "url" ? "<p>This is a freshly saved article. Extraction wiring comes in a later phase -- for now this is placeholder content so the card and reader are navigable.</p>" : null,
-        extractedText: mode === "url" ? "This is a freshly saved article." : `Placeholder text for ${file!.name}.`,
-        fileStorageKey: mode === "file" ? `uploads/${mockUser.id}/${file!.name}` : null,
-        originalFilename: mode === "file" ? file!.name : null,
-        readingTimeEstimate: mode === "url" ? 1 : 8,
-        progressFraction: 0,
-        status: "UNREAD",
-        savedAt: now,
-        readAt: null,
-        archivedAt: null,
-        createdAt: now,
-        updatedAt: now,
-      };
-
       onSaved(article);
-    }, 1100);
+    } catch (err) {
+      setStatus("error");
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
+    }
   }
 
   return (
@@ -167,38 +109,13 @@ export function SaveArticleModal({ onClose, onSaved }: SaveArticleModalProps) {
             />
           ) : (
             <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                const dropped = e.dataTransfer.files[0];
-                if (dropped) handleFileChosen(dropped);
-              }}
               onClick={() => fileInputRef.current?.click()}
-              className={cn(
-                "flex cursor-pointer flex-col items-center gap-2 rounded-sm border border-dashed px-4 py-8 text-center transition-colors",
-                dragOver ? "border-accent bg-surface-2" : "border-border",
-              )}
+              className="flex cursor-not-allowed flex-col items-center gap-2 rounded-sm border border-dashed border-border px-4 py-8 text-center opacity-60"
             >
               <IconUpload className="h-6 w-6 text-ink-faint" />
-              <p className="font-sans text-sm text-ink-muted">
-                {file ? file.name : "Drag a .pdf or .epub here, or click to browse"}
-              </p>
-              <p className="font-sans text-xs text-ink-faint">Up to 100MB</p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.epub"
-                className="hidden"
-                onChange={(e) => {
-                  const chosen = e.target.files?.[0];
-                  if (chosen) handleFileChosen(chosen);
-                }}
-              />
+              <p className="font-sans text-sm text-ink-muted">PDF and EPUB uploads are coming soon</p>
+              <p className="font-sans text-xs text-ink-faint">For now, paste a URL instead</p>
+              <input ref={fileInputRef} type="file" accept=".pdf,.epub" className="hidden" disabled />
             </div>
           )}
 
@@ -210,7 +127,7 @@ export function SaveArticleModal({ onClose, onSaved }: SaveArticleModalProps) {
             <Button type="button" variant="ghost" onClick={onClose} disabled={status === "loading"}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" disabled={status === "loading"}>
+            <Button type="submit" variant="primary" disabled={status === "loading" || mode === "file"}>
               {status === "loading" ? "Saving…" : "Save"}
             </Button>
           </div>
@@ -218,16 +135,4 @@ export function SaveArticleModal({ onClose, onSaved }: SaveArticleModalProps) {
       </div>
     </div>
   );
-}
-
-function ensureProtocol(value: string): string {
-  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
-}
-
-function hostnameOf(value: string): string | null {
-  try {
-    return new URL(ensureProtocol(value)).hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
 }

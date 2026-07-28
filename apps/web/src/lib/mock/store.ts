@@ -1,23 +1,22 @@
-import type { Article, Highlight, ResurfaceFrequency } from "@booklet/shared";
-import { mockUser, seedArticles, seedHighlights } from "./data";
+import type { ResurfaceFrequency } from "@booklet/shared";
 
 /**
- * Stand-in for the real API until Auth/save/highlight/settings routes exist
- * (see the "frontend-only, mock data" decisions made throughout this
- * project). Swap this module out, not the pages that call it, once a real
- * backend lands. Bump a key whenever the shape it stores changes -- a
- * browser holding data from before a schema change must not be handed to
- * code expecting the new shape.
+ * Local-only settings persistence for anonymous (no-account) users. Article
+ * and highlight storage moved to IndexedDB (lib/local/db.ts, via
+ * lib/data/*) -- this is what's left of the original mock store, since
+ * settings are small enough that a localStorage blob is still the right
+ * tool. Signed-in users read/write settings through PATCH /api/auth/me
+ * instead (see the settings page).
  */
 
-const ARTICLES_KEY = "booklet-mock-articles-v1";
-const HIGHLIGHTS_KEY = "booklet-mock-highlights-v2";
 const SETTINGS_KEY = "booklet-mock-settings-v1";
 
 export interface UserSettings {
   resurfaceFrequency: ResurfaceFrequency;
   highlightsPerDigest: number;
 }
+
+const DEFAULT_SETTINGS: UserSettings = { resurfaceFrequency: "DAILY", highlightsPerDigest: 5 };
 
 function load<T>(key: string, fallback: T, isValid: (value: unknown) => value is T): T {
   try {
@@ -38,29 +37,6 @@ function save(key: string, value: unknown): void {
   }
 }
 
-function looksLikeArticleArray(value: unknown): value is Article[] {
-  return (
-    Array.isArray(value) &&
-    value.every((a) => typeof a === "object" && a !== null && typeof (a as Record<string, unknown>).id === "string")
-  );
-}
-
-function looksLikeHighlightArray(value: unknown): value is Highlight[] {
-  return (
-    Array.isArray(value) &&
-    value.every((h) => {
-      if (typeof h !== "object" || h === null) return false;
-      const v = h as Record<string, unknown>;
-      return (
-        typeof v.id === "string" &&
-        typeof v.position === "object" &&
-        v.position !== null &&
-        typeof (v.position as Record<string, unknown>).type === "string"
-      );
-    })
-  );
-}
-
 function looksLikeSettings(value: unknown): value is UserSettings {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
@@ -70,28 +46,8 @@ function looksLikeSettings(value: unknown): value is UserSettings {
   );
 }
 
-export function loadArticles(): Article[] {
-  return load(ARTICLES_KEY, seedArticles, looksLikeArticleArray);
-}
-
-export function saveArticles(articles: Article[]): void {
-  save(ARTICLES_KEY, articles);
-}
-
-export function loadHighlights(): Highlight[] {
-  return load(HIGHLIGHTS_KEY, seedHighlights, looksLikeHighlightArray);
-}
-
-export function saveHighlights(highlights: Highlight[]): void {
-  save(HIGHLIGHTS_KEY, highlights);
-}
-
 export function loadUserSettings(): UserSettings {
-  return load(
-    SETTINGS_KEY,
-    { resurfaceFrequency: mockUser.resurfaceFrequency, highlightsPerDigest: mockUser.highlightsPerDigest },
-    looksLikeSettings,
-  );
+  return load(SETTINGS_KEY, DEFAULT_SETTINGS, looksLikeSettings);
 }
 
 export function saveUserSettings(settings: UserSettings): void {

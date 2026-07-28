@@ -1,20 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, Highlight } from "@booklet/shared";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
-import { loadArticles, loadHighlights, saveHighlights } from "@/lib/mock/store";
-import { mockUser } from "@/lib/mock/data";
+import { loadArticles } from "@/lib/data/articles";
+import { loadHighlights, saveHighlights, LOCAL_USER_ID } from "@/lib/data/highlights";
+import { useAuth } from "@/lib/auth/auth-provider";
 
 export default function HighlightsPage() {
+  const { status, isAuthenticated } = useAuth();
   const [articles, setArticles] = useState<Article[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [articleFilter, setArticleFilter] = useState<string>("ALL");
 
+  const refresh = useCallback(() => {
+    if (status === "loading") return;
+    Promise.all([loadArticles(isAuthenticated), loadHighlights()]).then(([a, h]) => {
+      setArticles(a);
+      setHighlights(h);
+    });
+  }, [status, isAuthenticated]);
+
   useEffect(() => {
-    setArticles(loadArticles());
-    setHighlights(loadHighlights());
-  }, []);
+    refresh();
+  }, [refresh]);
 
   const articleById = useMemo(() => new Map(articles.map((a) => [a.id, a])), [articles]);
 
@@ -44,7 +53,7 @@ export default function HighlightsPage() {
             : {
                 id: `local-${crypto.randomUUID()}`,
                 highlightId,
-                userId: mockUser.id,
+                userId: LOCAL_USER_ID,
                 noteText,
                 createdAt: now,
                 updatedAt: now,

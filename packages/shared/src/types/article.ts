@@ -34,3 +34,29 @@ export interface Article {
 
 /** GET /api/articles list DTO -- omits the large extracted content fields. */
 export type ArticleSummary = Omit<Article, "extractedHtml" | "extractedText">;
+
+/** POST /api/articles, POST /api/extract -- PDF/EPUB upload is a later phase, URL-only for now. */
+export interface CreateArticleRequest {
+  url: string;
+}
+
+/** Shared by the authed persist-and-extract route and the public extract-only route. */
+export interface ExtractedContent {
+  title: string | null;
+  author: string | null;
+  siteName: string | null;
+  excerpt: string | null;
+  html: string | null;
+  text: string | null;
+  readingTimeEstimate: number | null;
+}
+
+export interface UpdateArticleRequest {
+  status?: ArticleStatus;
+  progressFraction?: number;
+}
+
+export interface ArticleListResponse {
+  articles: ArticleSummary[];
+  nextCursor: string | null;
+}
