@@ -1,0 +1,69 @@
+# Local "production-like" stack: real Postgres + the two Dockerfiles, all
+# on one network. Not what you'd run in actual production (no TLS, no
+# secrets manager, a single Postgres instance with no backups) -- this is
+# for testing the images themselves, and as a starting point for whatever
+# orchestration you actually deploy with.
+#
+# Unverified: no Docker available in the environment this was written in,
+# so `docker compose up --build` here has not actually been run. The
+# Dockerfiles it references were reasoned through carefully (the web one
+# against a real `next build` output layout) but neither has been build-
+# tested.
+#
+#   cp apps/api/.env.example apps/api/.env.docker   # fill in JWT_ACCESS_SECRET etc.
+#   docker compose up --build
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: booklet
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/booklet?schema=public
+      PORT: "4000"
+      WEB_ORIGIN: http://localhost:3000
+      NODE_ENV: production
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set a real secret -- see .env.example}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Prisma's migrate deploy (not migrate dev -- no shadow DB, no
+    # interactive prompts, the right one for a real deployment) before
+    # starting the server. The api image's build stage copies the whole
+    # repo (see apps/api/Dockerfile), so pnpm and the prisma CLI are both
+    # still present at runtime for this.
+    command: sh -c "pnpm --filter @booklet/api exec prisma migrate deploy && node apps/api/dist/index.js"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:

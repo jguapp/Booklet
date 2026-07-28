@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Article, ArticleStatus, Collection } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,14 @@ const TABS: { value: FilterTab; label: string }[] = [
 ];
 
 export default function LibraryPage() {
+  return (
+    <Suspense fallback={null}>
+      <LibraryPageInner />
+    </Suspense>
+  );
+}
+
+function LibraryPageInner() {
   const { status, isAuthenticated, lastSyncResult, dismissSyncResult } = useAuth();
   const searchParams = useSearchParams();
   const collectionId = searchParams.get("collection");
