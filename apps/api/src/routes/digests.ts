@@ -1,8 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import type { Digest, Highlight, HighlightPosition } from "@booklet/shared";
+import { compileDigestEmail } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { getHighlightsToResurface } from "../services/resurface-service.js";
+import { sendEmail } from "../services/email-service.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -92,4 +94,32 @@ export async function registerDigestRoutes(app: FastifyInstance): Promise<void> 
     };
     return reply.send(body);
   });
+
+  app.post<{ Params: { id: string } }>(
+    "/api/digests/:id/email",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const digest = await prisma.digest.findFirst({
+        where: { id: request.params.id, userId: request.userId! },
+        include: { highlights: { include: { annotation: true } } },
+      });
+      if (!digest) return reply.code(404).send({ error: "not_found", message: "Digest not found." });
+      if (digest.highlights.length === 0) {
+        return reply.code(400).send({ error: "empty_digest", message: "This digest has no highlights to send." });
+      }
+
+      const user = await prisma.user.findUniqueOrThrow({ where: { id: request.userId! } });
+      const articles = await prisma.article.findMany({
+        where: { id: { in: [...new Set(digest.highlights.map((h) => h.articleId))] } },
+        select: { id: true, title: true },
+      });
+      const articleTitleById = new Map(articles.map((a) => [a.id, { title: a.title }]));
+
+      const content = compileDigestEmail(digest.highlights.map(toHighlight), articleTitleById);
+      await sendEmail({ to: user.email, subject: content.subject, text: content.textBody });
+
+      const updated = await prisma.digest.update({ where: { id: digest.id }, data: { emailSentAt: new Date() } });
+      return reply.send({ ok: true, emailSentAt: updated.emailSentAt!.toISOString() });
+    },
+  );
 }
