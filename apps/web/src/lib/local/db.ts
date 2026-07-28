@@ -73,18 +73,6 @@ async function remove(storeName: string, id: string): Promise<void> {
   await promisify(store.delete(id));
 }
 
-async function replaceAll(storeName: string, values: unknown[]): Promise<void> {
-  const db = await openDb();
-  const tx = db.transaction(storeName, "readwrite");
-  const store = tx.objectStore(storeName);
-  store.clear();
-  for (const value of values) store.put(value);
-  await new Promise<void>((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
 export const localArticles = {
   getAll: () => getAll<Article>(ARTICLES_STORE),
   get: (id: string) => getOne<Article>(ARTICLES_STORE, id),
@@ -94,5 +82,6 @@ export const localArticles = {
 
 export const localHighlights = {
   getAll: () => getAll<Highlight>(HIGHLIGHTS_STORE),
-  replaceAll: (highlights: Highlight[]) => replaceAll(HIGHLIGHTS_STORE, highlights),
+  put: (highlight: Highlight) => put(HIGHLIGHTS_STORE, highlight),
+  delete: (id: string) => remove(HIGHLIGHTS_STORE, id),
 };

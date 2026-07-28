@@ -6,3 +6,7 @@ export interface Annotation {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface UpsertAnnotationRequest {
+  noteText: string;
+}

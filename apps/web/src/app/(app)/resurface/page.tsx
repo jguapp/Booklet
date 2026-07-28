@@ -6,7 +6,7 @@ import { selectHighlightsToResurface } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
 import { loadArticles } from "@/lib/data/articles";
-import { loadHighlights, saveHighlights } from "@/lib/data/highlights";
+import { loadHighlights, updateHighlightFeedback } from "@/lib/data/highlights";
 import { loadUserSettings } from "@/lib/mock/store";
 import { compileDigestEmail, sendDigestEmail } from "@/lib/mock/digest-email";
 import { useAuth } from "@/lib/auth/auth-provider";
@@ -21,7 +21,7 @@ export default function ResurfacePage() {
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
-    Promise.all([loadArticles(isAuthenticated), loadHighlights()]).then(([loadedArticles, loadedHighlights]) => {
+    Promise.all([loadArticles(isAuthenticated), loadHighlights(isAuthenticated)]).then(([loadedArticles, loadedHighlights]) => {
       setArticles(loadedArticles);
       setHighlights(loadedHighlights);
 
@@ -50,25 +50,21 @@ export default function ResurfacePage() {
     return highlights.filter((h) => ids.has(h.id) && !reviewedIds.has(h.id));
   }, [highlights, batchIds, reviewedIds]);
 
-  function applyFeedback(highlightId: string, feedback: ResurfaceFeedback | null, archive: boolean) {
+  async function applyFeedback(highlightId: string, feedback: ResurfaceFeedback | null, archive: boolean) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
     const now = new Date().toISOString();
-    setHighlights((prev) => {
-      const next = prev.map((h) =>
-        h.id !== highlightId
-          ? h
-          : {
-              ...h,
-              lastSurfacedAt: now,
-              surfaceCount: h.surfaceCount + 1,
-              lastFeedback: feedback ?? h.lastFeedback,
-              lastFeedbackAt: feedback ? now : h.lastFeedbackAt,
-              resurfaceArchivedAt: archive ? now : h.resurfaceArchivedAt,
-              updatedAt: now,
-            },
-      );
-      saveHighlights(next);
-      return next;
-    });
+    const updated = await updateHighlightFeedback(
+      target,
+      {
+        lastSurfacedAt: now,
+        surfaceCount: target.surfaceCount + 1,
+        ...(feedback ? { lastFeedback: feedback, lastFeedbackAt: now } : {}),
+        ...(archive ? { resurfaceArchivedAt: now } : {}),
+      },
+      isAuthenticated,
+    );
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
     setReviewedIds((prev) => new Set(prev).add(highlightId));
   }
 

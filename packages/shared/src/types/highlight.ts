@@ -26,3 +26,21 @@ export interface Highlight {
 
   annotation?: Annotation | null;
 }
+
+export interface CreateHighlightRequest {
+  articleId: string;
+  selectedText: string;
+  position: HighlightPosition;
+  color: HighlightColor;
+  /** Optional -- creates the highlight and its note in one round trip. */
+  noteText?: string;
+}
+
+export interface UpdateHighlightRequest {
+  color?: HighlightColor;
+  resurfaceArchivedAt?: string | null;
+  lastSurfacedAt?: string;
+  surfaceCount?: number;
+  lastFeedback?: ResurfaceFeedback;
+  lastFeedbackAt?: string;
+}

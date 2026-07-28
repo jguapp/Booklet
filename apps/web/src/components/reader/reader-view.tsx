@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Article, ArticleStatus, Highlight, HighlightColor, TextPosition } from "@booklet/shared";
 import { useTheme } from "@/lib/theme/theme-provider";
 import { loadArticle, updateArticleStatus } from "@/lib/data/articles";
-import { loadHighlights, saveHighlights, LOCAL_USER_ID } from "@/lib/data/highlights";
+import { createHighlight, deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { formatReadingTime } from "@/lib/format";
 import { ReaderToolbar, type ReaderSize } from "./reader-toolbar";
@@ -31,21 +31,18 @@ export function ReaderView({ articleId }: { articleId: string }) {
 
   const refresh = useCallback(() => {
     if (authStatus === "loading") return;
-    Promise.all([loadArticle(articleId, isAuthenticated), loadHighlights()]).then(([a, h]) => {
-      setArticle(a);
-      setHighlights(h);
-      setLoaded(true);
-    });
+    Promise.all([loadArticle(articleId, isAuthenticated), loadHighlights(isAuthenticated, articleId)]).then(
+      ([a, h]) => {
+        setArticle(a);
+        setHighlights(h);
+        setLoaded(true);
+      },
+    );
   }, [authStatus, isAuthenticated, articleId]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  const articleHighlights = useMemo(
-    () => highlights.filter((h) => h.articleId === articleId),
-    [highlights, articleId],
-  );
 
   useEffect(() => {
     function handleScroll() {
@@ -58,83 +55,32 @@ export function ReaderView({ articleId }: { articleId: string }) {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  function handleCreateHighlight(position: TextPosition, color: HighlightColor, note: string) {
+  async function handleCreateHighlight(position: TextPosition, color: HighlightColor, note: string) {
     if (!article) return;
-    const now = new Date().toISOString();
-    const id = `local-${crypto.randomUUID()}`;
-    const trimmedNote = note.trim();
-
-    const highlight: Highlight = {
-      id,
-      articleId: article.id,
-      userId: LOCAL_USER_ID,
-      selectedText: position.exact,
-      position,
-      color,
-      lastSurfacedAt: null,
-      surfaceCount: 0,
-      lastFeedback: null,
-      lastFeedbackAt: null,
-      resurfaceArchivedAt: null,
-      createdAt: now,
-      updatedAt: now,
-      annotation: trimmedNote
-        ? {
-            id: `local-${crypto.randomUUID()}`,
-            highlightId: id,
-            userId: LOCAL_USER_ID,
-            noteText: trimmedNote,
-            createdAt: now,
-            updatedAt: now,
-          }
-        : null,
-    };
-
-    setHighlights((prev) => {
-      const next = [...prev, highlight];
-      saveHighlights(next);
-      return next;
-    });
+    const created = await createHighlight(
+      { articleId: article.id, selectedText: position.exact, position, color, noteText: note.trim() || undefined },
+      isAuthenticated,
+    );
+    setHighlights((prev) => [...prev, created]);
   }
 
-  function handleDeleteHighlight(highlightId: string) {
-    setHighlights((prev) => {
-      const next = prev.filter((h) => h.id !== highlightId);
-      saveHighlights(next);
-      return next;
-    });
+  async function handleDeleteHighlight(highlightId: string) {
+    await deleteHighlight(highlightId, isAuthenticated);
+    setHighlights((prev) => prev.filter((h) => h.id !== highlightId));
   }
 
-  function handleSaveNote(highlightId: string, noteText: string) {
-    const now = new Date().toISOString();
-    setHighlights((prev) => {
-      const next = prev.map((h) => {
-        if (h.id !== highlightId) return h;
-        return {
-          ...h,
-          annotation: h.annotation
-            ? { ...h.annotation, noteText, updatedAt: now }
-            : {
-                id: `local-${crypto.randomUUID()}`,
-                highlightId,
-                userId: LOCAL_USER_ID,
-                noteText,
-                createdAt: now,
-                updatedAt: now,
-              },
-        };
-      });
-      saveHighlights(next);
-      return next;
-    });
+  async function handleSaveNote(highlightId: string, noteText: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await saveNote(target, noteText, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
   }
 
-  function handleDeleteNote(highlightId: string) {
-    setHighlights((prev) => {
-      const next = prev.map((h) => (h.id === highlightId ? { ...h, annotation: null } : h));
-      saveHighlights(next);
-      return next;
-    });
+  async function handleDeleteNote(highlightId: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await deleteNote(target, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
   }
 
   async function handleStatusChange(nextStatus: ArticleStatus) {
@@ -206,7 +152,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
         {isRenderable ? (
           <ArticleContent
             html={article.extractedHtml ?? ""}
-            highlights={articleHighlights}
+            highlights={highlights}
             size={size}
             onCreateHighlight={handleCreateHighlight}
             onDeleteHighlight={handleDeleteHighlight}
@@ -236,12 +182,12 @@ export function ReaderView({ articleId }: { articleId: string }) {
               <p className="font-serif text-lg leading-relaxed text-ink">{article.extractedText}</p>
             )}
 
-            {articleHighlights.length > 0 && (
+            {highlights.length > 0 && (
               <div className="flex flex-col gap-3">
                 <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
                   Highlights in this document
                 </h2>
-                {articleHighlights.map((h) => (
+                {highlights.map((h) => (
                   <HighlightListItem
                     key={h.id}
                     highlight={h}

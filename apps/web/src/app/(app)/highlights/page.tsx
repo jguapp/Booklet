@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, Highlight } from "@booklet/shared";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
 import { loadArticles } from "@/lib/data/articles";
-import { loadHighlights, saveHighlights, LOCAL_USER_ID } from "@/lib/data/highlights";
+import { deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
 import { useAuth } from "@/lib/auth/auth-provider";
 
 export default function HighlightsPage() {
@@ -15,7 +15,7 @@ export default function HighlightsPage() {
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
-    Promise.all([loadArticles(isAuthenticated), loadHighlights()]).then(([a, h]) => {
+    Promise.all([loadArticles(isAuthenticated), loadHighlights(isAuthenticated)]).then(([a, h]) => {
       setArticles(a);
       setHighlights(h);
     });
@@ -33,44 +33,23 @@ export default function HighlightsPage() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [highlights, articleFilter]);
 
-  function handleDelete(highlightId: string) {
-    setHighlights((prev) => {
-      const next = prev.filter((h) => h.id !== highlightId);
-      saveHighlights(next);
-      return next;
-    });
+  async function handleDelete(highlightId: string) {
+    await deleteHighlight(highlightId, isAuthenticated);
+    setHighlights((prev) => prev.filter((h) => h.id !== highlightId));
   }
 
-  function handleSaveNote(highlightId: string, noteText: string) {
-    const now = new Date().toISOString();
-    setHighlights((prev) => {
-      const next = prev.map((h) => {
-        if (h.id !== highlightId) return h;
-        return {
-          ...h,
-          annotation: h.annotation
-            ? { ...h.annotation, noteText, updatedAt: now }
-            : {
-                id: `local-${crypto.randomUUID()}`,
-                highlightId,
-                userId: LOCAL_USER_ID,
-                noteText,
-                createdAt: now,
-                updatedAt: now,
-              },
-        };
-      });
-      saveHighlights(next);
-      return next;
-    });
+  async function handleSaveNote(highlightId: string, noteText: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await saveNote(target, noteText, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
   }
 
-  function handleDeleteNote(highlightId: string) {
-    setHighlights((prev) => {
-      const next = prev.map((h) => (h.id === highlightId ? { ...h, annotation: null } : h));
-      saveHighlights(next);
-      return next;
-    });
+  async function handleDeleteNote(highlightId: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await deleteNote(target, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
   }
 
   return (
