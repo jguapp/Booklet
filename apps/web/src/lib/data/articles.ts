@@ -11,7 +11,7 @@ import type {
   ExtractedContent,
 } from "@booklet/shared";
 import { apiFetch, ApiError } from "@/lib/api/client";
-import { localArticles } from "@/lib/local/db";
+import { localArticles, localFiles } from "@/lib/local/db";
 
 export { ApiError };
 
@@ -21,6 +21,12 @@ async function extractContent(url: string): Promise<ExtractedContent> {
     body: JSON.stringify({ url }),
     auth: false,
   });
+}
+
+async function extractFileContent(file: File): Promise<ExtractedContent> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  return apiFetch<ExtractedContent>("/api/extract-file", { method: "POST", body: form, auth: false });
 }
 
 export async function loadArticles(authenticated: boolean): Promise<Article[]> {
@@ -94,6 +100,57 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
   return article;
 }
 
+export async function saveArticleFromFile(file: File, authenticated: boolean): Promise<Article> {
+  const ext = file.name.toLowerCase().split(".").pop();
+  if (ext !== "pdf" && ext !== "epub") {
+    throw new ApiError(400, "unsupported_type", "Only .pdf and .epub files are supported.");
+  }
+
+  if (authenticated) {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return apiFetch<Article>("/api/articles/upload", { method: "POST", body: form });
+  }
+
+  let extracted: ExtractedContent | null = null;
+  let extractionError: string | null = null;
+  try {
+    extracted = await extractFileContent(file);
+  } catch (err) {
+    extractionError = err instanceof ApiError ? err.message : "Extraction failed.";
+  }
+
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  const article: Article = {
+    id,
+    userId: "local",
+    url: null,
+    title: extracted?.title ?? file.name.replace(/\.(pdf|epub)$/i, ""),
+    author: null,
+    siteName: null,
+    excerpt: null,
+    sourceType: ext === "pdf" ? "PDF" : "EPUB",
+    extractionStatus: extracted ? "SUCCESS" : "FAILED",
+    extractionError,
+    extractedHtml: null,
+    extractedText: extracted?.text ?? null,
+    fileStorageKey: id, // local files are keyed by article id, see lib/local/db localFiles
+    originalFilename: file.name,
+    readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
+    progressFraction: 0,
+    status: "UNREAD",
+    savedAt: now,
+    readAt: null,
+    archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await localArticles.put(article);
+  await localFiles.put(id, file);
+  return article;
+}
+
 export async function updateArticleStatus(
   article: Article,
   status: ArticleStatus,
@@ -139,5 +196,5 @@ export async function deleteArticle(id: string, authenticated: boolean): Promise
     await apiFetch(`/api/articles/${id}`, { method: "DELETE" });
     return;
   }
-  await localArticles.delete(id);
+  await Promise.all([localArticles.delete(id), localFiles.delete(id)]);
 }

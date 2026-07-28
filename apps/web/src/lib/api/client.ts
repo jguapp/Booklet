@@ -36,7 +36,9 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   const { auth = true, skipRetry = false, headers, ...rest } = options;
 
   const finalHeaders = new Headers(headers);
-  if (rest.body && !finalHeaders.has("Content-Type")) {
+  // FormData needs the browser to set its own multipart boundary -- an
+  // explicit Content-Type here would stop it from doing that.
+  if (rest.body && typeof rest.body === "string" && !finalHeaders.has("Content-Type")) {
     finalHeaders.set("Content-Type", "application/json");
   }
   if (auth) {

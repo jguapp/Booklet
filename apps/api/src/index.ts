@@ -2,6 +2,7 @@ import Fastify, { type FastifyError } from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
+import multipart from "@fastify/multipart";
 import type { HealthResponse } from "@booklet/shared";
 import { setupAuthContext } from "./lib/auth/context.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -55,6 +56,10 @@ await app.register(cookie);
 await app.register(rateLimit, {
   max: 300,
   timeWindow: "1 minute",
+});
+
+await app.register(multipart, {
+  limits: { fileSize: 100 * 1024 * 1024, files: 1 }, // 100MB, matches the web upload UI's stated limit
 });
 
 await setupAuthContext(app);

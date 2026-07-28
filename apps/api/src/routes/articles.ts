@@ -10,6 +10,9 @@ import type {
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
+import { EpubExtractionError, extractEpubText } from "../services/epub-extraction.js";
+import { PdfExtractionError, extractPdfText } from "../services/pdf-extraction.js";
+import { deleteStoredFile, readStoredFile, saveFile } from "../services/storage-service.js";
 
 type ArticleRow = Awaited<ReturnType<typeof prisma.article.findFirstOrThrow>>;
 
@@ -93,6 +96,77 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
 
       return reply.code(201).send(toArticle(article));
+    },
+  );
+
+  app.post(
+    "/api/articles/upload",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const file = await request.file();
+      if (!file) return reply.code(400).send({ error: "no_file", message: "No file was uploaded." });
+
+      const originalFilename = file.filename;
+      const ext = originalFilename.toLowerCase().split(".").pop();
+      if (ext !== "pdf" && ext !== "epub") {
+        return reply.code(400).send({ error: "unsupported_type", message: "Only .pdf and .epub files are supported." });
+      }
+
+      const buffer = await file.toBuffer();
+      const sourceType = ext === "pdf" ? "PDF" : "EPUB";
+
+      let extracted: { title: string | null; text: string; readingTimeEstimate: number } | null = null;
+      let extractionError: string | null = null;
+      try {
+        extracted =
+          ext === "pdf" ? await extractPdfText(new Uint8Array(buffer)) : await extractEpubText(buffer);
+      } catch (err) {
+        extractionError =
+          err instanceof PdfExtractionError || err instanceof EpubExtractionError
+            ? err.message
+            : "Extraction failed.";
+      }
+
+      const fileStorageKey = await saveFile(request.userId!, originalFilename, buffer);
+
+      const article = await prisma.article.create({
+        data: {
+          userId: request.userId!,
+          url: null,
+          title: extracted?.title ?? originalFilename.replace(/\.(pdf|epub)$/i, ""),
+          sourceType,
+          extractionStatus: extracted ? "SUCCESS" : "FAILED",
+          extractionError,
+          extractedText: extracted?.text ?? null,
+          readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
+          fileStorageKey,
+          originalFilename,
+        },
+      });
+
+      return reply.code(201).send(toArticle(article));
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/articles/:id/file",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const article = await prisma.article.findFirst({
+        where: { id: request.params.id, userId: request.userId! },
+      });
+      if (!article?.fileStorageKey) {
+        return reply.code(404).send({ error: "not_found", message: "No file for this article." });
+      }
+
+      const buffer = await readStoredFile(article.fileStorageKey);
+      const contentType = article.sourceType === "PDF" ? "application/pdf" : "application/epub+zip";
+      reply.header("Content-Type", contentType);
+      reply.header(
+        "Content-Disposition",
+        `inline; filename="${(article.originalFilename ?? "download").replace(/"/g, "")}"`,
+      );
+      return reply.send(buffer);
     },
   );
 
@@ -185,6 +259,9 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
       if (!existing) return reply.code(404).send({ error: "not_found", message: "Article not found." });
       await prisma.article.delete({ where: { id: existing.id } });
+      if (existing.fileStorageKey) {
+        await deleteStoredFile(existing.fileStorageKey).catch(() => undefined);
+      }
       return reply.code(204).send();
     },
   );
