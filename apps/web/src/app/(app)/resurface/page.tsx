@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, Highlight, ResurfaceCandidate, ResurfaceFeedback } from "@booklet/shared";
-import { selectHighlightsToResurface } from "@booklet/shared";
+import { applySm2Review, feedbackToQuality, selectHighlightsToResurface } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
 import { loadArticles } from "@/lib/data/articles";
@@ -43,9 +43,7 @@ export default function ResurfacePage() {
       const highlightsPerDigest = loadUserSettings().highlightsPerDigest;
       const candidates: ResurfaceCandidate[] = loadedHighlights.map((h) => ({
         id: h.id,
-        lastSurfacedAt: h.lastSurfacedAt,
-        hasAnnotation: !!h.annotation,
-        lastFeedback: h.lastFeedback,
+        nextDueAt: h.nextDueAt,
         resurfaceArchivedAt: h.resurfaceArchivedAt,
       }));
       const selected = selectHighlightsToResurface(candidates, highlightsPerDigest);
@@ -68,14 +66,34 @@ export default function ResurfacePage() {
   async function applyFeedback(highlightId: string, feedback: ResurfaceFeedback | null, archive: boolean) {
     const target = highlights.find((h) => h.id === highlightId);
     if (!target) return;
-    const now = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    // SM-2 scheduling only makes sense on an actual recall judgment --
+    // archiving without feedback just removes it from rotation outright.
+    const sm2 = feedback
+      ? applySm2Review(
+          { easinessFactor: target.easinessFactor, intervalDays: target.intervalDays, repetitions: target.repetitions },
+          feedbackToQuality(feedback),
+          now,
+        )
+      : null;
+
     const updated = await updateHighlightFeedback(
       target,
       {
-        lastSurfacedAt: now,
+        lastSurfacedAt: nowIso,
         surfaceCount: target.surfaceCount + 1,
-        ...(feedback ? { lastFeedback: feedback, lastFeedbackAt: now } : {}),
-        ...(archive ? { resurfaceArchivedAt: now } : {}),
+        ...(feedback ? { lastFeedback: feedback, lastFeedbackAt: nowIso } : {}),
+        ...(archive ? { resurfaceArchivedAt: nowIso } : {}),
+        ...(sm2
+          ? {
+              easinessFactor: sm2.easinessFactor,
+              intervalDays: sm2.intervalDays,
+              repetitions: sm2.repetitions,
+              nextDueAt: sm2.nextDueAt,
+            }
+          : {}),
       },
       isAuthenticated,
     );

@@ -1,14 +1,7 @@
 import { selectHighlightsToResurface, type ResurfaceCandidate } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 
-/**
- * Not yet exercised against a live database (none is connected in this repo
- * yet) -- the selection logic itself is verified in isolation via
- * packages/shared/scripts/resurface-demo.ts. This is the thin glue that will
- * make it real once Auth/a live Postgres exist: fetch a user's eligible
- * highlights, hand them to the pure algorithm, return the full rows for
- * whatever it picked.
- */
+/** Fetch a user's eligible highlights, hand them to the pure SM-2 selection algorithm, return the full rows it picked. */
 export async function getHighlightsToResurface(userId: string, count: number) {
   const rows = await prisma.highlight.findMany({
     where: { userId },
@@ -17,9 +10,7 @@ export async function getHighlightsToResurface(userId: string, count: number) {
 
   const candidates: ResurfaceCandidate[] = rows.map((row) => ({
     id: row.id,
-    lastSurfacedAt: row.lastSurfacedAt?.toISOString() ?? null,
-    hasAnnotation: row.annotation !== null,
-    lastFeedback: row.lastFeedback,
+    nextDueAt: row.nextDueAt?.toISOString() ?? null,
     resurfaceArchivedAt: row.resurfaceArchivedAt?.toISOString() ?? null,
   }));
 

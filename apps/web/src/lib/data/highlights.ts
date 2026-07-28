@@ -12,6 +12,7 @@ import type {
   HighlightPosition,
   UpdateHighlightRequest,
 } from "@booklet/shared";
+import { DEFAULT_SM2_STATE } from "@booklet/shared";
 import { apiFetch, ApiError } from "@/lib/api/client";
 import { localHighlights } from "@/lib/local/db";
 
@@ -56,6 +57,8 @@ export async function createHighlight(input: CreateHighlightInput, authenticated
     lastFeedback: null,
     lastFeedbackAt: null,
     resurfaceArchivedAt: null,
+    ...DEFAULT_SM2_STATE,
+    nextDueAt: null,
     createdAt: now,
     updatedAt: now,
     annotation: trimmedNote
@@ -134,6 +137,10 @@ export async function updateHighlightFeedback(
     ...(patch.surfaceCount !== undefined ? { surfaceCount: patch.surfaceCount } : {}),
     ...(patch.lastFeedback !== undefined ? { lastFeedback: patch.lastFeedback } : {}),
     ...(patch.lastFeedbackAt !== undefined ? { lastFeedbackAt: patch.lastFeedbackAt } : {}),
+    ...(patch.easinessFactor !== undefined ? { easinessFactor: patch.easinessFactor } : {}),
+    ...(patch.intervalDays !== undefined ? { intervalDays: patch.intervalDays } : {}),
+    ...(patch.repetitions !== undefined ? { repetitions: patch.repetitions } : {}),
+    ...(patch.nextDueAt !== undefined ? { nextDueAt: patch.nextDueAt } : {}),
     updatedAt: new Date().toISOString(),
   };
   await localHighlights.put(updated);

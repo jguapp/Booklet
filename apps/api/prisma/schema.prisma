@@ -176,6 +176,13 @@ model Highlight {
   lastFeedbackAt      DateTime?
   resurfaceArchivedAt DateTime? // "archive this highlight" -- null = still eligible
 
+  /// SM-2 spaced-repetition state (packages/shared resurface.ts applySm2Review).
+  /// nextDueAt null = never reviewed, due immediately.
+  easinessFactor Float     @default(2.5)
+  intervalDays   Int       @default(0)
+  repetitions    Int       @default(0)
+  nextDueAt      DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -184,6 +191,7 @@ model Highlight {
 
   @@index([articleId])
   @@index([userId, createdAt])
+  @@index([userId, nextDueAt])
 }
 
 model Digest {
