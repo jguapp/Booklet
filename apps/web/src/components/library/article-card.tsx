@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import type { Article } from "@booklet/shared";
+import type { Article, Collection } from "@booklet/shared";
 import { formatReadingTime, formatRelativeDate } from "@/lib/format";
 import { SourceIcon } from "./source-icon";
 import { StatusBadge } from "./status-badge";
+import { CollectionMenu } from "./collection-menu";
 import { IconArchive, IconInbox, IconTrash } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 
@@ -15,9 +16,11 @@ interface ArticleCardProps {
   article: Article;
   onToggleArchived?: (article: Article) => void;
   onDelete?: (article: Article) => void;
+  collections?: Collection[];
+  authenticated?: boolean;
 }
 
-export function ArticleCard({ article, onToggleArchived, onDelete }: ArticleCardProps) {
+export function ArticleCard({ article, onToggleArchived, onDelete, collections, authenticated }: ArticleCardProps) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const confirmTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,6 +74,9 @@ export function ArticleCard({ article, onToggleArchived, onDelete }: ArticleCard
             >
               {isArchived ? <IconInbox className="h-3.5 w-3.5" /> : <IconArchive className="h-3.5 w-3.5" />}
             </button>
+          )}
+          {collections && authenticated !== undefined && (
+            <CollectionMenu articleId={article.id} allCollections={collections} authenticated={authenticated} />
           )}
           {onDelete && (
             <button

@@ -4,12 +4,21 @@
  * this; it adds a synced copy on the server (see lib/data/*) while this
  * stays the source of truth for anyone who never creates an account.
  */
-import type { Article, Highlight } from "@booklet/shared";
+import type { Article, Collection, Highlight } from "@booklet/shared";
 
 const DB_NAME = "booklet";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const ARTICLES_STORE = "articles";
 const HIGHLIGHTS_STORE = "highlights";
+const COLLECTIONS_STORE = "collections";
+const ARTICLE_COLLECTIONS_STORE = "articleCollections";
+
+export interface LocalArticleCollection {
+  id: string; // `${articleId}:${collectionId}`
+  articleId: string;
+  collectionId: string;
+  addedAt: string;
+}
 
 function isBrowser(): boolean {
   return typeof indexedDB !== "undefined";
@@ -31,6 +40,14 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(HIGHLIGHTS_STORE)) {
         const store = db.createObjectStore(HIGHLIGHTS_STORE, { keyPath: "id" });
         store.createIndex("articleId", "articleId");
+      }
+      if (!db.objectStoreNames.contains(COLLECTIONS_STORE)) {
+        db.createObjectStore(COLLECTIONS_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(ARTICLE_COLLECTIONS_STORE)) {
+        const store = db.createObjectStore(ARTICLE_COLLECTIONS_STORE, { keyPath: "id" });
+        store.createIndex("articleId", "articleId");
+        store.createIndex("collectionId", "collectionId");
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -80,6 +97,13 @@ async function clear(storeName: string): Promise<void> {
   await promisify(store.clear());
 }
 
+async function getAllByIndex<T>(storeName: string, indexName: string, value: string): Promise<T[]> {
+  if (!isBrowser()) return [];
+  const db = await openDb();
+  const store = db.transaction(storeName, "readonly").objectStore(storeName);
+  return promisify(store.index(indexName).getAll(value));
+}
+
 export const localArticles = {
   getAll: () => getAll<Article>(ARTICLES_STORE),
   get: (id: string) => getOne<Article>(ARTICLES_STORE, id),
@@ -93,4 +117,25 @@ export const localHighlights = {
   put: (highlight: Highlight) => put(HIGHLIGHTS_STORE, highlight),
   delete: (id: string) => remove(HIGHLIGHTS_STORE, id),
   clear: () => clear(HIGHLIGHTS_STORE),
+};
+
+export const localCollections = {
+  getAll: () => getAll<Collection>(COLLECTIONS_STORE),
+  put: (collection: Collection) => put(COLLECTIONS_STORE, collection),
+  delete: (id: string) => remove(COLLECTIONS_STORE, id),
+  clear: () => clear(COLLECTIONS_STORE),
+};
+
+export const localArticleCollections = {
+  getForArticle: (articleId: string) =>
+    getAllByIndex<LocalArticleCollection>(ARTICLE_COLLECTIONS_STORE, "articleId", articleId),
+  getForCollection: (collectionId: string) =>
+    getAllByIndex<LocalArticleCollection>(ARTICLE_COLLECTIONS_STORE, "collectionId", collectionId),
+  put: (link: LocalArticleCollection) => put(ARTICLE_COLLECTIONS_STORE, link),
+  delete: (id: string) => remove(ARTICLE_COLLECTIONS_STORE, id),
+  deleteForCollection: async (collectionId: string) => {
+    const links = await getAllByIndex<LocalArticleCollection>(ARTICLE_COLLECTIONS_STORE, "collectionId", collectionId);
+    await Promise.all(links.map((l) => remove(ARTICLE_COLLECTIONS_STORE, l.id)));
+  },
+  clear: () => clear(ARTICLE_COLLECTIONS_STORE),
 };

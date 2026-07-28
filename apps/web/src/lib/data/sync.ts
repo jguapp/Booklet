@@ -7,14 +7,30 @@
  */
 import type { ImportRequest, ImportResponse } from "@booklet/shared";
 import { apiFetch } from "@/lib/api/client";
-import { localArticles, localHighlights } from "@/lib/local/db";
+import { localArticleCollections, localArticles, localCollections, localHighlights } from "@/lib/local/db";
+
+const EMPTY_RESULT: ImportResponse = {
+  importedArticles: 0,
+  skippedArticles: 0,
+  importedHighlights: 0,
+  importedCollections: 0,
+  skippedCollections: 0,
+};
 
 export async function migrateLocalDataToAccount(): Promise<ImportResponse> {
-  const [articles, highlights] = await Promise.all([localArticles.getAll(), localHighlights.getAll()]);
+  const [articles, highlights, collections] = await Promise.all([
+    localArticles.getAll(),
+    localHighlights.getAll(),
+    localCollections.getAll(),
+  ]);
 
-  if (articles.length === 0 && highlights.length === 0) {
-    return { importedArticles: 0, skippedArticles: 0, importedHighlights: 0 };
+  if (articles.length === 0 && highlights.length === 0 && collections.length === 0) {
+    return EMPTY_RESULT;
   }
+
+  const articleCollections = (
+    await Promise.all(collections.map((c) => localArticleCollections.getForCollection(c.id)))
+  ).flat();
 
   const body: ImportRequest = {
     articles: articles.map((a) => ({
@@ -49,6 +65,11 @@ export async function migrateLocalDataToAccount(): Promise<ImportResponse> {
       createdAt: h.createdAt,
       noteText: h.annotation?.noteText ?? null,
     })),
+    collections: collections.map((c) => ({ localId: c.id, name: c.name, color: c.color })),
+    articleCollections: articleCollections.map((l) => ({
+      localArticleId: l.articleId,
+      localCollectionId: l.collectionId,
+    })),
   };
 
   const result = await apiFetch<ImportResponse>("/api/sync/import", {
@@ -56,7 +77,12 @@ export async function migrateLocalDataToAccount(): Promise<ImportResponse> {
     body: JSON.stringify(body),
   });
 
-  await Promise.all([localArticles.clear(), localHighlights.clear()]);
+  await Promise.all([
+    localArticles.clear(),
+    localHighlights.clear(),
+    localCollections.clear(),
+    localArticleCollections.clear(),
+  ]);
 
   return result;
 }

@@ -1,10 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { IconHighlights, IconLibrary, IconLogout, IconResurface, IconSettings } from "@/components/ui/icons";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import type { Collection } from "@booklet/shared";
+import { IconHighlights, IconLibrary, IconLogout, IconPlus, IconResurface, IconSettings } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { createCollection, loadCollections } from "@/lib/data/collections";
+import { ApiError } from "@/lib/api/client";
 
 const NAV_ITEMS = [
   { href: "/library", label: "Library", Icon: IconLibrary },
@@ -15,12 +19,43 @@ const NAV_ITEMS = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
-  const { status, user, logout } = useAuth();
+  const { status, isAuthenticated, user, logout } = useAuth();
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+
+  const activeCollectionId = searchParams.get("collection");
+
+  const refreshCollections = useCallback(() => {
+    if (status === "loading") return;
+    loadCollections(isAuthenticated).then(setCollections);
+  }, [status, isAuthenticated]);
+
+  useEffect(() => {
+    refreshCollections();
+  }, [refreshCollections]);
 
   async function handleLogout() {
     await logout();
     router.push("/login");
+  }
+
+  async function handleCreateCollection(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newName.trim();
+    if (!name) return;
+    try {
+      const created = await createCollection({ name }, isAuthenticated);
+      setCollections((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewName("");
+      setCreating(false);
+      router.push(`/library?collection=${created.id}`);
+    } catch (err) {
+      // Name collision is the only realistic failure here -- surface it inline rather than losing the input.
+      if (err instanceof ApiError) setNewName(name);
+    }
   }
 
   return (
@@ -32,9 +67,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 px-3">
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
           {NAV_ITEMS.map(({ href, label, Icon }) => {
-            const active = pathname === href || pathname?.startsWith(`${href}/`);
+            const active = (pathname === href || pathname?.startsWith(`${href}/`)) && !activeCollectionId;
             return (
               <Link
                 key={href}
@@ -49,6 +84,56 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
+
+          <div className="mt-6 flex items-center justify-between px-3">
+            <span className="font-sans text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              Collections
+            </span>
+            <button
+              type="button"
+              title="New collection"
+              onClick={() => setCreating((v) => !v)}
+              className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
+            >
+              <IconPlus className="h-3 w-3" />
+            </button>
+          </div>
+
+          {creating && (
+            <form onSubmit={handleCreateCollection} className="px-3 py-1">
+              <input
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onBlur={() => !newName && setCreating(false)}
+                placeholder="Collection name"
+                className="w-full rounded-sm border border-border bg-paper px-2 py-1 font-sans text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              />
+            </form>
+          )}
+
+          {collections.map((c) => (
+            <Link
+              key={c.id}
+              href={`/library?collection=${c.id}`}
+              className={cn(
+                "flex items-center gap-2.5 rounded-sm px-3 py-1.5 font-sans text-sm transition-colors",
+                activeCollectionId === c.id
+                  ? "bg-surface-2 text-accent"
+                  : "text-ink-muted hover:bg-surface-2 hover:text-ink",
+              )}
+            >
+              <span
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: c.color ?? "var(--color-ink-faint)" }}
+                aria-hidden
+              />
+              <span className="truncate">{c.name}</span>
+              {typeof c.articleCount === "number" && (
+                <span className="ml-auto shrink-0 font-sans text-xs text-ink-faint">{c.articleCount}</span>
+              )}
+            </Link>
+          ))}
         </nav>
 
         <div className="border-t border-border px-3 py-4">

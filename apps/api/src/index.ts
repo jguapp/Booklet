@@ -9,6 +9,7 @@ import { registerArticleRoutes } from "./routes/articles.js";
 import { registerHighlightRoutes } from "./routes/highlights.js";
 import { registerDigestRoutes } from "./routes/digests.js";
 import { registerSyncRoutes } from "./routes/sync.js";
+import { registerCollectionRoutes } from "./routes/collections.js";
 
 try {
   process.loadEnvFile();
@@ -44,6 +45,7 @@ await registerArticleRoutes(app);
 await registerHighlightRoutes(app);
 await registerDigestRoutes(app);
 await registerSyncRoutes(app);
+await registerCollectionRoutes(app);
 
 const port = Number(process.env.PORT ?? 4000);
 

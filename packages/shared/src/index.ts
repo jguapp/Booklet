@@ -6,5 +6,6 @@ export * from "./types/highlight";
 export * from "./types/digest";
 export * from "./types/auth";
 export * from "./types/sync";
+export * from "./types/collection";
 export * from "./highlight-anchor";
 export * from "./resurface";
