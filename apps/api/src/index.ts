@@ -7,6 +7,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerExtractRoute } from "./routes/extract.js";
 import { registerArticleRoutes } from "./routes/articles.js";
 import { registerHighlightRoutes } from "./routes/highlights.js";
+import { registerDigestRoutes } from "./routes/digests.js";
 
 try {
   process.loadEnvFile();
@@ -40,6 +41,7 @@ await registerAuthRoutes(app);
 await registerExtractRoute(app);
 await registerArticleRoutes(app);
 await registerHighlightRoutes(app);
+await registerDigestRoutes(app);
 
 const port = Number(process.env.PORT ?? 4000);
 
