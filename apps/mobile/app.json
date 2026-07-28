@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Booklet",
+    "slug": "booklet",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.booklet.mobile"
+    },
+    "android": {
+      "package": "app.booklet.mobile"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

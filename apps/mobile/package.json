@@ -1,0 +1,30 @@
+{
+  "name": "@booklet/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "android": "expo start --android",
+    "ios": "expo start --ios"
+  },
+  "dependencies": {
+    "@booklet/shared": "workspace:*",
+    "@react-native-async-storage/async-storage": "2.1.2",
+    "expo": "~53.0.0",
+    "expo-status-bar": "~2.2.3",
+    "react": "19.0.0",
+    "react-native": "0.79.6"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/traverse": "^8.0.4",
+    "@expo/metro-runtime": "^5.0.5",
+    "@types/react": "~19.0.10",
+    "babel-preset-expo": "^13.0.0",
+    "react-dom": "19.0.0",
+    "react-native-web": "^0.20.0",
+    "typescript": "^5.8.3"
+  }
+}
