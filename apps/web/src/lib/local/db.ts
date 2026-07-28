@@ -73,15 +73,24 @@ async function remove(storeName: string, id: string): Promise<void> {
   await promisify(store.delete(id));
 }
 
+async function clear(storeName: string): Promise<void> {
+  if (!isBrowser()) return;
+  const db = await openDb();
+  const store = db.transaction(storeName, "readwrite").objectStore(storeName);
+  await promisify(store.clear());
+}
+
 export const localArticles = {
   getAll: () => getAll<Article>(ARTICLES_STORE),
   get: (id: string) => getOne<Article>(ARTICLES_STORE, id),
   put: (article: Article) => put(ARTICLES_STORE, article),
   delete: (id: string) => remove(ARTICLES_STORE, id),
+  clear: () => clear(ARTICLES_STORE),
 };
 
 export const localHighlights = {
   getAll: () => getAll<Highlight>(HIGHLIGHTS_STORE),
   put: (highlight: Highlight) => put(HIGHLIGHTS_STORE, highlight),
   delete: (id: string) => remove(HIGHLIGHTS_STORE, id),
+  clear: () => clear(HIGHLIGHTS_STORE),
 };

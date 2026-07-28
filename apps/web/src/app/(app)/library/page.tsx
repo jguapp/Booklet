@@ -21,7 +21,7 @@ const TABS: { value: FilterTab; label: string }[] = [
 ];
 
 export default function LibraryPage() {
-  const { status, isAuthenticated } = useAuth();
+  const { status, isAuthenticated, lastSyncResult, dismissSyncResult } = useAuth();
   const [articles, setArticles] = useState<Article[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState<FilterTab>("ALL");
@@ -68,6 +68,23 @@ export default function LibraryPage() {
           Save article
         </Button>
       </div>
+
+      {lastSyncResult && (lastSyncResult.importedArticles > 0 || lastSyncResult.importedHighlights > 0) && (
+        <div className="mb-6 flex items-center justify-between gap-4 rounded-sm border border-accent/30 bg-accent/10 px-4 py-2.5">
+          <p className="font-sans text-sm text-ink">
+            Synced {lastSyncResult.importedArticles} article{lastSyncResult.importedArticles === 1 ? "" : "s"} and{" "}
+            {lastSyncResult.importedHighlights} highlight{lastSyncResult.importedHighlights === 1 ? "" : "s"} from
+            this device to your account.
+          </p>
+          <button
+            type="button"
+            onClick={dismissSyncResult}
+            className="shrink-0 font-sans text-xs font-medium text-ink-muted hover:text-ink"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex gap-1 rounded-sm bg-surface-2 p-1">
