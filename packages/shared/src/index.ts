@@ -5,5 +5,6 @@ export * from "./types/highlight-position";
 export * from "./types/highlight";
 export * from "./types/digest";
 export * from "./types/auth";
+export * from "./types/sync";
 export * from "./highlight-anchor";
 export * from "./resurface";
