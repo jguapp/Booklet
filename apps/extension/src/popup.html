@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Booklet</title>
+    <style>
+      body {
+        width: 280px;
+        margin: 0;
+        padding: 16px;
+        font-family: -apple-system, "Segoe UI", sans-serif;
+        background: #f7f4ee;
+        color: #1c1a16;
+      }
+      h1 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0 0 12px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: #6b6558;
+        margin-bottom: 4px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        margin-bottom: 10px;
+        border: 1px solid #ddd6c7;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+      button {
+        width: 100%;
+        padding: 8px;
+        border: none;
+        border-radius: 4px;
+        background: #b5502f;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      button.secondary {
+        background: transparent;
+        color: #6b6558;
+        border: 1px solid #ddd6c7;
+        margin-top: 8px;
+      }
+      p.status {
+        font-size: 12px;
+        color: #6b6558;
+        margin-top: 10px;
+      }
+      p.error {
+        color: #b5502f;
+      }
+      .account-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        font-size: 12px;
+        color: #6b6558;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Booklet</h1>
+    <div id="root"></div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
