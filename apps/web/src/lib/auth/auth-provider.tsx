@@ -3,11 +3,14 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type {
   AuthResponse,
+  ForgotPasswordRequest,
   ImportResponse,
   LoginRequest,
+  ResetPasswordRequest,
   SignupRequest,
   UpdateSettingsRequest,
   UserProfile,
+  VerifyEmailRequest,
 } from "@booklet/shared";
 import { apiFetch, ApiError } from "@/lib/api/client";
 import { clearAccessToken, getAccessToken, setAccessToken, silentRefresh } from "@/lib/auth/session";
@@ -29,6 +32,10 @@ interface AuthContextValue {
   /** Manual re-sync -- a safety net if the automatic import on login/signup ever fails partway. */
   syncLocalData: () => Promise<ImportResponse>;
   dismissSyncResult: () => void;
+  requestPasswordReset: (email: string) => Promise<void>;
+  resetPassword: (token: string, newPassword: string) => Promise<void>;
+  verifyEmail: (token: string) => Promise<void>;
+  resendVerificationEmail: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -137,6 +144,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(profile);
   }, []);
 
+  const requestPasswordReset = useCallback(async (email: string) => {
+    const body: ForgotPasswordRequest = { email };
+    await apiFetch("/api/auth/forgot-password", { method: "POST", body: JSON.stringify(body), auth: false });
+  }, []);
+
+  const resetPassword = useCallback(async (token: string, newPassword: string) => {
+    const body: ResetPasswordRequest = { token, newPassword };
+    await apiFetch("/api/auth/reset-password", { method: "POST", body: JSON.stringify(body), auth: false });
+  }, []);
+
+  const verifyEmail = useCallback(async (token: string) => {
+    const body: VerifyEmailRequest = { token };
+    const profile = await apiFetch<UserProfile>("/api/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify(body),
+      auth: false,
+    });
+    // Only meaningful if this browser happens to also be signed in as that user.
+    setUser((prev) => (prev && prev.id === profile.id ? profile : prev));
+  }, []);
+
+  const resendVerificationEmail = useCallback(async () => {
+    await apiFetch("/api/auth/resend-verification", { method: "POST" });
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -150,6 +182,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         lastSyncResult,
         syncLocalData,
         dismissSyncResult,
+        requestPasswordReset,
+        resetPassword,
+        verifyEmail,
+        resendVerificationEmail,
       }}
     >
       {children}

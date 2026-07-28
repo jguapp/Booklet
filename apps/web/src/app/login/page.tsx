@@ -47,7 +47,12 @@ export default function LoginPage() {
               <Input type="email" name="email" required autoFocus placeholder="you@example.com" />
             </label>
             <label className="flex flex-col gap-1.5">
-              <span className="font-sans text-xs font-medium text-ink-muted">Password</span>
+              <div className="flex items-center justify-between">
+                <span className="font-sans text-xs font-medium text-ink-muted">Password</span>
+                <Link href="/forgot-password" className="font-sans text-xs font-medium text-accent">
+                  Forgot password?
+                </Link>
+              </div>
               <Input type="password" name="password" required placeholder="••••••••" />
             </label>
 

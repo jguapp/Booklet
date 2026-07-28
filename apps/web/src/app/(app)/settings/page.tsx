@@ -24,10 +24,11 @@ const THEMES: { value: Theme; label: string }[] = [
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
-  const { status, user, logout, updateSettings } = useAuth();
+  const { status, user, logout, updateSettings, resendVerificationEmail } = useAuth();
   const [frequency, setFrequency] = useState<ResurfaceFrequency>("DAILY");
   const [perDigest, setPerDigest] = useState(5);
   const [saved, setSaved] = useState(false);
+  const [resendStatus, setResendStatus] = useState<"idle" | "sending" | "sent">("idle");
 
   useEffect(() => {
     if (status === "authenticated" && user) {
@@ -56,6 +57,16 @@ export default function SettingsPage() {
   async function handleLogout() {
     await logout();
     router.push("/login");
+  }
+
+  async function handleResendVerification() {
+    setResendStatus("sending");
+    try {
+      await resendVerificationEmail();
+      setResendStatus("sent");
+    } catch {
+      setResendStatus("idle");
+    }
   }
 
   return (
@@ -134,6 +145,23 @@ export default function SettingsPage() {
             <p className="mb-4 font-sans text-sm text-ink-muted">
               Signed in as {user.email}. Your saves and highlights sync across devices.
             </p>
+            {!user.emailVerified && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-sm border border-accent/30 bg-accent/10 px-3 py-2.5">
+                <p className="font-sans text-sm text-ink">Your email is not verified yet.</p>
+                {resendStatus === "sent" ? (
+                  <span className="font-sans text-xs text-ink-muted">Verification email sent.</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={resendStatus === "sending"}
+                    className="font-sans text-xs font-medium text-accent disabled:opacity-50"
+                  >
+                    {resendStatus === "sending" ? "Sending…" : "Resend verification email"}
+                  </button>
+                )}
+              </div>
+            )}
             <Button type="button" variant="secondary" onClick={handleLogout}>
               Log out
             </Button>

@@ -10,6 +10,7 @@ export interface UserProfile {
   id: string;
   email: string;
   name: string | null;
+  emailVerified: boolean;
   resurfaceFrequency: ResurfaceFrequency;
   highlightsPerDigest: number;
   createdAt: string;
@@ -46,4 +47,17 @@ export interface UpdateSettingsRequest {
 export interface ApiErrorResponse {
   error: string;
   message: string;
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  newPassword: string;
+}
+
+export interface VerifyEmailRequest {
+  token: string;
 }
