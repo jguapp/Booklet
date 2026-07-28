@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { ResurfaceFrequency } from "@booklet/shared";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTheme, type Theme } from "@/lib/theme/theme-provider";
-import { mockUser } from "@/lib/mock/data";
 import { loadUserSettings, saveUserSettings } from "@/lib/mock/store";
+import { useAuth } from "@/lib/auth/auth-provider";
 import { cn } from "@/lib/cn";
 
 const FREQUENCIES: { value: ResurfaceFrequency; label: string }[] = [
@@ -22,21 +23,39 @@ const THEMES: { value: Theme; label: string }[] = [
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
+  const router = useRouter();
+  const { status, user, logout, updateSettings } = useAuth();
   const [frequency, setFrequency] = useState<ResurfaceFrequency>("DAILY");
   const [perDigest, setPerDigest] = useState(5);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const settings = loadUserSettings();
-    setFrequency(settings.resurfaceFrequency);
-    setPerDigest(settings.highlightsPerDigest);
-  }, []);
+    if (status === "authenticated" && user) {
+      setFrequency(user.resurfaceFrequency);
+      setPerDigest(user.highlightsPerDigest);
+      return;
+    }
+    if (status === "anonymous") {
+      const settings = loadUserSettings();
+      setFrequency(settings.resurfaceFrequency);
+      setPerDigest(settings.highlightsPerDigest);
+    }
+  }, [status, user]);
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    saveUserSettings({ resurfaceFrequency: frequency, highlightsPerDigest: perDigest });
+    if (status === "authenticated") {
+      await updateSettings({ resurfaceFrequency: frequency, highlightsPerDigest: perDigest });
+    } else {
+      saveUserSettings({ resurfaceFrequency: frequency, highlightsPerDigest: perDigest });
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function handleLogout() {
+    await logout();
+    router.push("/login");
   }
 
   return (
@@ -110,10 +129,25 @@ export default function SettingsPage() {
 
       <section className="mt-10 border-t border-border pt-6">
         <h2 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Account</h2>
-        <p className="mb-4 font-sans text-sm text-ink-muted">{mockUser.email}</p>
-        <ButtonLink href="/login" variant="secondary">
-          Log out
-        </ButtonLink>
+        {status === "authenticated" && user ? (
+          <>
+            <p className="mb-4 font-sans text-sm text-ink-muted">
+              Signed in as {user.email}. Your saves and highlights sync across devices.
+            </p>
+            <Button type="button" variant="secondary" onClick={handleLogout}>
+              Log out
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="mb-4 font-sans text-sm text-ink-muted">
+              Not signed in — everything is saved locally on this device only.
+            </p>
+            <ButtonLink href="/signup" variant="secondary">
+              Create an account to sync
+            </ButtonLink>
+          </>
+        )}
       </section>
     </div>
   );

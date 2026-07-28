@@ -5,16 +5,30 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/lib/auth/auth-provider";
+import { ApiError } from "@/lib/api/client";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login } = useAuth();
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setError(null);
     setSubmitting(true);
-    // No Auth backend yet -- this is where POST /api/auth/login will go.
-    setTimeout(() => router.push("/library"), 500);
+    const form = new FormData(e.currentTarget);
+    try {
+      await login({
+        email: String(form.get("email") ?? ""),
+        password: String(form.get("password") ?? ""),
+      });
+      router.push("/library");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -37,6 +51,8 @@ export default function LoginPage() {
               <Input type="password" name="password" required placeholder="••••••••" />
             </label>
 
+            {error && <p className="font-sans text-sm text-red-500">{error}</p>}
+
             <Button type="submit" variant="primary" disabled={submitting} className="mt-2 w-full">
               {submitting ? "Logging in…" : "Log in"}
             </Button>
@@ -47,6 +63,12 @@ export default function LoginPage() {
           New here?{" "}
           <Link href="/signup" className="font-medium text-accent">
             Create an account
+          </Link>
+        </p>
+        <p className="mt-2 text-center font-sans text-sm text-ink-faint">
+          Just here to read?{" "}
+          <Link href="/library" className="font-medium text-accent">
+            Skip this — no account needed
           </Link>
         </p>
       </div>
