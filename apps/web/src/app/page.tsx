@@ -18,6 +18,10 @@ export default function Home() {
           Log in
         </ButtonLink>
       </div>
+
+      <ButtonLink href="/library" variant="ghost" className="-mt-2">
+        Continue without an account
+      </ButtonLink>
     </div>
   );
 }
