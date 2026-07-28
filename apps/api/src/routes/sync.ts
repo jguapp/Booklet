@@ -5,7 +5,12 @@ import { requireAuth } from "../lib/auth/context.js";
 
 export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: ImportRequest }>("/api/sync/import", { preHandler: requireAuth }, async (request, reply) => {
-    const { articles, highlights } = request.body ?? { articles: [], highlights: [] };
+    const {
+      articles,
+      highlights,
+      collections = [],
+      articleCollections = [],
+    } = request.body ?? { articles: [], highlights: [] };
     const userId = request.userId!;
 
     if (!Array.isArray(articles) || !Array.isArray(highlights)) {
@@ -82,7 +87,45 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
       importedHighlights++;
     }
 
-    const body: ImportResponse = { importedArticles, skippedArticles, importedHighlights };
+    const localCollectionIdToServerId = new Map<string, string>();
+    let importedCollections = 0;
+    let skippedCollections = 0;
+
+    for (const c of collections) {
+      if (typeof c.localId !== "string" || !c.localId) continue;
+      const name = c.name?.trim();
+      if (!name) continue;
+
+      const existing = await prisma.collection.findUnique({ where: { userId_name: { userId, name } } });
+      if (existing) {
+        localCollectionIdToServerId.set(c.localId, existing.id);
+        skippedCollections++;
+        continue;
+      }
+
+      const created = await prisma.collection.create({ data: { userId, name, color: c.color ?? null } });
+      localCollectionIdToServerId.set(c.localId, created.id);
+      importedCollections++;
+    }
+
+    for (const link of articleCollections) {
+      const articleId = localIdToServerId.get(link.localArticleId);
+      const collectionId = localCollectionIdToServerId.get(link.localCollectionId);
+      if (!articleId || !collectionId) continue;
+      await prisma.articleCollection.upsert({
+        where: { articleId_collectionId: { articleId, collectionId } },
+        create: { articleId, collectionId },
+        update: {},
+      });
+    }
+
+    const body: ImportResponse = {
+      importedArticles,
+      skippedArticles,
+      importedHighlights,
+      importedCollections,
+      skippedCollections,
+    };
     return reply.send(body);
   });
 }

@@ -43,13 +43,28 @@ export interface ImportHighlight {
   noteText: string | null;
 }
 
+export interface ImportCollection {
+  localId: string;
+  name: string;
+  color: string | null;
+}
+
+export interface ImportArticleCollection {
+  localArticleId: string;
+  localCollectionId: string;
+}
+
 export interface ImportRequest {
   articles: ImportArticle[];
   highlights: ImportHighlight[];
+  collections: ImportCollection[];
+  articleCollections: ImportArticleCollection[];
 }
 
 export interface ImportResponse {
   importedArticles: number;
   skippedArticles: number; // already existed server-side (same URL) -- highlights still attach to those
   importedHighlights: number;
+  importedCollections: number;
+  skippedCollections: number; // already existed server-side (same name)
 }

@@ -156,6 +156,33 @@ export function IconInbox(props: IconProps) {
   );
 }
 
+export function IconFolder(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path
+        d="M3 5.5a1 1 0 0 1 1-1h3.8l1.4 1.6H16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5.5Z"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function IconPlus(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10 4.5v11M4.5 10h11" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function IconCheck(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="m4.5 10.5 3.5 3.5 7.5-8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function IconPencil(props: IconProps) {
   return (
     <svg {...base(props)}>
