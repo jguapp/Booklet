@@ -88,6 +88,15 @@ export function IconSettings(props: IconProps) {
   );
 }
 
+export function IconSidebar(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="2.5" y="4" width="15" height="12" rx="1.5" />
+      <path d="M7.5 4v12" />
+    </svg>
+  );
+}
+
 export function IconLogout(props: IconProps) {
   return (
     <svg {...base(props)}>
