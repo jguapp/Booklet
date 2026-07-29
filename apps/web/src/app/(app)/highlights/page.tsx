@@ -64,34 +64,34 @@ export default function HighlightsPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-8 py-10">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="mb-6">
         <h1 className="font-serif text-2xl font-semibold text-ink">Highlights</h1>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative w-full max-w-[240px]">
-            <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
-            <Input
-              type="text"
-              placeholder="Search highlights, notes…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9"
-            />
-          </div>
-
-          <select
-            value={articleFilter}
-            onChange={(e) => setArticleFilter(e.target.value)}
-            className="rounded-sm border border-border bg-surface px-3 py-2 font-sans text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            <option value="ALL">All articles</option>
-            {articles.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.title ?? "Untitled"}
-              </option>
-            ))}
-          </select>
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <div className="relative w-full max-w-[280px]">
+          <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
+          <Input
+            type="text"
+            placeholder="Search highlights, notes…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9"
+          />
         </div>
+
+        <select
+          value={articleFilter}
+          onChange={(e) => setArticleFilter(e.target.value)}
+          className="rounded-sm border border-border bg-surface px-3 py-2 font-sans text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <option value="ALL">All articles</option>
+          {articles.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.title ?? "Untitled"}
+            </option>
+          ))}
+        </select>
       </div>
 
       {visible.length === 0 ? (
