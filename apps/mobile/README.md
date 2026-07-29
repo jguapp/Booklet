@@ -17,11 +17,22 @@ Logging in migrates whatever's saved locally onto the account via the same
 (`src/lib/data/sync.ts`) -- mobile just never sends `collections`, since
 there's no collections UI here yet.
 
-Read-only reader -- no highlighting. The web app's highlighting is built on
-the browser's Selection/Range APIs (`lib/reader/dom-range.ts`), which don't
-exist in React Native; a mobile equivalent needs a native text-selection
-approach, not a port of that code. (`localHighlights` already exists in the
-local storage layer, ready for whenever that lands.)
+**Highlighting** -- but through a different interaction than the web app's,
+because React Native has no single component that both reports a user's
+text selection *and* renders per-substring styling the way a browser's
+Selection/Range API + styled `<mark>` elements do. `Text` renders rich
+nested styling but exposes no selection events; `TextInput` is the only
+component with `onSelectionChange`, but can't mix styled runs into its
+value. `ArticleScreen` toggles between the two: a "Select text" mode swaps
+in a plain, edit-blocked `TextInput` (`value` stays bound to the article's
+text and `onChangeText` is a no-op, so nothing can actually be typed; a
+software keyboard is suppressed via `showSoftInputOnFocus={false}`) to
+capture a selection range, then a color swatch bar creates the highlight
+and switches back to a `Text` tree with the highlighted run rendered as a
+styled nested `Text`. Anchoring reuses `computeTextPosition` from
+`@booklet/shared` unchanged -- it's already just plain-text-offset based,
+the same one the web app uses for HTML articles, and mobile only ever
+highlights `extractedText`, never a PDF/EPUB position.
 
 No navigation library -- a handful of screens and a session check don't
 need React Navigation's setup (and its native-linking config) for an app
@@ -42,12 +53,22 @@ which aliases the host machine) by default -- see `src/lib/config.ts`.
 ## Verified, and what wasn't
 
 The web target now actually runs, end to end -- confirmed with Playwright
-against the real dev API, both ways: (a) sign up, log in, land on the
-Library, save a URL with real extraction, see it listed, and (b) continue
-without an account, save a URL into AsyncStorage, then log in and confirm
-the same article survives the migration into the account -- the local/
-account boundary this app shares with the web app, actually exercised end
-to end, not just typechecked. `tsc --noEmit` is clean across the whole app.
+against the real dev API: (a) sign up, log in, land on the Library, save a
+URL with real extraction, see it listed; (b) continue without an account,
+save a URL into AsyncStorage, then log in and confirm the same article
+survives the migration into the account; and (c) select a text range in an
+article (simulating a real drag-select via the underlying `<textarea>`
+react-native-web renders a multiline `TextInput` as), create a highlight,
+confirm it persists across a reload, and confirm the highlight's `onPress`
+handler fires correctly with the right id when tapped (proven by a
+temporary `console.log`, since the actual removal it triggers goes through
+`Alert.alert`, and react-native-web's `Alert.alert` is a hard no-op --
+`static alert() {}` in `node_modules/react-native-web/src/exports/Alert` --
+so confirm-and-remove itself couldn't be exercised on this target. Real
+iOS/Android has a fully working native `Alert.alert`; this is a gap in the
+web target used for development convenience, not in the removal code
+itself, but it should be the first thing re-checked on a real device.
+`tsc --noEmit` is clean across the whole app.
 
 Getting there took two separate fixes for pnpm + Metro/React Native
 friction, both now permanent parts of this repo rather than "whoever picks

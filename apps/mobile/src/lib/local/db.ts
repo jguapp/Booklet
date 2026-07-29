@@ -13,6 +13,14 @@ import type { Article, Highlight } from "@booklet/shared";
 const ARTICLES_KEY = "booklet_local_articles";
 const HIGHLIGHTS_KEY = "booklet_local_highlights";
 
+// Hermes (React Native's JS engine) doesn't implement crypto.randomUUID()
+// without an extra native module (expo-crypto) -- not worth a new
+// dependency just for locally-scoped ids that are never treated as
+// server-issued UUIDs.
+export function generateLocalId(): string {
+  return `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 async function readMap<T>(key: string): Promise<Record<string, T>> {
   const raw = await AsyncStorage.getItem(key);
   if (!raw) return {};
