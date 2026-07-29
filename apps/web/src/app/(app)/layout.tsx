@@ -16,6 +16,7 @@ import {
   IconStar,
   IconStats,
   IconTrash,
+  IconUpload,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth/auth-provider";
@@ -42,6 +43,7 @@ const BASE_NAV_ITEMS = [
 const STATS_NAV_ITEM = { href: "/stats", label: "Stats", Icon: IconStats };
 const TAIL_NAV_ITEMS = [
   { href: "/trash", label: "Trash", Icon: IconTrash },
+  { href: "/import-export", label: "Import & Export", Icon: IconUpload },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
 
