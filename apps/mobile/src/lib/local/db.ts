@@ -1,0 +1,72 @@
+/**
+ * AsyncStorage-backed local storage for articles and highlights -- the
+ * mobile equivalent of the web app's lib/local/db.ts (IndexedDB). Same
+ * principle: this is what makes the app usable without an account, and
+ * stays the source of truth for anyone who never signs in. AsyncStorage is
+ * a flat key/value store (no indexes, no transactions), so each entity
+ * type is kept as a single JSON-encoded map of id -> record rather than
+ * IndexedDB's per-row storage.
+ */
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { Article, Highlight } from "@booklet/shared";
+
+const ARTICLES_KEY = "booklet_local_articles";
+const HIGHLIGHTS_KEY = "booklet_local_highlights";
+
+async function readMap<T>(key: string): Promise<Record<string, T>> {
+  const raw = await AsyncStorage.getItem(key);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, T>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeMap<T>(key: string, map: Record<string, T>): Promise<void> {
+  await AsyncStorage.setItem(key, JSON.stringify(map));
+}
+
+export const localArticles = {
+  async getAll(): Promise<Article[]> {
+    return Object.values(await readMap<Article>(ARTICLES_KEY));
+  },
+  async get(id: string): Promise<Article | undefined> {
+    return (await readMap<Article>(ARTICLES_KEY))[id];
+  },
+  async put(article: Article): Promise<void> {
+    const map = await readMap<Article>(ARTICLES_KEY);
+    map[article.id] = article;
+    await writeMap(ARTICLES_KEY, map);
+  },
+  async delete(id: string): Promise<void> {
+    const map = await readMap<Article>(ARTICLES_KEY);
+    delete map[id];
+    await writeMap(ARTICLES_KEY, map);
+  },
+  async clear(): Promise<void> {
+    await AsyncStorage.removeItem(ARTICLES_KEY);
+  },
+};
+
+export const localHighlights = {
+  async getAll(): Promise<Highlight[]> {
+    return Object.values(await readMap<Highlight>(HIGHLIGHTS_KEY));
+  },
+  async getForArticle(articleId: string): Promise<Highlight[]> {
+    return (await this.getAll()).filter((h) => h.articleId === articleId);
+  },
+  async put(highlight: Highlight): Promise<void> {
+    const map = await readMap<Highlight>(HIGHLIGHTS_KEY);
+    map[highlight.id] = highlight;
+    await writeMap(HIGHLIGHTS_KEY, map);
+  },
+  async delete(id: string): Promise<void> {
+    const map = await readMap<Highlight>(HIGHLIGHTS_KEY);
+    delete map[id];
+    await writeMap(HIGHLIGHTS_KEY, map);
+  },
+  async clear(): Promise<void> {
+    await AsyncStorage.removeItem(HIGHLIGHTS_KEY);
+  },
+};

@@ -10,14 +10,16 @@ import {
   View,
 } from "react-native";
 import type { Article } from "@booklet/shared";
-import { ApiError, clearSession, loadArticles, saveArticleFromUrl } from "../lib/api";
+import { clearSession } from "../lib/api";
+import { ApiError, loadArticles, saveArticleFromUrl } from "../lib/data/articles";
 
 interface LibraryScreenProps {
+  authenticated: boolean;
   onOpenArticle: (id: string) => void;
-  onLoggedOut: () => void;
+  onSignedOut: () => void;
 }
 
-export function LibraryScreen({ onOpenArticle, onLoggedOut }: LibraryScreenProps) {
+export function LibraryScreen({ authenticated, onOpenArticle, onSignedOut }: LibraryScreenProps) {
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -27,13 +29,14 @@ export function LibraryScreen({ onOpenArticle, onLoggedOut }: LibraryScreenProps
 
   const refresh = useCallback(async () => {
     try {
-      setArticles(await loadArticles());
+      setArticles(await loadArticles(authenticated));
     } catch {
       // best-effort -- keep whatever was already loaded
     }
-  }, []);
+  }, [authenticated]);
 
   useEffect(() => {
+    setLoading(true);
     refresh().finally(() => setLoading(false));
   }, [refresh]);
 
@@ -42,7 +45,7 @@ export function LibraryScreen({ onOpenArticle, onLoggedOut }: LibraryScreenProps
     setSaving(true);
     setError(null);
     try {
-      const article = await saveArticleFromUrl(url.trim());
+      const article = await saveArticleFromUrl(url.trim(), authenticated);
       setArticles((prev) => [article, ...prev]);
       setUrl("");
     } catch (err) {
@@ -52,9 +55,9 @@ export function LibraryScreen({ onOpenArticle, onLoggedOut }: LibraryScreenProps
     }
   }
 
-  async function handleLogout() {
-    await clearSession();
-    onLoggedOut();
+  async function handleAccountAction() {
+    if (authenticated) await clearSession();
+    onSignedOut();
   }
 
   if (loading) {
@@ -69,8 +72,8 @@ export function LibraryScreen({ onOpenArticle, onLoggedOut }: LibraryScreenProps
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Library</Text>
-        <TouchableOpacity onPress={handleLogout}>
-          <Text style={styles.logout}>Log out</Text>
+        <TouchableOpacity onPress={handleAccountAction}>
+          <Text style={styles.logout}>{authenticated ? "Log out" : "Log in to sync"}</Text>
         </TouchableOpacity>
       </View>
 

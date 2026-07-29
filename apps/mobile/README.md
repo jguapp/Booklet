@@ -1,25 +1,31 @@
 # Booklet mobile app
 
-An Expo/React Native scaffold: log in, see your library, save a URL, read
-an article's extracted text. Reuses the same API and `@booklet/shared`
-types as the web app, per the README roadmap's "reusing the same API and
-data model rather than a rewrite."
+An Expo/React Native app: continue without an account or log in, see your
+library, save a URL, read an article's extracted text. Reuses the same API
+and `@booklet/shared` types as the web app, per the README roadmap's
+"reusing the same API and data model rather than a rewrite."
 
-## Scope of this scaffold
+## Scope
 
-Authenticated only, same reasoning as the browser extension -- no
-IndexedDB-equivalent local-first layer on mobile yet (that'd mean building
-a whole separate offline storage story on `expo-sqlite` or similar, a real
-project of its own, not a scaffold-stage add-on).
+**Local-first, like the web app.** `src/lib/local/db.ts` is an
+AsyncStorage-backed equivalent of the web app's IndexedDB layer (`Article`s
+and `Highlight`s as JSON, keyed by id -- AsyncStorage is a flat key/value
+store, so no real indexes the way IndexedDB has), and `src/lib/data/*.ts`
+is the same local-vs-API repository-pattern swap point the web app uses.
+Logging in migrates whatever's saved locally onto the account via the same
+`POST /api/sync/import` endpoint the web app's migration uses
+(`src/lib/data/sync.ts`) -- mobile just never sends `collections`, since
+there's no collections UI here yet.
 
 Read-only reader -- no highlighting. The web app's highlighting is built on
 the browser's Selection/Range APIs (`lib/reader/dom-range.ts`), which don't
 exist in React Native; a mobile equivalent needs a native text-selection
-approach, not a port of that code.
+approach, not a port of that code. (`localHighlights` already exists in the
+local storage layer, ready for whenever that lands.)
 
-No navigation library -- three screens and a session check don't need React
-Navigation's setup (and its native-linking config) for a scaffold this
-size. Worth adding once there's more than three screens.
+No navigation library -- a handful of screens and a session check don't
+need React Navigation's setup (and its native-linking config) for an app
+this size. Worth adding once there's meaningfully more than this.
 
 ## Develop
 
@@ -36,9 +42,12 @@ which aliases the host machine) by default -- see `src/lib/config.ts`.
 ## Verified, and what wasn't
 
 The web target now actually runs, end to end -- confirmed with Playwright
-against the real dev API: sign up, log in, land on the Library, save a URL
-(real extraction, not a stub), and see it listed. `tsc --noEmit` is clean
-across the whole app.
+against the real dev API, both ways: (a) sign up, log in, land on the
+Library, save a URL with real extraction, see it listed, and (b) continue
+without an account, save a URL into AsyncStorage, then log in and confirm
+the same article survives the migration into the account -- the local/
+account boundary this app shares with the web app, actually exercised end
+to end, not just typechecked. `tsc --noEmit` is clean across the whole app.
 
 Getting there took two separate fixes for pnpm + Metro/React Native
 friction, both now permanent parts of this repo rather than "whoever picks
