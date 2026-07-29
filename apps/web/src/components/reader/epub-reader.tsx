@@ -111,6 +111,20 @@ export function EpubReader({
     let cancelled = false;
     setLoadError(null);
 
+    // Whether book.locations.generate() (below) has finished -- percentage
+    // is meaningless before that, but it's *also* exactly 0 for a real,
+    // ready position near the start of a short book/chapter, so it can't be
+    // used as its own readiness signal (that's what silently dropped
+    // progress here: relocating to chapter two of a short book still
+    // reports percentage 0, indistinguishable from "not ready yet").
+    let locationsReady = false;
+    // The cfi of the most recent relocate, tracked regardless of readiness,
+    // so a relocate that lands while generate() is still running isn't lost
+    // -- once ready, its percentage gets computed from here instead of from
+    // a live currentLocation() query (which raced the manager's own
+    // still-settling state and read stale results some of the time).
+    let lastKnownCfi: string | null = null;
+
     async function open() {
       try {
         const data = await fileBlob.arrayBuffer();
@@ -135,12 +149,10 @@ export function EpubReader({
 
         r.on(
           "relocated",
-          (location: { start: { displayed: { page: number; total: number }; percentage: number } }) => {
+          (location: { start: { cfi: string; displayed: { page: number; total: number }; percentage: number } }) => {
             setLocationLabel(`Page ${location.start.displayed.page} of ${location.start.displayed.total}`);
-            // 0 until book.locations.generate() (kicked off below) finishes --
-            // harmless: it just means progress isn't reported for the first
-            // few relocations on a book that hasn't been opened before.
-            if (location.start.percentage > 0) onProgressChangeRef.current(location.start.percentage);
+            lastKnownCfi = location.start.cfi;
+            if (locationsReady) onProgressChangeRef.current(location.start.percentage);
           },
         );
 
@@ -153,6 +165,21 @@ export function EpubReader({
         // after display() rather than blocking the reader on it.
         await book.locations.generate(1024);
         if (cancelled) return;
+        locationsReady = true;
+
+        // A relocate (e.g. the reader clicking Next) that lands while
+        // generate() above is still running arrives with locationsReady
+        // still false, so the relocated handler drops it -- correctly,
+        // since percentage is meaningless before locations exist, but
+        // nothing re-fires it once ready either, so that position would
+        // otherwise be lost for good. Catch up using whatever cfi the last
+        // relocate actually reported, now that it can be turned into a
+        // percentage.
+        if (lastKnownCfi) {
+          const pct = book.locations.percentageFromCfi(lastKnownCfi);
+          if (typeof pct === "number" && pct >= 0) onProgressChangeRef.current(pct);
+        }
+
         const resumeAt = initialProgressRef.current;
         if (resumeAt > 0) {
           const cfi = book.locations.cfiFromPercentage(resumeAt);
