@@ -1,6 +1,15 @@
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
+  // Without these, the generated client's *own* internal relative imports
+  // (e.g. "./internal/class") come out extension-less -- fine for tsc's
+  // Bundler moduleResolution (which this project otherwise wants, since dev
+  // runs on tsx), but plain `node dist/index.js` in production requires an
+  // explicit extension on every relative ESM import and fails to start
+  // without one. Forcing .js here makes the generated *source* already
+  // correct, so tsc's compiled output is too.
+  moduleFormat         = "esm"
+  importFileExtension  = "js"
 }
 
 datasource db {

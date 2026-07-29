@@ -3,11 +3,19 @@
 #
 # Uses Next's "standalone" output (see next.config.ts) -- a self-contained
 # server bundle, so the runtime image doesn't need the full node_modules
-# tree. Verified locally that `next build` actually produces the file
-# layout this Dockerfile assumes (apps/web/Dockerfile's COPY paths were
-# written by inspecting a real `.next/standalone` build, not guessed) --
-# building the *image* itself is unverified, no Docker in the environment
-# this was written in.
+# tree. Verified locally (twice now, across two different sessions) that
+# `next build` actually produces the file layout this Dockerfile assumes --
+# apps/web/Dockerfile's COPY paths were written by inspecting a real
+# `.next/standalone` build, not guessed -- including that server.js ends up
+# at exactly the path CMD expects and that .next/static and public/ really
+# are missing from standalone/ and need their own COPY (both easy to get
+# wrong, since standalone's whole point is *not* needing most of what a
+# normal build produces). The `docker build`/`docker run` commands
+# themselves are still unverified in this environment specifically (Docker
+# Desktop installed but its daemon needs WSL2, which isn't -- installing it
+# needs a restart, out of scope to do unilaterally); see
+# .github/workflows/ci.yml's docker-build job for that verification
+# instead, which does run on a real runner.
 #
 # NEXT_PUBLIC_API_URL is baked in at build time (Next.js inlines
 # NEXT_PUBLIC_* vars into the client bundle) -- pass it as a build arg

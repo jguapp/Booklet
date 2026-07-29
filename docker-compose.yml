@@ -4,11 +4,15 @@
 # for testing the images themselves, and as a starting point for whatever
 # orchestration you actually deploy with.
 #
-# Unverified: no Docker available in the environment this was written in,
-# so `docker compose up --build` here has not actually been run. The
-# Dockerfiles it references were reasoned through carefully (the web one
-# against a real `next build` output layout) but neither has been build-
-# tested.
+# `docker compose up --build` itself is still unverified in this specific
+# environment (Docker Desktop installed but its daemon needs WSL2, which
+# isn't -- installing it needs a restart, out of scope to do unilaterally).
+# What is verified: apps/api/Dockerfile's actual build+run path (see that
+# file's own header comment) directly, by running the equivalent commands
+# without Docker in between; and both Dockerfiles building, plus the api
+# image actually booting against a real Postgres and answering a request,
+# in .github/workflows/ci.yml's docker-build job, which runs on a real
+# GitHub Actions runner.
 #
 #   cp apps/api/.env.example apps/api/.env.docker   # fill in JWT_ACCESS_SECRET etc.
 #   docker compose up --build
@@ -40,10 +44,15 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/booklet?schema=public
       PORT: "4000"
       WEB_ORIGIN: http://localhost:3000
+      API_ORIGIN: http://localhost:4000
       NODE_ENV: production
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set a real secret -- see .env.example}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
