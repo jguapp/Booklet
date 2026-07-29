@@ -11,9 +11,11 @@ import { emailDigest, loadCurrentDigest } from "@/lib/data/digests";
 import { loadHighlights as loadLocalHighlights } from "@/lib/data/highlights";
 import { loadUserSettings } from "@/lib/mock/store";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { useToast } from "@/lib/toast/toast-provider";
 
 export default function ResurfacePage() {
   const { status, isAuthenticated } = useAuth();
+  const { toast } = useToast();
   const [articles, setArticles] = useState<Article[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
@@ -106,6 +108,17 @@ export default function ResurfacePage() {
     );
     setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
     setReviewedIds((prev) => new Set(prev).add(highlightId));
+
+    // The card just disappeared from the batch -- say where it went instead
+    // of leaving that unexplained. sm2.intervalDays is the real computed
+    // interval (SM-2 always resets a "forgot" to exactly 1 day), not a guess.
+    if (feedback === "REMEMBERED" && sm2) {
+      toast(`Nice — you'll see this again in ${sm2.intervalDays} day${sm2.intervalDays === 1 ? "" : "s"}.`);
+    } else if (feedback === "FORGOT" && sm2) {
+      toast("No worries — you'll see this again tomorrow.");
+    } else if (archive) {
+      toast("Archived — it won't resurface again.");
+    }
   }
 
   async function handleEmailDigest() {

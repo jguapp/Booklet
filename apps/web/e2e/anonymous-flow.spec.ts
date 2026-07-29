@@ -107,3 +107,40 @@ test("Daily Review shows the empty state when nothing is eligible yet", async ({
   await page.goto("/resurface");
   await expect(page.getByRole("heading", { name: /daily review/i })).toBeVisible();
 });
+
+test("Daily Review shows a toast explaining what happens after Remembered/Forgot/Archive", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("button", { name: /save article/i }).click();
+  await page.getByPlaceholder(/example\.com/).fill(TEST_ARTICLE_URL);
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await waitForSaveModalToClose(page);
+
+  await page.locator("a[href^='/reader/']").first().click();
+  await expect(page).toHaveURL(/\/reader\//);
+
+  const paragraph = page.locator("[data-article-content] p").first();
+  await expect(paragraph).toBeVisible({ timeout: 10_000 });
+  await paragraph.evaluate((el) => {
+    const textNode = el.firstChild;
+    if (!textNode) throw new Error("paragraph has no text node");
+    const range = document.createRange();
+    const length = Math.min(12, textNode.textContent?.length ?? 0);
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  const yellowSwatch = page.getByTitle("Yellow");
+  await expect(yellowSwatch).toBeVisible({ timeout: 5_000 });
+  await yellowSwatch.click();
+
+  // A highlight with no review history yet (nextDueAt: null) is due
+  // immediately -- no need to fast-forward any clock to see it in today's batch.
+  await page.goto("/resurface");
+  await expect(page.getByRole("button", { name: "Remembered this" })).toBeVisible({ timeout: 5_000 });
+  await page.getByRole("button", { name: "Remembered this" }).click();
+
+  await expect(page.getByRole("status")).toContainText(/you'll see this again in \d+ days?/i);
+});

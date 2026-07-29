@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Literata, Work_Sans } from "next/font/google";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 import { AuthProvider } from "@/lib/auth/auth-provider";
+import { ToastProvider } from "@/lib/toast/toast-provider";
 import { ErrorMonitoringInit } from "@/lib/error-monitoring-init";
 import "./globals.css";
 
@@ -62,7 +63,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <ErrorMonitoringInit />
         <ThemeProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            <ToastProvider>{children}</ToastProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>
