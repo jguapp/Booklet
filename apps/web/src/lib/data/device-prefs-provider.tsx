@@ -7,6 +7,7 @@ import { loadHoardingPrefs, saveHoardingPrefs, type HoardingPrefs } from "./hoar
 import { loadShowReadingStats, saveShowReadingStats } from "./stats-prefs";
 import { loadAutoDeletePrefs, saveAutoDeletePrefs, type AutoDeletePrefs } from "./auto-delete-prefs";
 import { loadNavOrder, saveNavOrder } from "./nav-order-prefs";
+import { loadSidebarCompact, saveSidebarCompact } from "./sidebar-prefs";
 
 /**
  * Every device-local (not account-synced) preference in one place, reactive
@@ -27,6 +28,7 @@ interface DevicePrefsState {
   showReadingStats: boolean;
   autoDelete: AutoDeletePrefs;
   navOrder: string[];
+  sidebarCompact: boolean;
 }
 
 interface DevicePrefsContextValue extends DevicePrefsState {
@@ -36,6 +38,7 @@ interface DevicePrefsContextValue extends DevicePrefsState {
   setShowReadingStats: (enabled: boolean) => void;
   setAutoDelete: (prefs: AutoDeletePrefs) => void;
   setNavOrder: (order: string[]) => void;
+  setSidebarCompact: (compact: boolean) => void;
 }
 
 const DevicePrefsContext = createContext<DevicePrefsContextValue | null>(null);
@@ -50,6 +53,7 @@ const SERVER_DEFAULTS: DevicePrefsState = {
   showReadingStats: false,
   autoDelete: { enabled: false, days: 90 },
   navOrder: [],
+  sidebarCompact: false,
 };
 
 export function DevicePrefsProvider({ children }: { children: React.ReactNode }) {
@@ -63,6 +67,7 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
         showReadingStats: loadShowReadingStats(),
         autoDelete: loadAutoDeletePrefs(),
         navOrder: loadNavOrder(),
+        sidebarCompact: loadSidebarCompact(),
       });
     }
     syncFromStorage();
@@ -104,9 +109,23 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
     setState((prev) => ({ ...prev, navOrder: order }));
   }, []);
 
+  const setSidebarCompact = useCallback((compact: boolean) => {
+    saveSidebarCompact(compact);
+    setState((prev) => ({ ...prev, sidebarCompact: compact }));
+  }, []);
+
   return (
     <DevicePrefsContext.Provider
-      value={{ ...state, setReaderSize, setTtsRate, setHoarding, setShowReadingStats, setAutoDelete, setNavOrder }}
+      value={{
+        ...state,
+        setReaderSize,
+        setTtsRate,
+        setHoarding,
+        setShowReadingStats,
+        setAutoDelete,
+        setNavOrder,
+        setSidebarCompact,
+      }}
     >
       {children}
     </DevicePrefsContext.Provider>

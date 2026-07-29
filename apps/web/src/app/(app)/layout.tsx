@@ -13,6 +13,7 @@ import {
   IconResurface,
   IconRss,
   IconSettings,
+  IconSidebar,
   IconStar,
   IconStats,
   IconTrash,
@@ -68,7 +69,12 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const { showReadingStats, autoDelete, navOrder, setNavOrder } = useDevicePrefs();
+  const { showReadingStats, autoDelete, navOrder, setNavOrder, sidebarCompact, setSidebarCompact } = useDevicePrefs();
+  const [sidebarHovered, setSidebarHovered] = useState(false);
+  // In compact mode the rail itself stays narrow (so the layout never
+  // reflows) and an overlay pops out on hover -- content is only "full" when
+  // not compact, or compact-but-hovered.
+  const sidebarExpanded = !sidebarCompact || sidebarHovered;
 
   const navItems = applyNavOrder(
     showReadingStats ? [...BASE_NAV_ITEMS, STATS_NAV_ITEM, ...TAIL_NAV_ITEMS] : [...BASE_NAV_ITEMS, ...TAIL_NAV_ITEMS],
@@ -207,174 +213,213 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
-        <div className="flex items-center gap-2 px-5 py-6">
-          <BookletLogo className="mt-1.5" />
-          <Link href="/library" className="font-serif text-xl font-semibold text-ink">
-            Booklet
-          </Link>
-        </div>
-
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
-          {navItems.map(({ href, label, Icon }) => {
-            const active = (pathname === href || pathname?.startsWith(`${href}/`)) && !activeCollectionId;
-            const isTrash = href === "/trash";
-            return (
-              <Link
-                key={href}
-                href={href}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData(NAV_DRAG_MIME, href);
-                  e.dataTransfer.effectAllowed = "move";
-                }}
-                onDragOver={(e) => handleNavDragOver(e, isTrash)}
-                onDragEnter={() => {
-                  if (isTrash) setDragOverTrash(true);
-                  setDragOverHref(href);
-                }}
-                onDragLeave={() => {
-                  if (isTrash) setDragOverTrash(false);
-                  setDragOverHref((prev) => (prev === href ? null : prev));
-                }}
-                onDrop={(e) => handleNavDrop(e, href, isTrash)}
-                className={cn(
-                  "flex items-center gap-2.5 rounded-sm px-3 py-2 font-sans text-sm font-medium transition-colors",
-                  active ? "bg-surface-2 text-accent" : "text-ink-muted hover:bg-surface-2 hover:text-ink",
-                  isTrash && dragOverTrash
-                    ? "bg-red-500/15 text-red-500 ring-2 ring-red-500/40"
-                    : dragOverHref === href && "ring-2 ring-accent/40",
-                )}
-              >
-                <Icon className="h-[18px] w-[18px]" />
-                {label}
-              </Link>
-            );
-          })}
-
-          <div className="mt-6 flex items-center justify-between px-3">
-            <span className="font-sans text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-              Collections
-            </span>
-            <button
-              type="button"
-              title="New collection"
-              onClick={() => setCreating((v) => !v)}
-              className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
-            >
-              <IconPlus className="h-3 w-3" />
-            </button>
-          </div>
-
-          {creating && (
-            <form onSubmit={handleCreateCollection} className="px-3 py-1">
-              <input
-                autoFocus
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onBlur={() => !newName && setCreating(false)}
-                placeholder="Collection name"
-                className="w-full rounded-sm border border-border bg-paper px-2 py-1 font-sans text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              />
-            </form>
+      <aside className={cn("relative shrink-0", sidebarCompact ? "w-14" : "w-60 border-r border-border")}>
+        <div
+          onMouseEnter={() => sidebarCompact && setSidebarHovered(true)}
+          onMouseLeave={() => sidebarCompact && setSidebarHovered(false)}
+          className={cn(
+            "flex h-full flex-col bg-surface",
+            sidebarCompact
+              ? cn(
+                  "absolute inset-y-0 left-0 z-30 overflow-hidden border-r border-border transition-[width] duration-150",
+                  sidebarExpanded ? "w-60 shadow-xl" : "w-14",
+                )
+              : "w-60",
           )}
-
-          {collections.map((c) =>
-            editingId === c.id ? (
-              <form key={c.id} onSubmit={(e) => handleRename(e, c.id)} className="px-3 py-1">
-                <input
-                  autoFocus
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onBlur={() => setEditingId(null)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") setEditingId(null);
-                  }}
-                  className="w-full rounded-sm border border-border bg-paper px-2 py-1 font-sans text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                />
-              </form>
-            ) : (
-              <Link
-                key={c.id}
-                href={`/library?collection=${c.id}`}
-                className={cn(
-                  "group flex items-center gap-2.5 rounded-sm px-3 py-1.5 font-sans text-sm transition-colors",
-                  activeCollectionId === c.id
-                    ? "bg-surface-2 text-accent"
-                    : "text-ink-muted hover:bg-surface-2 hover:text-ink",
-                )}
-              >
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: c.color ?? "var(--color-ink-faint)" }}
-                  aria-hidden
-                />
-                <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                {typeof c.articleCount === "number" && (
-                  <span className="shrink-0 font-sans text-xs text-ink-faint">{c.articleCount}</span>
-                )}
-                <span className="flex shrink-0 items-center gap-0.5">
-                  <button
-                    type="button"
-                    title="Rename collection"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      startRename(c);
-                    }}
-                    className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
-                  >
-                    <IconPencil className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Delete collection"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleDeleteCollection(c);
-                    }}
-                    className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
-                  >
-                    <IconTrash className="h-3 w-3" />
-                  </button>
-                </span>
+        >
+          <div className={cn("flex items-center gap-2 py-6", sidebarExpanded ? "px-5" : "justify-center px-2")}>
+            <BookletLogo className="mt-1.5 shrink-0" />
+            {sidebarExpanded && (
+              <Link href="/library" className="whitespace-nowrap font-serif text-xl font-semibold text-ink">
+                Booklet
               </Link>
-            ),
-          )}
-        </nav>
-
-        <div className="border-t border-border px-3 py-4">
-          {status === "authenticated" && user ? (
-            <div className="flex items-center justify-between gap-2 rounded-sm px-3 py-2">
-              <div className="min-w-0">
-                <div className="truncate font-sans text-sm font-medium text-ink">
-                  {user.name ?? user.email}
-                </div>
-                <div className="truncate font-sans text-xs text-ink-faint">{user.email}</div>
-              </div>
+            )}
+            {sidebarExpanded && (
               <button
                 type="button"
-                onClick={handleLogout}
-                title="Log out"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                title={sidebarCompact ? "Keep the sidebar open" : "Auto-hide the sidebar on hover"}
+                onClick={() => setSidebarCompact(!sidebarCompact)}
+                className={cn(
+                  "ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-2 hover:text-ink",
+                  sidebarCompact ? "text-accent" : "text-ink-faint",
+                )}
               >
-                <IconLogout className="h-4 w-4" />
+                <IconSidebar className="h-4 w-4" />
               </button>
-            </div>
-          ) : (
-            <Link
-              href="/signup"
-              className="block rounded-sm px-3 py-2 font-sans text-xs text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
-            >
-              Saved locally on this device.
-              <span className="block font-medium text-accent">Sync across devices →</span>
-            </Link>
-          )}
-        </div>
+            )}
+          </div>
 
-        <div className="flex justify-center border-t border-border px-5 py-3">
-          <ThemeSwitcher />
+          <nav className="flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-3">
+            {navItems.map(({ href, label, Icon }) => {
+              const active = (pathname === href || pathname?.startsWith(`${href}/`)) && !activeCollectionId;
+              const isTrash = href === "/trash";
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  title={sidebarExpanded ? undefined : label}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData(NAV_DRAG_MIME, href);
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragOver={(e) => handleNavDragOver(e, isTrash)}
+                  onDragEnter={() => {
+                    if (isTrash) setDragOverTrash(true);
+                    setDragOverHref(href);
+                  }}
+                  onDragLeave={() => {
+                    if (isTrash) setDragOverTrash(false);
+                    setDragOverHref((prev) => (prev === href ? null : prev));
+                  }}
+                  onDrop={(e) => handleNavDrop(e, href, isTrash)}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-sm px-3 py-2 font-sans text-sm font-medium transition-colors",
+                    !sidebarExpanded && "justify-center px-0",
+                    active ? "bg-surface-2 text-accent" : "text-ink-muted hover:bg-surface-2 hover:text-ink",
+                    isTrash && dragOverTrash
+                      ? "bg-red-500/15 text-red-500 ring-2 ring-red-500/40"
+                      : dragOverHref === href && "ring-2 ring-accent/40",
+                  )}
+                >
+                  <Icon className="h-[18px] w-[18px] shrink-0" />
+                  {sidebarExpanded && <span className="truncate">{label}</span>}
+                </Link>
+              );
+            })}
+
+            {sidebarExpanded && (
+              <>
+                <div className="mt-6 flex items-center justify-between px-3">
+                  <span className="font-sans text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                    Collections
+                  </span>
+                  <button
+                    type="button"
+                    title="New collection"
+                    onClick={() => setCreating((v) => !v)}
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
+                  >
+                    <IconPlus className="h-3 w-3" />
+                  </button>
+                </div>
+
+                {creating && (
+                  <form onSubmit={handleCreateCollection} className="px-3 py-1">
+                    <input
+                      autoFocus
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      onBlur={() => !newName && setCreating(false)}
+                      placeholder="Collection name"
+                      className="w-full rounded-sm border border-border bg-paper px-2 py-1 font-sans text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    />
+                  </form>
+                )}
+
+                {collections.map((c) =>
+                  editingId === c.id ? (
+                    <form key={c.id} onSubmit={(e) => handleRename(e, c.id)} className="px-3 py-1">
+                      <input
+                        autoFocus
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onBlur={() => setEditingId(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        className="w-full rounded-sm border border-border bg-paper px-2 py-1 font-sans text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      />
+                    </form>
+                  ) : (
+                    <Link
+                      key={c.id}
+                      href={`/library?collection=${c.id}`}
+                      className={cn(
+                        "group flex items-center gap-2.5 rounded-sm px-3 py-1.5 font-sans text-sm transition-colors",
+                        activeCollectionId === c.id
+                          ? "bg-surface-2 text-accent"
+                          : "text-ink-muted hover:bg-surface-2 hover:text-ink",
+                      )}
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: c.color ?? "var(--color-ink-faint)" }}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                      {typeof c.articleCount === "number" && (
+                        <span className="shrink-0 font-sans text-xs text-ink-faint">{c.articleCount}</span>
+                      )}
+                      <span className="flex shrink-0 items-center gap-0.5">
+                        <button
+                          type="button"
+                          title="Rename collection"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            startRename(c);
+                          }}
+                          className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
+                        >
+                          <IconPencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Delete collection"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleDeleteCollection(c);
+                          }}
+                          className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
+                        >
+                          <IconTrash className="h-3 w-3" />
+                        </button>
+                      </span>
+                    </Link>
+                  ),
+                )}
+              </>
+            )}
+          </nav>
+
+          {sidebarExpanded && (
+            <>
+              <div className="border-t border-border px-3 py-4">
+                {status === "authenticated" && user ? (
+                  <div className="flex items-center justify-between gap-2 rounded-sm px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="truncate font-sans text-sm font-medium text-ink">
+                        {user.name ?? user.email}
+                      </div>
+                      <div className="truncate font-sans text-xs text-ink-faint">{user.email}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      title="Log out"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                    >
+                      <IconLogout className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <Link
+                    href="/signup"
+                    className="block rounded-sm px-3 py-2 font-sans text-xs text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
+                  >
+                    Saved locally on this device.
+                    <span className="block font-medium text-accent">Sync across devices →</span>
+                  </Link>
+                )}
+              </div>
+
+              <div className="flex justify-center border-t border-border px-5 py-3">
+                <ThemeSwitcher />
+              </div>
+            </>
+          )}
         </div>
       </aside>
 
