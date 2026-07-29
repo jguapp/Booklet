@@ -27,6 +27,7 @@ const STATUS_TABS: { value: ArticleStatus; label: string }[] = [
 
 const PROGRESS_SAVE_INTERVAL_MS = 4000;
 const PROGRESS_CHANGE_THRESHOLD = 0.01; // don't write on every hair's-width of scroll
+const AUTO_READ_PROGRESS_THRESHOLD = 0.98; // PDF hits exactly 1 on its last page; HTML scroll and EPUB locations can fall just short
 
 export function ReaderView({ articleId }: { articleId: string }) {
   const { theme, setTheme } = useTheme();
@@ -62,18 +63,30 @@ export function ReaderView({ articleId }: { articleId: string }) {
   // (GET /api/articles/:id/file) that a plain <a href> can't send a Bearer
   // token to, so loadArticleFile fetches it as a Blob either way -- see
   // lib/data/articles.ts.
+  //
+  // Keyed on the whole `article` object, so it re-fires on *any* article
+  // update -- a tag edit, a status change -- not just an actual file change.
+  // A fresh fileBlob reference then trips PdfReader/EpubReader's own
+  // doc-loading effect (keyed on `fileBlob`), which resets back to page 1 /
+  // the first location. loadedFileKeyRef skips the refetch (and the
+  // resulting reset) unless the file identity actually changed.
+  const loadedFileKeyRef = useRef<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     let objectUrl: string | null = null;
 
     async function loadFile() {
       if (!article || (article.sourceType !== "PDF" && article.sourceType !== "EPUB")) {
+        loadedFileKeyRef.current = null;
         if (!cancelled) {
           setFileBlob(null);
           setDownloadUrl(null);
         }
         return;
       }
+      const key = `${article.id}:${article.sourceType}:${isAuthenticated}`;
+      if (key === loadedFileKeyRef.current) return;
+      loadedFileKeyRef.current = key;
       const blob = await loadArticleFile(article.id, isAuthenticated).catch(() => null);
       if (cancelled || !blob) return;
       setFileBlob(blob);
@@ -163,6 +176,23 @@ export function ReaderView({ articleId }: { articleId: string }) {
       flush();
     };
   }, [articleId, isAuthenticated]);
+
+  // Auto-mark as read on reaching the end -- the same transition manually
+  // clicking the "Reading" tab already makes (Booklet's closest concept to
+  // "read"; see the three-way ArticleStatus enum). Only fires out of UNREAD
+  // so it never fights a user who already archived the article, and the ref
+  // guard stops a duplicate call racing the `article` state update that
+  // would otherwise let the effect fire again before status catches up.
+  const autoMarkedReadRef = useRef(false);
+  useEffect(() => {
+    autoMarkedReadRef.current = false;
+  }, [articleId]);
+  useEffect(() => {
+    if (autoMarkedReadRef.current || !article || article.status !== "UNREAD") return;
+    if (progress < AUTO_READ_PROGRESS_THRESHOLD) return;
+    autoMarkedReadRef.current = true;
+    updateArticleStatus(article, "READING", isAuthenticated).then(setArticle);
+  }, [progress, article, isAuthenticated]);
 
   // Hooks can't be called after the !loaded/!article early returns below, so
   // this has to live up here -- readableText is just "" (tts.play() is a
