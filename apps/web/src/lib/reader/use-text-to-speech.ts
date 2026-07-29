@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pickBestVoice } from "./tts-voice";
+import { loadReaderPrefs } from "./device-prefs";
 
 export type TtsStatus = "idle" | "playing" | "paused";
 
@@ -59,6 +60,7 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     if (voiceRef.current) utterance.voice = voiceRef.current;
+    utterance.rate = loadReaderPrefs().ttsRate;
     utterance.onend = () => setStatus("idle");
     utterance.onerror = () => setStatus("idle");
     utteranceRef.current = utterance;
