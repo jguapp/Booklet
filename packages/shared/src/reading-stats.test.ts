@@ -10,6 +10,7 @@ describe("computeReadingStats", () => {
     const stats = computeReadingStats([]);
     expect(stats).toEqual({
       currentStreakDays: 0,
+      longestStreakDays: 0,
       totalReadingSeconds: 0,
       completionRate: 0,
       totalArticles: 0,
@@ -75,5 +76,37 @@ describe("computeReadingStats", () => {
       now,
     );
     expect(stats.currentStreakDays).toBe(1);
+  });
+
+  it("longest streak remembers a past run even after it's been broken", () => {
+    const now = new Date("2026-01-20T12:00:00");
+    const stats = computeReadingStats(
+      [
+        // A 4-day run early in the month...
+        article(new Date("2026-01-01T09:00:00").toISOString()),
+        article(new Date("2026-01-02T09:00:00").toISOString()),
+        article(new Date("2026-01-03T09:00:00").toISOString()),
+        article(new Date("2026-01-04T09:00:00").toISOString()),
+        // ...then a gap, then a shorter 2-day run right up to `now`.
+        article(new Date("2026-01-19T09:00:00").toISOString()),
+        article(new Date("2026-01-20T09:00:00").toISOString()),
+      ],
+      now,
+    );
+    expect(stats.currentStreakDays).toBe(2);
+    expect(stats.longestStreakDays).toBe(4);
+  });
+
+  it("longest streak equals the current streak when it's the best one so far", () => {
+    const now = new Date("2026-01-10T12:00:00");
+    const stats = computeReadingStats(
+      [
+        article(new Date("2026-01-10T09:00:00").toISOString()),
+        article(new Date("2026-01-09T09:00:00").toISOString()),
+        article(new Date("2026-01-08T09:00:00").toISOString()),
+      ],
+      now,
+    );
+    expect(stats.longestStreakDays).toBe(3);
   });
 });

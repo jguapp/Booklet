@@ -15,6 +15,9 @@ export interface ReadingStats {
   /** Consecutive days (including today, if something was already finished
    * today) with at least one article finished. */
   currentStreakDays: number;
+  /** The longest run of consecutive finish-days ever, which may be the
+   * current streak itself (an ongoing streak still counts while it runs). */
+  longestStreakDays: number;
   totalReadingSeconds: number;
   /** 0-1. 0 when there's nothing saved yet, not NaN. */
   completionRate: number;
@@ -49,5 +52,26 @@ export function computeReadingStats(articles: ReadingStatsCandidate[], now: Date
     cursor -= DAY_MS;
   }
 
-  return { currentStreakDays, totalReadingSeconds, completionRate, totalArticles, finishedArticles };
+  // Longest run of consecutive days anywhere in history -- walk the
+  // distinct finish-days in order and count consecutive-day runs. Only
+  // needs to consider days that actually have a finish, since a gap of
+  // any size breaks a run regardless of how long it is.
+  const sortedDays = [...finishedDayStarts].sort((a, b) => a - b);
+  let longestStreakDays = 0;
+  let runLength = 0;
+  let previousDay: number | null = null;
+  for (const day of sortedDays) {
+    runLength = previousDay !== null && day - previousDay === DAY_MS ? runLength + 1 : 1;
+    longestStreakDays = Math.max(longestStreakDays, runLength);
+    previousDay = day;
+  }
+
+  return {
+    currentStreakDays,
+    longestStreakDays,
+    totalReadingSeconds,
+    completionRate,
+    totalArticles,
+    finishedArticles,
+  };
 }
