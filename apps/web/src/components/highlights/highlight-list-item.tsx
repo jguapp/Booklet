@@ -6,6 +6,7 @@ import type { Article, Highlight, HighlightColor } from "@booklet/shared";
 import { formatRelativeDate } from "@/lib/format";
 import { IconPencil, IconTrash } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const DOT_CLASS: Record<HighlightColor, string> = {
   YELLOW: "bg-highlight-yellow",
@@ -36,6 +37,7 @@ export function HighlightListItem({
 }: HighlightListItemProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(highlight.annotation?.noteText ?? "");
+  const [confirming, setConfirming] = useState<"highlight" | "note" | null>(null);
 
   function startEditing() {
     setDraft(highlight.annotation?.noteText ?? "");
@@ -50,12 +52,6 @@ export function HighlightListItem({
       onSaveNote?.(highlight.id, trimmed);
     }
     setEditing(false);
-  }
-
-  function handleDelete() {
-    if (window.confirm("Delete this highlight? This can't be undone.")) {
-      onDelete?.(highlight.id);
-    }
   }
 
   return (
@@ -103,7 +99,7 @@ export function HighlightListItem({
                     <button
                       type="button"
                       title="Delete note"
-                      onClick={() => onDeleteNote(highlight.id)}
+                      onClick={() => setConfirming("note")}
                       className="flex h-6 w-6 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
                     >
                       <IconTrash className="h-3.5 w-3.5" />
@@ -139,7 +135,7 @@ export function HighlightListItem({
           <button
             type="button"
             title="Delete highlight"
-            onClick={handleDelete}
+            onClick={() => setConfirming("highlight")}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
           >
             <IconTrash className="h-4 w-4" />
@@ -148,6 +144,19 @@ export function HighlightListItem({
       </div>
 
       {actions && <div className="mt-4 flex justify-end gap-2">{actions}</div>}
+
+      {confirming && (
+        <ConfirmDialog
+          title={confirming === "highlight" ? "Delete this highlight?" : "Delete this note?"}
+          message="This can't be undone."
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => {
+            if (confirming === "highlight") onDelete?.(highlight.id);
+            else onDeleteNote?.(highlight.id);
+            setConfirming(null);
+          }}
+        />
+      )}
     </div>
   );
 }
