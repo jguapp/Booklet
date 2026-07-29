@@ -24,6 +24,8 @@ interface PdfReaderProps {
   highlights: Highlight[];
   initialProgressFraction: number;
   onProgressChange: (fraction: number) => void;
+  /** The current page's plain text, for read-aloud -- re-reported on every page turn. */
+  onPageTextChange?: (text: string) => void;
   onCreateHighlight: (position: PdfPosition, color: HighlightColor, note: string) => void;
   onDeleteHighlight: (highlightId: string) => void;
   onSaveNote: (highlightId: string, noteText: string) => void;
@@ -62,6 +64,7 @@ export function PdfReader({
   highlights,
   initialProgressFraction,
   onProgressChange,
+  onPageTextChange,
   onCreateHighlight,
   onDeleteHighlight,
   onSaveNote,
@@ -87,10 +90,12 @@ export function PdfReader({
   // current fraction upstream) doesn't fight the reader by resetting it.
   const initialProgressRef = useRef(initialProgressFraction);
   const onProgressChangeRef = useRef(onProgressChange);
+  const onPageTextChangeRef = useRef(onPageTextChange);
   useEffect(() => {
     initialProgressRef.current = initialProgressFraction;
     onProgressChangeRef.current = onProgressChange;
-  }, [initialProgressFraction, onProgressChange]);
+    onPageTextChangeRef.current = onPageTextChange;
+  }, [initialProgressFraction, onProgressChange, onPageTextChange]);
 
   // Load the document once per file. A local (IndexedDB) file and an
   // authenticated (server) file both arrive as a Blob either way -- see
@@ -178,6 +183,10 @@ export function PdfReader({
     if (numPages <= 1) return;
     onProgressChangeRef.current((pageNumber - 1) / (numPages - 1));
   }, [pageNumber, numPages]);
+
+  useEffect(() => {
+    onPageTextChangeRef.current?.(pageText);
+  }, [pageText]);
 
   function handleMouseUp() {
     const selection = window.getSelection();

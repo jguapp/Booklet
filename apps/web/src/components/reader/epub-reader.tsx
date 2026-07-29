@@ -32,6 +32,8 @@ interface EpubReaderProps {
   size: ReaderSize;
   initialProgressFraction: number;
   onProgressChange: (fraction: number) => void;
+  /** The current section's plain text, for read-aloud -- re-reported on every relocate. */
+  onSectionTextChange?: (text: string) => void;
   onCreateHighlight: (cfiRange: string, selectedText: string, color: HighlightColor, note: string) => void;
   onDeleteHighlight: (highlightId: string) => void;
   onSaveNote: (highlightId: string, noteText: string) => void;
@@ -77,6 +79,7 @@ export function EpubReader({
   size,
   initialProgressFraction,
   onProgressChange,
+  onSectionTextChange,
   onCreateHighlight,
   onDeleteHighlight,
   onSaveNote,
@@ -99,10 +102,12 @@ export function EpubReader({
   // reset the reading position and re-run the (non-trivial) locations.generate() pass.
   const initialProgressRef = useRef(initialProgressFraction);
   const onProgressChangeRef = useRef(onProgressChange);
+  const onSectionTextChangeRef = useRef(onSectionTextChange);
   useEffect(() => {
     initialProgressRef.current = initialProgressFraction;
     onProgressChangeRef.current = onProgressChange;
-  }, [initialProgressFraction, onProgressChange]);
+    onSectionTextChangeRef.current = onSectionTextChange;
+  }, [initialProgressFraction, onProgressChange, onSectionTextChange]);
 
   // Open the book and render it into viewerRef once per file. epub.js owns
   // the iframe(s) inside that div entirely -- nothing else touches its DOM.
@@ -153,6 +158,12 @@ export function EpubReader({
             setLocationLabel(`Page ${location.start.displayed.page} of ${location.start.displayed.total}`);
             lastKnownCfi = location.start.cfi;
             if (locationsReady) onProgressChangeRef.current(location.start.percentage);
+
+            // Same Contents[]-not-Contents typing mismatch as handleConfirm
+            // below -- one Contents per currently-rendered iframe/section.
+            const contents = r.getContents() as unknown as Contents[] | undefined;
+            const sectionText = contents?.map((c) => c.document.body?.textContent ?? "").join("\n\n").trim();
+            if (sectionText) onSectionTextChangeRef.current?.(sectionText);
           },
         );
 

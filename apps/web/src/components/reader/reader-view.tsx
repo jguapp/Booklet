@@ -13,6 +13,8 @@ import { ReaderToolbar, type ReaderSize } from "./reader-toolbar";
 import { ArticleContent } from "./article-content";
 import { PdfReader } from "./pdf-reader";
 import { EpubReader } from "./epub-reader";
+import { TtsControls } from "./tts-controls";
+import { useTextToSpeech } from "@/lib/reader/use-text-to-speech";
 import { TagEditor } from "@/components/library/tag-editor";
 import { SourceIcon } from "@/components/library/source-icon";
 import { cn } from "@/lib/cn";
@@ -36,6 +38,8 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const [loaded, setLoaded] = useState(false);
   const [fileBlob, setFileBlob] = useState<Blob | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [pdfPageText, setPdfPageText] = useState("");
+  const [epubSectionText, setEpubSectionText] = useState("");
 
   const refresh = useCallback(() => {
     if (authStatus === "loading") return;
@@ -160,6 +164,21 @@ export function ReaderView({ articleId }: { articleId: string }) {
     };
   }, [articleId, isAuthenticated]);
 
+  // Hooks can't be called after the !loaded/!article early returns below, so
+  // this has to live up here -- readableText is just "" (tts.play() is a
+  // no-op on empty text) until article's actually loaded and the right
+  // reader has reported something. What "read aloud" should read: the
+  // current PDF page, the current EPUB section, or -- since there's no
+  // per-page concept for scrolled HTML -- the whole article's plain text.
+  const usesPdfReaderForTts = article?.sourceType === "PDF" && fileBlob !== null;
+  const usesEpubReaderForTts = article?.sourceType === "EPUB" && fileBlob !== null;
+  const readableText = usesPdfReaderForTts
+    ? pdfPageText
+    : usesEpubReaderForTts
+      ? epubSectionText
+      : (article?.extractedText ?? "");
+  const tts = useTextToSpeech(readableText);
+
   async function handleCreateHighlight(
     selectedText: string,
     position: HighlightPosition,
@@ -253,20 +272,31 @@ export function ReaderView({ articleId }: { articleId: string }) {
           {isTextRenderable && remainingMinutes !== null ? ` · ${remainingMinutes} min left` : ""}
         </p>
 
-        <div className="mb-5 flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Article status">
-          {STATUS_TABS.map((t) => (
-            <button
-              key={t.value}
-              type="button"
-              onClick={() => handleStatusChange(t.value)}
-              className={cn(
-                "flex-1 rounded-sm py-1.5 font-sans text-xs font-medium transition-colors",
-                article.status === t.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <div className="flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Article status">
+            {STATUS_TABS.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => handleStatusChange(t.value)}
+                className={cn(
+                  "flex-1 rounded-sm py-1.5 font-sans text-xs font-medium transition-colors",
+                  article.status === t.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <TtsControls
+            status={tts.status}
+            supported={tts.supported}
+            hasText={readableText.trim().length > 0}
+            onPlay={tts.play}
+            onPause={tts.pause}
+            onResume={tts.resume}
+            onStop={tts.stop}
+          />
         </div>
 
         <div className="mb-9">
@@ -295,6 +325,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
             highlights={highlights}
             initialProgressFraction={article.progressFraction}
             onProgressChange={handleProgressChange}
+            onPageTextChange={setPdfPageText}
             onCreateHighlight={(position, color, note) => handleCreateHighlight(position.text, position, color, note)}
             onDeleteHighlight={handleDeleteHighlight}
             onSaveNote={handleSaveNote}
@@ -308,6 +339,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
             size={size}
             initialProgressFraction={article.progressFraction}
             onProgressChange={handleProgressChange}
+            onSectionTextChange={setEpubSectionText}
             onCreateHighlight={(cfi, selectedText, color, note) =>
               handleCreateHighlight(selectedText, { type: "epub", cfi }, color, note)
             }
