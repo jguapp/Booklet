@@ -40,8 +40,20 @@ throughout:
       range (EPUB) — the `HighlightPosition` variants the schema reserved
       for this are no longer unused
 - [x] Reading list / library view — IndexedDB-backed when signed out, synced
-      via the API when signed in, same UI either way. Delete, archive, and
-      organize into collections (folders) in both modes
+      via the API when signed in, same UI either way. Delete, archive,
+      organize into collections (folders), and tag (free-form, lighter-weight
+      than collections — no separate entity, no color) in both modes
+- [x] Full-text search — title/excerpt/author/site/body-text/tags for
+      articles, selected text/notes for highlights. Plain case-insensitive
+      matching rather than Postgres tsvector, on purpose: local/anonymous
+      mode has no full-text index at all, so both modes behave the same way
+      instead of signed-in users getting relevance-ranked results local mode
+      structurally can't match
+- [x] Reading progress persistence — periodic + visibility-triggered saves
+      (not just on navigate-away — a hard reload or tab close can interrupt
+      an in-flight async write before that would fire) for all three reader
+      kinds, resuming scroll position (HTML), page (PDF), or chapter
+      (EPUB, via epub.js's own location index) on next open
 - [x] Reader view — light/dark/sepia theming, adjustable type size,
       select-to-highlight with optional notes, drift-tolerant highlight
       re-anchoring
@@ -71,7 +83,10 @@ throughout:
       (AsyncStorage instead of IndexedDB, same repository-pattern swap
       point), with highlighting (a toggled select-then-highlight flow --
       React Native has no single component that both reports a text
-      selection and renders per-range styling, unlike a browser)
+      selection and renders per-range styling, unlike a browser),
+      collections, PDF/EPUB upload (as extracted text — no real page/CFI
+      rendering, which needs DOM canvas/iframe APIs React Native doesn't
+      have), and Daily Review/resurfacing with the same SM-2 feedback loop
 - [x] Deployment configs — Dockerfiles for both apps, `docker-compose.yml`,
       `DEPLOYMENT.md`. Written carefully but not build-tested (no Docker in
       the environment that wrote them) — see `DEPLOYMENT.md` for exactly
@@ -86,12 +101,13 @@ pnpm --filter @booklet/web test:e2e     # e2e: local/anonymous flow, real PDF + 
 pnpm --filter @booklet/extension test:e2e   # e2e: loads the real built extension in Chromium (headed -- see its README)
 ```
 
-`apps/web/e2e` covers the local/anonymous save→read→highlight loop plus
-the real PDF (`pdf-reader.spec.ts`) and EPUB (`epub-reader.spec.ts`)
-readers end to end — actual canvas rendering and iframe-based pagination
-in a real browser, not mocked. `apps/mobile` has no automated test suite
-(`tsc --noEmit` only); its web target was verified manually the same way,
-see `apps/mobile/README.md`.
+`apps/web/e2e` covers the local/anonymous save→read→highlight loop, the
+real PDF (`pdf-reader.spec.ts`) and EPUB (`epub-reader.spec.ts`) readers
+end to end (actual canvas rendering and iframe-based pagination in a real
+browser, not mocked), and tags/search/reading-progress persistence
+(`tags-search-progress.spec.ts`). `apps/mobile` has no automated test
+suite (`tsc --noEmit` only); its web target was verified manually the same
+way, see `apps/mobile/README.md`.
 
 `.github/workflows/ci.yml` runs the shared/api/web suites (the API and web
 e2e jobs against a real Postgres service container) plus typecheck/lint
@@ -120,10 +136,11 @@ device/simulator) rather than unstarted work:
 - **CI actually running for real** — `.github/workflows/ci.yml` is
   syntax-checked but has never executed on a real GitHub Actions runner
 - Smaller, not-yet-started polish: React Navigation for mobile once it has
-  more than a handful of screens; a reading-progress bar for the PDF/EPUB
-  readers (currently only the original HTML article view tracks scroll
-  progress); exports and sharing are intentionally out of scope until
-  everything above is solid
+  more than a handful of screens; real page/CFI rendering for mobile
+  PDF/EPUB (needs a WebView bridge to reuse the web app's pdfjs-dist/
+  epub.js code, or a native renderer — a real project of its own, not a
+  scaffold-stage add-on); exports and sharing are intentionally out of
+  scope until everything above is solid
 
 See each app's own README (`apps/mobile`, `apps/extension`) for exactly
 what's verified and what isn't within these constraints.
