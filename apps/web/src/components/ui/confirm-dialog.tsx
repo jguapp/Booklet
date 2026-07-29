@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 
 interface ConfirmDialogProps {
@@ -35,7 +36,13 @@ export function ConfirmDialog({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onCancel]);
 
-  return (
+  // Portaled to <body> -- callers render this from inside popovers that are
+  // themselves `position: fixed` + `transform` (to anchor/center over a
+  // highlight), and a CSS transform on an ancestor becomes the containing
+  // block for a `fixed` descendant. Without the portal, this dialog's own
+  // `inset: 0` backdrop was clipped to that small popover's box instead of
+  // covering the viewport.
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 px-4"
       onMouseDown={(e) => {
@@ -73,6 +80,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
