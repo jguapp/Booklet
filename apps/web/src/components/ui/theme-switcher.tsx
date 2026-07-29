@@ -12,6 +12,7 @@ const THEME_SWATCH_CLASS: Record<Theme, string> = {
   light: "bg-[#EDEBE2] text-[#211F1A]",
   sepia: "bg-[#E7D8B2] text-[#392E1C]",
   dark: "bg-[#14181A] text-[#E8E4DA]",
+  kindle: "bg-white text-black",
 };
 
 export function ThemeSwitcher({ className }: { className?: string }) {
@@ -19,7 +20,7 @@ export function ThemeSwitcher({ className }: { className?: string }) {
 
   return (
     <div className={cn("flex items-center gap-1.5", className)} role="group" aria-label="Theme">
-      {(["light", "sepia", "dark"] as Theme[]).map((t) => (
+      {(["light", "sepia", "dark", "kindle"] as Theme[]).map((t) => (
         <button
           key={t}
           type="button"

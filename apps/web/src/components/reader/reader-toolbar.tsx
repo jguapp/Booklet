@@ -11,6 +11,7 @@ const THEME_SWATCH_CLASS: Record<Theme, string> = {
   light: "bg-[#EDEBE2] text-[#211F1A]",
   sepia: "bg-[#E7D8B2] text-[#392E1C]",
   dark: "bg-[#14181A] text-[#E8E4DA]",
+  kindle: "bg-white text-black",
 };
 
 interface ReaderToolbarProps {
@@ -52,7 +53,7 @@ export function ReaderToolbar({
         </div>
 
         <div className="flex items-center gap-2" role="group" aria-label="Reading theme">
-          {(["light", "sepia", "dark"] as Theme[]).map((t) => (
+          {(["light", "sepia", "dark", "kindle"] as Theme[]).map((t) => (
             <button
               key={t}
               type="button"

@@ -21,6 +21,7 @@ const THEME_COLORS: Record<Theme, { bg: string; fg: string }> = {
   light: { bg: "#FAF9F4", fg: "#211F1A" },
   dark: { bg: "#1C2124", fg: "#E8E4DA" },
   sepia: { bg: "#DDCB9C", fg: "#392E1C" },
+  kindle: { bg: "#F7F7F7", fg: "#000000" },
 };
 
 const SIZE_PERCENT: Record<ReaderSize, string> = { sm: "90%", md: "105%", lg: "120%", xl: "135%" };

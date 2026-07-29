@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 
-export type Theme = "light" | "dark" | "sepia";
+export type Theme = "light" | "dark" | "sepia" | "kindle";
 
 const STORAGE_KEY = "booklet-theme";
 
@@ -31,7 +31,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function syncFromDom() {
       const attr = document.documentElement.getAttribute("data-theme");
-      if (attr === "dark" || attr === "sepia" || attr === "light") {
+      if (attr === "dark" || attr === "sepia" || attr === "light" || attr === "kindle") {
         setThemeState(attr);
       }
     }
