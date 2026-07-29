@@ -26,6 +26,8 @@ jobs:
       - run: pnpm --filter @booklet/api exec tsc --noEmit
       - run: pnpm --filter @booklet/web exec tsc --noEmit
       - run: pnpm --filter @booklet/web lint
+      - run: pnpm --filter @booklet/extension exec tsc --noEmit
+      - run: pnpm --filter @booklet/mobile exec tsc --noEmit
 
   test-shared:
     runs-on: ubuntu-latest

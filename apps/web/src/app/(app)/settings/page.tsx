@@ -34,16 +34,19 @@ export default function SettingsPage() {
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
 
   useEffect(() => {
-    if (status === "authenticated" && user) {
-      setFrequency(user.resurfaceFrequency);
-      setPerDigest(user.highlightsPerDigest);
-      return;
+    async function syncSettings() {
+      if (status === "authenticated" && user) {
+        setFrequency(user.resurfaceFrequency);
+        setPerDigest(user.highlightsPerDigest);
+        return;
+      }
+      if (status === "anonymous") {
+        const settings = loadUserSettings();
+        setFrequency(settings.resurfaceFrequency);
+        setPerDigest(settings.highlightsPerDigest);
+      }
     }
-    if (status === "anonymous") {
-      const settings = loadUserSettings();
-      setFrequency(settings.resurfaceFrequency);
-      setPerDigest(settings.highlightsPerDigest);
-    }
+    syncSettings();
   }, [status, user]);
 
   async function handleSave(e: React.FormEvent) {

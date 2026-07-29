@@ -2,7 +2,7 @@
   "name": "@booklet/mobile",
   "version": "0.1.0",
   "private": true,
-  "main": "node_modules/expo/AppEntry.js",
+  "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "web": "expo start --web",
@@ -10,6 +10,7 @@
     "ios": "expo start --ios"
   },
   "dependencies": {
+    "@babel/runtime": "^7.25.0",
     "@booklet/shared": "workspace:*",
     "@react-native-async-storage/async-storage": "2.1.2",
     "expo": "~53.0.0",

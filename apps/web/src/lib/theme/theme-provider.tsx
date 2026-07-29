@@ -29,10 +29,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // so there's no color flash -- only React-rendered attributes that read
   // `theme` update, one frame after mount.
   useEffect(() => {
-    const attr = document.documentElement.getAttribute("data-theme");
-    if (attr === "dark" || attr === "sepia" || attr === "light") {
-      setThemeState(attr);
+    async function syncFromDom() {
+      const attr = document.documentElement.getAttribute("data-theme");
+      if (attr === "dark" || attr === "sepia" || attr === "light") {
+        setThemeState(attr);
+      }
     }
+    syncFromDom();
   }, []);
 
   function setTheme(next: Theme) {

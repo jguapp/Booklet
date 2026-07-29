@@ -122,7 +122,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
   if (!article) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-paper px-6 text-center">
-        <p className="font-serif text-lg text-ink">Couldn't find that article.</p>
+        <p className="font-serif text-lg text-ink">Couldn&apos;t find that article.</p>
         <Link href="/library" className="font-sans text-sm font-medium text-accent">
           Back to Library
         </Link>

@@ -1,6 +1,22 @@
 packages:
   - "apps/*"
   - "packages/*"
+# Metro (the mobile app's bundler) doesn't reliably resolve relative
+# imports through the NTFS junctions pnpm uses for directory links on
+# Windows -- confirmed by hand: apps/mobile/node_modules/expo was a
+# Junction (not a symlink), and Metro's unstable_enableSymlinks resolver
+# option didn't traverse it correctly, so expo/AppEntry.js's own
+# `import App from "../../App"` could never resolve. hoisted switches to a
+# flat, real-directory node_modules layout (npm/yarn-classic style) with no
+# junctions/symlinks at all, sidestepping the problem instead of fighting
+# Metro's resolver further.
+#
+# Tradeoff: this affects dependency resolution for every workspace package,
+# not just apps/mobile -- a package could now accidentally resolve an
+# undeclared transitive dependency that happens to be hoisted (pnpm's
+# default isolated linker is specifically what prevents that). The full
+# test suite was re-run across every package after this change.
+nodeLinker: hoisted
 allowBuilds:
   '@prisma/engines': true
   esbuild: true
