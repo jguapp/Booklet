@@ -10,7 +10,7 @@ import { IconSearch } from "@/components/ui/icons";
 import { ArticleCard } from "@/components/library/article-card";
 import { SaveArticleModal } from "@/components/library/save-article-modal";
 import { cn } from "@/lib/cn";
-import { deleteArticle, loadArticles, updateArticleStatus } from "@/lib/data/articles";
+import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
 import { loadArticlesInCollection, loadCollections } from "@/lib/data/collections";
 import { searchLibrary } from "@/lib/data/search";
 import { useAuth } from "@/lib/auth/auth-provider";
@@ -114,8 +114,13 @@ function LibraryPageInner() {
     setArticles((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
   }
 
+  async function handleToggleFavorited(article: Article) {
+    const updated = await updateArticleFavorited(article, !article.favorited, isAuthenticated);
+    setArticles((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+  }
+
   async function handleDelete(article: Article) {
-    await deleteArticle(article.id, isAuthenticated);
+    await trashArticle(article, isAuthenticated);
     setArticles((prev) => prev.filter((a) => a.id !== article.id));
   }
 
@@ -228,6 +233,7 @@ function LibraryPageInner() {
               key={article.id}
               article={article}
               onToggleArchived={handleToggleArchived}
+              onToggleFavorited={handleToggleFavorited}
               onDelete={handleDelete}
               collections={collections}
               authenticated={isAuthenticated}

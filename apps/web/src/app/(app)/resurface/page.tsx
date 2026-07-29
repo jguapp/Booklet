@@ -38,7 +38,14 @@ export default function ResurfacePage() {
         return;
       }
 
-      const loadedHighlights = await loadLocalHighlights(false);
+      // loadArticles() already excludes trash -- a trashed article's
+      // highlights shouldn't keep resurfacing (a stronger "I'm done with
+      // this" signal than archiving, whose highlights stay eligible on
+      // purpose), so filter against the article IDs that survived that.
+      const nonTrashedArticleIds = new Set(loadedArticles.map((a) => a.id));
+      const loadedHighlights = (await loadLocalHighlights(false)).filter((h) =>
+        nonTrashedArticleIds.has(h.articleId),
+      );
       setHighlights(loadedHighlights);
       const highlightsPerDigest = loadUserSettings().highlightsPerDigest;
       const candidates: ResurfaceCandidate[] = loadedHighlights.map((h) => ({
