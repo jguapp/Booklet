@@ -12,6 +12,7 @@ import { textToParagraphHtml } from "@/lib/reader/text-to-html";
 import { ReaderToolbar, type ReaderSize } from "./reader-toolbar";
 import { ArticleContent } from "./article-content";
 import { PdfReader } from "./pdf-reader";
+import { EpubReader } from "./epub-reader";
 import { SourceIcon } from "@/components/library/source-icon";
 import { cn } from "@/lib/cn";
 
@@ -146,13 +147,16 @@ export function ReaderView({ articleId }: { articleId: string }) {
     ? Math.max(0, Math.round(article.readingTimeEstimate * (1 - progress)))
     : null;
   const label = article.siteName ?? article.author ?? article.originalFilename ?? "Reader";
-  // PDF gets its own real page-rendered reader once the file's loaded (see
-  // pdf-reader.tsx). EPUB and a PDF whose file failed to load fall back to
+  // PDF and EPUB each get their own real reader once the file's loaded
+  // (pdf-reader.tsx, epub-reader.tsx). A source whose file failed to load
+  // (or an old article saved before either reader existed) falls back to
   // the extracted-text-through-the-HTML-highlighter path, same as before.
   const usesPdfReader = article.sourceType === "PDF" && fileBlob !== null;
-  const renderHtml = usesPdfReader
-    ? null
-    : (article.extractedHtml ?? (article.extractedText ? textToParagraphHtml(article.extractedText) : null));
+  const usesEpubReader = article.sourceType === "EPUB" && fileBlob !== null;
+  const renderHtml =
+    usesPdfReader || usesEpubReader
+      ? null
+      : (article.extractedHtml ?? (article.extractedText ? textToParagraphHtml(article.extractedText) : null));
   const isTextRenderable = renderHtml !== null;
 
   return (
@@ -165,7 +169,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
         onSizeChange={setSize}
         progress={isTextRenderable ? progress : article.progressFraction}
       />
-      <main className={cn("mx-auto px-6 py-12", usesPdfReader ? "max-w-[840px]" : "max-w-[680px]")}>
+      <main className={cn("mx-auto px-6 py-12", usesPdfReader || usesEpubReader ? "max-w-[840px]" : "max-w-[680px]")}>
         <div className="mb-4 flex items-center gap-2 text-ink-faint">
           <SourceIcon sourceType={article.sourceType} className="h-4 w-4" />
           <span className="font-sans text-xs uppercase tracking-wide">{article.sourceType}</span>
@@ -199,7 +203,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
         {article.sourceType !== "HTML" && (
           <p className="mb-6 font-sans text-xs text-ink-faint">
             {article.sourceType === "PDF" ? "PDF" : "EPUB"}
-            {!usesPdfReader ? " · shown as extracted text, not the original page layout" : ""}
+            {!usesPdfReader && !usesEpubReader ? " · shown as extracted text, not the original page layout" : ""}
             {article.originalFilename ? ` · ${article.originalFilename}` : ""}
             {downloadUrl && (
               <>
@@ -217,6 +221,19 @@ export function ReaderView({ articleId }: { articleId: string }) {
             fileBlob={fileBlob!}
             highlights={highlights}
             onCreateHighlight={(position, color, note) => handleCreateHighlight(position.text, position, color, note)}
+            onDeleteHighlight={handleDeleteHighlight}
+            onSaveNote={handleSaveNote}
+            onDeleteNote={handleDeleteNote}
+          />
+        ) : usesEpubReader ? (
+          <EpubReader
+            fileBlob={fileBlob!}
+            highlights={highlights}
+            theme={theme}
+            size={size}
+            onCreateHighlight={(cfi, selectedText, color, note) =>
+              handleCreateHighlight(selectedText, { type: "epub", cfi }, color, note)
+            }
             onDeleteHighlight={handleDeleteHighlight}
             onSaveNote={handleSaveNote}
             onDeleteNote={handleDeleteNote}
