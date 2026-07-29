@@ -26,7 +26,7 @@
 # own internal relative imports lacked the .js extension plain Node's ESM
 # loader requires) -- confirmed by literally hitting that failure first.
 
-FROM node:20-slim AS base
+FROM node:22-slim AS base
 RUN corepack enable
 WORKDIR /repo
 

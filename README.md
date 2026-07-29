@@ -183,8 +183,9 @@ docker-compose.yml, apps/*/Dockerfile, DEPLOYMENT.md
 
 ## Getting started
 
-Requires Node 20+ and pnpm. You also need a PostgreSQL database -- either a
-real one, or the bundled dev database (no install required, see below).
+Requires Node 22.13+ (pnpm 11's own minimum) and pnpm. You also need a
+PostgreSQL database -- either a real one, or the bundled dev database (no
+install required, see below).
 
 ```bash
 pnpm install

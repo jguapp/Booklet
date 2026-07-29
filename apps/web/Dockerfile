@@ -21,7 +21,7 @@
 # NEXT_PUBLIC_* vars into the client bundle) -- pass it as a build arg
 # pointing at your deployed API before building, not as a runtime env var.
 
-FROM node:20-slim AS base
+FROM node:22-slim AS base
 RUN corepack enable
 WORKDIR /repo
 
