@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { HighlightColor } from "@booklet/shared";
 import { cn } from "@/lib/cn";
+import { isLookupableWord, lookupWord, type DictionaryEntry } from "@/lib/dictionary";
+import { IconBook } from "@/components/ui/icons";
 
 const COLORS: { value: HighlightColor; className: string; label: string }[] = [
   { value: "YELLOW", className: "bg-highlight-yellow", label: "Yellow" },
@@ -12,18 +14,27 @@ const COLORS: { value: HighlightColor; className: string; label: string }[] = [
   { value: "ORANGE", className: "bg-highlight-orange", label: "Orange" },
 ];
 
+type Panel = "none" | "note" | "define";
+type DictStatus = "idle" | "loading" | "error" | "not-found" | "found";
+
 interface HighlightPopoverProps {
   /** Viewport position to anchor the popover above (e.g. selection bounding rect). */
   anchorRect: DOMRect;
+  /** The actual selected text -- used to offer "Look up" only for a single word, Apple Books-style. */
+  selectedText?: string;
   onConfirm: (color: HighlightColor, note: string) => void;
   onDismiss: () => void;
 }
 
-export function HighlightPopover({ anchorRect, onConfirm, onDismiss }: HighlightPopoverProps) {
+export function HighlightPopover({ anchorRect, selectedText, onConfirm, onDismiss }: HighlightPopoverProps) {
   const [color, setColor] = useState<HighlightColor>("YELLOW");
-  const [noteOpen, setNoteOpen] = useState(false);
+  const [panel, setPanel] = useState<Panel>("none");
   const [note, setNote] = useState("");
+  const [dictStatus, setDictStatus] = useState<DictStatus>("idle");
+  const [dictEntry, setDictEntry] = useState<DictionaryEntry | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+
+  const lookupable = !!selectedText && isLookupableWord(selectedText);
 
   useEffect(() => {
     function handlePointerDown(e: MouseEvent) {
@@ -39,6 +50,22 @@ export function HighlightPopover({ anchorRect, onConfirm, onDismiss }: Highlight
       document.removeEventListener("keydown", handleKey);
     };
   }, [onDismiss]);
+
+  function toggleDefine() {
+    if (panel === "define") {
+      setPanel("none");
+      return;
+    }
+    setPanel("define");
+    if (dictStatus !== "idle" || !selectedText) return;
+    setDictStatus("loading");
+    lookupWord(selectedText)
+      .then((entry) => {
+        setDictEntry(entry);
+        setDictStatus(entry ? "found" : "not-found");
+      })
+      .catch(() => setDictStatus("error"));
+  }
 
   const top = anchorRect.top + window.scrollY - 12;
   const left = anchorRect.left + window.scrollX + anchorRect.width / 2;
@@ -57,7 +84,7 @@ export function HighlightPopover({ anchorRect, onConfirm, onDismiss }: Highlight
             title={c.label}
             onClick={() => {
               setColor(c.value);
-              if (!noteOpen) onConfirm(c.value, "");
+              if (panel === "none") onConfirm(c.value, "");
             }}
             className={cn(
               "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
@@ -67,13 +94,26 @@ export function HighlightPopover({ anchorRect, onConfirm, onDismiss }: Highlight
           />
         ))}
         <div className="mx-1 h-5 w-px bg-border" />
+        {lookupable && (
+          <button
+            type="button"
+            title="Look up"
+            onClick={toggleDefine}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded-full text-ink-muted hover:bg-surface-2 hover:text-ink",
+              panel === "define" && "bg-surface-2 text-accent",
+            )}
+          >
+            <IconBook className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           title="Add a note"
-          onClick={() => setNoteOpen((v) => !v)}
+          onClick={() => setPanel((p) => (p === "note" ? "none" : "note"))}
           className={cn(
             "flex h-6 w-6 items-center justify-center rounded-full text-ink-muted hover:bg-surface-2 hover:text-ink",
-            noteOpen && "bg-surface-2 text-accent",
+            panel === "note" && "bg-surface-2 text-accent",
           )}
         >
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className="h-3.5 w-3.5">
@@ -82,7 +122,7 @@ export function HighlightPopover({ anchorRect, onConfirm, onDismiss }: Highlight
         </button>
       </div>
 
-      {noteOpen && (
+      {panel === "note" && (
         <div className="mt-2.5 flex flex-col gap-2">
           <textarea
             autoFocus
@@ -99,6 +139,39 @@ export function HighlightPopover({ anchorRect, onConfirm, onDismiss }: Highlight
           >
             Save highlight
           </button>
+        </div>
+      )}
+
+      {panel === "define" && (
+        <div className="mt-2.5 w-64">
+          {dictStatus === "loading" && <p className="font-sans text-xs text-ink-faint">Looking up…</p>}
+          {dictStatus === "error" && (
+            <p className="font-sans text-xs text-ink-faint">Couldn&apos;t reach the dictionary.</p>
+          )}
+          {dictStatus === "not-found" && (
+            <p className="font-sans text-xs text-ink-faint">No definition found for &ldquo;{selectedText}&rdquo;.</p>
+          )}
+          {dictStatus === "found" && dictEntry && (
+            <div className="flex max-h-48 flex-col gap-2 overflow-y-auto">
+              <div className="flex items-baseline gap-2">
+                <span className="font-serif text-sm font-semibold text-ink">{dictEntry.word}</span>
+                {dictEntry.phonetic && (
+                  <span className="font-sans text-xs text-ink-faint">{dictEntry.phonetic}</span>
+                )}
+              </div>
+              {dictEntry.meanings.map((m, i) => (
+                <div key={i}>
+                  <p className="font-sans text-[11px] font-medium uppercase tracking-wide text-ink-faint">
+                    {m.partOfSpeech}
+                  </p>
+                  <p className="font-sans text-sm text-ink">{m.definition}</p>
+                  {m.example && (
+                    <p className="font-sans text-xs italic text-ink-faint">&ldquo;{m.example}&rdquo;</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

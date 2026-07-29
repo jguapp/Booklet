@@ -285,7 +285,12 @@ export function EpubReader({
       <div ref={viewerRef} data-epub-reader style={{ height: "70vh" }} />
 
       {pending && (
-        <HighlightPopover anchorRect={pending.rect} onConfirm={handleConfirm} onDismiss={() => setPending(null)} />
+        <HighlightPopover
+          anchorRect={pending.rect}
+          selectedText={pending.selectedText}
+          onConfirm={handleConfirm}
+          onDismiss={() => setPending(null)}
+        />
       )}
       {managing && (
         <HighlightManagePopover

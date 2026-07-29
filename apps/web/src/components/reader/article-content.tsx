@@ -32,6 +32,7 @@ interface PendingSelection {
   start: number;
   end: number;
   rect: DOMRect;
+  text: string;
 }
 
 interface ManagingHighlight {
@@ -143,7 +144,7 @@ export function ArticleContent({
     const { start, end } = textOffsetsForRange(container, range);
     if (start === end) return;
 
-    setPending({ start, end, rect });
+    setPending({ start, end, rect, text: range.toString() });
   }
 
   function handleConfirm(color: HighlightColor, note: string) {
@@ -190,6 +191,7 @@ export function ArticleContent({
       {pending && (
         <HighlightPopover
           anchorRect={pending.rect}
+          selectedText={pending.text}
           onConfirm={handleConfirm}
           onDismiss={() => setPending(null)}
         />
