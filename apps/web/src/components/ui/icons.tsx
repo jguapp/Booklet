@@ -183,6 +183,30 @@ export function IconCheck(props: IconProps) {
   );
 }
 
+export function IconPlay(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M6 4.2v11.6a.8.8 0 0 0 1.2.7l9.3-5.8a.8.8 0 0 0 0-1.4L7.2 3.5A.8.8 0 0 0 6 4.2Z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function IconPause(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M6.5 4.5h2v11h-2zM11.5 4.5h2v11h-2z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function IconStop(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="5.5" y="5.5" width="9" height="9" rx="1.2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function IconPencil(props: IconProps) {
   return (
     <svg {...base(props)}>
