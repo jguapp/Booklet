@@ -7,13 +7,11 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTheme, type Theme } from "@/lib/theme/theme-provider";
 import { loadUserSettings, saveUserSettings } from "@/lib/mock/store";
-import { loadReaderPrefs, saveReaderPrefs } from "@/lib/reader/device-prefs";
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { loadSessions, revokeOtherSessions, revokeSession } from "@/lib/data/sessions";
 import { exportAsMarkdownZip, importUrls, parseImportCsv } from "@/lib/data/export-import";
-import { loadHoardingPrefs, saveHoardingPrefs } from "@/lib/data/hoarding-prefs";
-import { loadShowReadingStats, saveShowReadingStats } from "@/lib/data/stats-prefs";
+import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { formatRelativeDate, summarizeUserAgent } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
@@ -38,60 +36,49 @@ const SIZES: { value: ReaderSize; label: string }[] = [
 
 const TTS_RATES = [0.75, 1, 1.25, 1.5, 2];
 
+const AUTO_DELETE_PERIODS = [
+  { value: 7, label: "1 week" },
+  { value: 30, label: "1 month" },
+  { value: 90, label: "3 months" },
+  { value: 180, label: "6 months" },
+  { value: 365, label: "1 year" },
+];
+
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
   const { status, user, logout, updateSettings, resendVerificationEmail } = useAuth();
+  const {
+    reader,
+    hoarding,
+    showReadingStats,
+    autoDelete,
+    setReaderSize,
+    setTtsRate,
+    setHoarding,
+    setShowReadingStats,
+    setAutoDelete,
+  } = useDevicePrefs();
   const [frequency, setFrequency] = useState<ResurfaceFrequency>("DAILY");
   const [perDigest, setPerDigest] = useState(5);
-  const [readerSize, setReaderSize] = useState<ReaderSize>("md");
-  const [ttsRate, setTtsRate] = useState(1);
-  const [hoardingEnabled, setHoardingEnabled] = useState(false);
-  const [maxUnread, setMaxUnread] = useState(25);
-  const [showStats, setShowStats] = useState(false);
   const [saved, setSaved] = useState(false);
   const [resendStatus, setResendStatus] = useState<"idle" | "sending" | "sent">("idle");
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
 
-  // Device-local, not account-synced -- see device-prefs.ts. Read after
-  // mount, same reasoning as reader-view.tsx's own read of these.
-  useEffect(() => {
-    function syncFromDevicePrefs() {
-      const prefs = loadReaderPrefs();
-      setReaderSize(prefs.size);
-      setTtsRate(prefs.ttsRate);
-      const hoarding = loadHoardingPrefs();
-      setHoardingEnabled(hoarding.enabled);
-      setMaxUnread(hoarding.maxUnread);
-      setShowStats(loadShowReadingStats());
-    }
-    syncFromDevicePrefs();
-  }, []);
-
-  function handleReaderSizeChange(size: ReaderSize) {
-    setReaderSize(size);
-    saveReaderPrefs({ size, ttsRate });
-  }
-
-  function handleTtsRateChange(rate: number) {
-    setTtsRate(rate);
-    saveReaderPrefs({ size: readerSize, ttsRate: rate });
-  }
-
   function handleHoardingEnabledChange(enabled: boolean) {
-    setHoardingEnabled(enabled);
-    saveHoardingPrefs({ enabled, maxUnread });
+    setHoarding({ ...hoarding, enabled });
   }
 
   function handleMaxUnreadChange(value: number) {
-    const clamped = Math.max(1, Math.min(500, value || 1));
-    setMaxUnread(clamped);
-    saveHoardingPrefs({ enabled: hoardingEnabled, maxUnread: clamped });
+    setHoarding({ ...hoarding, maxUnread: Math.max(1, Math.min(500, value || 1)) });
   }
 
-  function handleShowStatsChange(enabled: boolean) {
-    setShowStats(enabled);
-    saveShowReadingStats(enabled);
+  function handleAutoDeleteEnabledChange(enabled: boolean) {
+    setAutoDelete({ ...autoDelete, enabled });
+  }
+
+  function handleAutoDeleteDaysChange(days: number) {
+    setAutoDelete({ ...autoDelete, days });
   }
 
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -264,10 +251,10 @@ export default function SettingsPage() {
               <button
                 key={s.value}
                 type="button"
-                onClick={() => handleReaderSizeChange(s.value)}
+                onClick={() => setReaderSize(s.value)}
                 className={cn(
                   "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                  readerSize === s.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                  reader.size === s.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
                 )}
               >
                 {s.label}
@@ -285,10 +272,10 @@ export default function SettingsPage() {
               <button
                 key={rate}
                 type="button"
-                onClick={() => handleTtsRateChange(rate)}
+                onClick={() => setTtsRate(rate)}
                 className={cn(
                   "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                  ttsRate === rate ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                  reader.ttsRate === rate ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
                 )}
               >
                 {rate}×
@@ -312,7 +299,7 @@ export default function SettingsPage() {
               onClick={() => handleHoardingEnabledChange(false)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                !hoardingEnabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                !hoarding.enabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               Off
@@ -322,24 +309,82 @@ export default function SettingsPage() {
               onClick={() => handleHoardingEnabledChange(true)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                hoardingEnabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                hoarding.enabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               On
             </button>
           </div>
-          {hoardingEnabled && (
+          {hoarding.enabled && (
             <label className="mt-1 flex flex-col gap-1.5">
               <span className="font-sans text-sm font-medium text-ink">Unread limit</span>
               <Input
                 type="number"
                 min={1}
                 max={500}
-                value={maxUnread}
+                value={hoarding.maxUnread}
                 onChange={(e) => handleMaxUnreadChange(Number(e.target.value))}
                 className="max-w-[100px]"
               />
             </label>
+          )}
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Auto-delete old unread articles
+          </h2>
+          <p className="font-sans text-xs text-ink-faint">
+            Another way to keep the backlog from becoming overwhelming: an UNREAD article older than the period
+            below moves to Trash on its own (still recoverable there for 30 days, same as deleting one by hand).
+            Never touches anything you&rsquo;ve started reading or archived.
+          </p>
+          <div
+            className="flex gap-1 rounded-sm bg-surface-2 p-1"
+            role="group"
+            aria-label="Auto-delete old unread articles"
+          >
+            <button
+              type="button"
+              onClick={() => handleAutoDeleteEnabledChange(false)}
+              className={cn(
+                "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                !autoDelete.enabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+              )}
+            >
+              Off
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAutoDeleteEnabledChange(true)}
+              className={cn(
+                "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                autoDelete.enabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+              )}
+            >
+              On
+            </button>
+          </div>
+          {autoDelete.enabled && (
+            <div
+              className="mt-1 flex gap-1 rounded-sm bg-surface-2 p-1"
+              role="group"
+              aria-label="Auto-delete after"
+            >
+              {AUTO_DELETE_PERIODS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => handleAutoDeleteDaysChange(p.value)}
+                  className={cn(
+                    "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                    autoDelete.days === p.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           )}
         </section>
 
@@ -351,20 +396,20 @@ export default function SettingsPage() {
           <div className="flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Reading stats">
             <button
               type="button"
-              onClick={() => handleShowStatsChange(false)}
+              onClick={() => setShowReadingStats(false)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                !showStats ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                !showReadingStats ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               Off
             </button>
             <button
               type="button"
-              onClick={() => handleShowStatsChange(true)}
+              onClick={() => setShowReadingStats(true)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                showStats ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                showReadingStats ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               On

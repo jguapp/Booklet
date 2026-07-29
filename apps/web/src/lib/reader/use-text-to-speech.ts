@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pickBestVoice } from "./tts-voice";
-import { loadReaderPrefs } from "./device-prefs";
+import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 
 export type TtsStatus = "idle" | "playing" | "paused";
 
@@ -27,6 +27,7 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const supported = typeof window !== "undefined" && "speechSynthesis" in window;
+  const { reader } = useDevicePrefs();
 
   // The voice list loads asynchronously in most browsers -- empty on the
   // first call until `voiceschanged` fires -- so keep the best pick current
@@ -60,13 +61,13 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     if (voiceRef.current) utterance.voice = voiceRef.current;
-    utterance.rate = loadReaderPrefs().ttsRate;
+    utterance.rate = reader.ttsRate;
     utterance.onend = () => setStatus("idle");
     utterance.onerror = () => setStatus("idle");
     utteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
     setStatus("playing");
-  }, [supported, text]);
+  }, [supported, text, reader.ttsRate]);
 
   const pause = useCallback(() => {
     if (!supported) return;

@@ -20,13 +20,16 @@ import {
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { createCollection, deleteCollection, loadCollections, updateCollection } from "@/lib/data/collections";
-import { trashArticleById } from "@/lib/data/articles";
+import { loadArticles, trashArticleById } from "@/lib/data/articles";
 import { deleteHighlight } from "@/lib/data/highlights";
-import { loadShowReadingStats } from "@/lib/data/stats-prefs";
+import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
+import { applyNavOrder } from "@/lib/data/nav-order-prefs";
 import { ApiError } from "@/lib/api/client";
 import { ThemeSwitcher } from "@/components/ui/theme-switcher";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ARTICLE_DRAG_MIME, HIGHLIGHT_DRAG_MIME, notifyTrashed } from "@/lib/dnd/trash-drop";
+
+const NAV_DRAG_MIME = "application/x-booklet-nav-href";
 
 const BASE_NAV_ITEMS = [
   { href: "/library", label: "Library", Icon: IconLibrary },
@@ -62,20 +65,29 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [showStats, setShowStats] = useState(false);
+  const { showReadingStats, autoDelete, navOrder, setNavOrder } = useDevicePrefs();
 
-  // Device-local, off by default -- see stats-prefs.ts. Read after mount,
-  // same reasoning as every other device pref in this app (no localStorage
-  // during SSR, so this can't be the initial state without a hydration
-  // mismatch).
+  const navItems = applyNavOrder(
+    showReadingStats ? [...BASE_NAV_ITEMS, STATS_NAV_ITEM, ...TAIL_NAV_ITEMS] : [...BASE_NAV_ITEMS, ...TAIL_NAV_ITEMS],
+    navOrder,
+  );
+
+  // Auto-delete stale unread articles (trash, not permanent -- still
+  // recoverable for 30 days like every other delete path) -- runs once per
+  // app session here rather than on a specific page, since it should apply
+  // regardless of where the user lands first. See auto-delete-prefs.ts.
   useEffect(() => {
-    function syncFromPrefs() {
-      setShowStats(loadShowReadingStats());
+    if (status === "loading" || !autoDelete.enabled) return;
+    async function purgeStaleUnread() {
+      const cutoff = Date.now() - autoDelete.days * 24 * 60 * 60 * 1000;
+      const articles = await loadArticles(isAuthenticated);
+      const stale = articles.filter((a) => a.status === "UNREAD" && new Date(a.savedAt).getTime() < cutoff);
+      if (stale.length === 0) return;
+      await Promise.all(stale.map((a) => trashArticleById(a.id, isAuthenticated)));
+      notifyTrashed();
     }
-    syncFromPrefs();
-  }, []);
-
-  const navItems = showStats ? [...BASE_NAV_ITEMS, STATS_NAV_ITEM, ...TAIL_NAV_ITEMS] : [...BASE_NAV_ITEMS, ...TAIL_NAV_ITEMS];
+    purgeStaleUnread().catch(() => undefined);
+  }, [status, isAuthenticated, autoDelete.enabled, autoDelete.days]);
 
   const activeCollectionId = searchParams.get("collection");
 
@@ -142,27 +154,52 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   // for 30 days. A highlight has no trash tier (permanent delete is its
   // only "delete"), so it goes through the same real confirm its own
   // delete button already requires -- a drag gesture shouldn't skip that.
+  //
+  // The nav items themselves are *also* draggable, to reorder the sidebar
+  // (persisted via navOrder above) -- so every nav link, Trash included, is
+  // a drop target for two different kinds of payload at once. Dispatch on
+  // e.dataTransfer.types rather than having two separate handlers stepping
+  // on each other.
   const [dragOverTrash, setDragOverTrash] = useState(false);
+  const [dragOverHref, setDragOverHref] = useState<string | null>(null);
   const [pendingHighlightDrop, setPendingHighlightDrop] = useState<string | null>(null);
 
-  function handleTrashDragOver(e: React.DragEvent) {
-    if (e.dataTransfer.types.includes(ARTICLE_DRAG_MIME) || e.dataTransfer.types.includes(HIGHLIGHT_DRAG_MIME)) {
+  function handleNavDragOver(e: React.DragEvent, isTrash: boolean) {
+    const types = e.dataTransfer.types;
+    const isTrashPayload = isTrash && (types.includes(ARTICLE_DRAG_MIME) || types.includes(HIGHLIGHT_DRAG_MIME));
+    if (isTrashPayload || types.includes(NAV_DRAG_MIME)) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
     }
   }
 
-  async function handleTrashDrop(e: React.DragEvent) {
+  async function handleNavDrop(e: React.DragEvent, targetHref: string, isTrash: boolean) {
     e.preventDefault();
     setDragOverTrash(false);
-    const articleId = e.dataTransfer.getData(ARTICLE_DRAG_MIME);
-    const highlightId = e.dataTransfer.getData(HIGHLIGHT_DRAG_MIME);
-    if (articleId) {
-      await trashArticleById(articleId, isAuthenticated);
-      notifyTrashed();
-    } else if (highlightId) {
-      setPendingHighlightDrop(highlightId);
+    setDragOverHref(null);
+
+    if (isTrash && (e.dataTransfer.types.includes(ARTICLE_DRAG_MIME) || e.dataTransfer.types.includes(HIGHLIGHT_DRAG_MIME))) {
+      const articleId = e.dataTransfer.getData(ARTICLE_DRAG_MIME);
+      const highlightId = e.dataTransfer.getData(HIGHLIGHT_DRAG_MIME);
+      if (articleId) {
+        await trashArticleById(articleId, isAuthenticated);
+        notifyTrashed();
+      } else if (highlightId) {
+        setPendingHighlightDrop(highlightId);
+      }
+      return;
     }
+
+    const draggedHref = e.dataTransfer.getData(NAV_DRAG_MIME);
+    if (!draggedHref || draggedHref === targetHref) return;
+    const currentOrder = navItems.map((item) => item.href);
+    const from = currentOrder.indexOf(draggedHref);
+    const to = currentOrder.indexOf(targetHref);
+    if (from === -1 || to === -1) return;
+    const reordered = [...currentOrder];
+    reordered.splice(from, 1);
+    reordered.splice(to, 0, draggedHref);
+    setNavOrder(reordered);
   }
 
   return (
@@ -183,14 +220,27 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
               <Link
                 key={href}
                 href={href}
-                onDragOver={isTrash ? handleTrashDragOver : undefined}
-                onDragEnter={isTrash ? () => setDragOverTrash(true) : undefined}
-                onDragLeave={isTrash ? () => setDragOverTrash(false) : undefined}
-                onDrop={isTrash ? handleTrashDrop : undefined}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(NAV_DRAG_MIME, href);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(e) => handleNavDragOver(e, isTrash)}
+                onDragEnter={() => {
+                  if (isTrash) setDragOverTrash(true);
+                  setDragOverHref(href);
+                }}
+                onDragLeave={() => {
+                  if (isTrash) setDragOverTrash(false);
+                  setDragOverHref((prev) => (prev === href ? null : prev));
+                }}
+                onDrop={(e) => handleNavDrop(e, href, isTrash)}
                 className={cn(
                   "flex items-center gap-2.5 rounded-sm px-3 py-2 font-sans text-sm font-medium transition-colors",
                   active ? "bg-surface-2 text-accent" : "text-ink-muted hover:bg-surface-2 hover:text-ink",
-                  isTrash && dragOverTrash && "bg-red-500/15 text-red-500 ring-2 ring-red-500/40",
+                  isTrash && dragOverTrash
+                    ? "bg-red-500/15 text-red-500 ring-2 ring-red-500/40"
+                    : dragOverHref === href && "ring-2 ring-accent/40",
                 )}
               >
                 <Icon className="h-[18px] w-[18px]" />

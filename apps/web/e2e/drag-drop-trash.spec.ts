@@ -75,9 +75,13 @@ test("dragging a highlight onto Trash asks for confirmation before deleting it",
   await yellowSwatch.click();
 
   await page.goto("/highlights");
-  await expect(page.locator("[draggable='true']").first()).toBeVisible();
+  // Scoped to <main> -- the sidebar's nav links are also draggable now (see
+  // the nav-reorder feature), and sit earlier in the DOM, so an unscoped
+  // "[draggable='true']" would grab the first nav link instead of the
+  // highlight card.
+  await expect(page.locator("main [draggable='true']").first()).toBeVisible();
 
-  await simulateDrag(page, "[draggable='true']", "a[href='/trash']");
+  await simulateDrag(page, "main [draggable='true']", "a[href='/trash']");
 
   const dialog = page.getByRole("alertdialog");
   await expect(dialog).toBeVisible();

@@ -14,7 +14,7 @@ import { cn } from "@/lib/cn";
 import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
 import { loadArticlesInCollection, loadCollections } from "@/lib/data/collections";
 import { searchLibrary } from "@/lib/data/search";
-import { loadHoardingPrefs } from "@/lib/data/hoarding-prefs";
+import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
 
@@ -37,6 +37,7 @@ export default function LibraryPage() {
 
 function LibraryPageInner() {
   const { status, isAuthenticated, lastSyncResult, dismissSyncResult } = useAuth();
+  const { hoarding } = useDevicePrefs();
   const searchParams = useSearchParams();
   const collectionId = searchParams.get("collection");
 
@@ -114,7 +115,6 @@ function LibraryPageInner() {
   }, [articles, searchResults, isSearching, tab, tagFilter]);
 
   function handleSaveClick() {
-    const hoarding = loadHoardingPrefs();
     const unreadCount = articles.filter((a) => a.status === "UNREAD").length;
     if (hoarding.enabled && unreadCount >= hoarding.maxUnread) {
       setConfirmingHoarding(unreadCount);

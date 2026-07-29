@@ -1,0 +1,120 @@
+"use client";
+
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import type { ReaderSize } from "@/components/reader/reader-toolbar";
+import { loadReaderPrefs, saveReaderPrefs, type ReaderPrefs } from "@/lib/reader/device-prefs";
+import { loadHoardingPrefs, saveHoardingPrefs, type HoardingPrefs } from "./hoarding-prefs";
+import { loadShowReadingStats, saveShowReadingStats } from "./stats-prefs";
+import { loadAutoDeletePrefs, saveAutoDeletePrefs, type AutoDeletePrefs } from "./auto-delete-prefs";
+import { loadNavOrder, saveNavOrder } from "./nav-order-prefs";
+
+/**
+ * Every device-local (not account-synced) preference in one place, reactive
+ * everywhere it's read. Each individual pref still has its own small
+ * load/save module (device-prefs.ts, hoarding-prefs.ts, etc.) -- this
+ * doesn't change the storage format, just fixes a real bug: Settings and
+ * its consumers (the app shell's nav, reader-view.tsx, use-text-to-
+ * speech.ts, library/page.tsx) previously each read localStorage
+ * independently on their own mount, so a change made on the Settings page
+ * didn't apply anywhere else until a full reload remounted everything.
+ * Routing every read and write through one shared context (same pattern as
+ * ThemeProvider, which never had this problem) means a `setXxx` call here
+ * re-renders every consumer immediately.
+ */
+interface DevicePrefsState {
+  reader: ReaderPrefs;
+  hoarding: HoardingPrefs;
+  showReadingStats: boolean;
+  autoDelete: AutoDeletePrefs;
+  navOrder: string[];
+}
+
+interface DevicePrefsContextValue extends DevicePrefsState {
+  setReaderSize: (size: ReaderSize) => void;
+  setTtsRate: (rate: number) => void;
+  setHoarding: (prefs: HoardingPrefs) => void;
+  setShowReadingStats: (enabled: boolean) => void;
+  setAutoDelete: (prefs: AutoDeletePrefs) => void;
+  setNavOrder: (order: string[]) => void;
+}
+
+const DevicePrefsContext = createContext<DevicePrefsContextValue | null>(null);
+
+// The server has no localStorage at all, so it always renders these --
+// same reasoning as ThemeProvider's own default-then-correct-after-mount
+// split (see the effect below). No hydration mismatch: nothing here
+// renders differently server- vs client-side on first paint, only after.
+const SERVER_DEFAULTS: DevicePrefsState = {
+  reader: { size: "md", ttsRate: 1 },
+  hoarding: { enabled: false, maxUnread: 25 },
+  showReadingStats: false,
+  autoDelete: { enabled: false, days: 90 },
+  navOrder: [],
+};
+
+export function DevicePrefsProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<DevicePrefsState>(SERVER_DEFAULTS);
+
+  useEffect(() => {
+    function syncFromStorage() {
+      setState({
+        reader: loadReaderPrefs(),
+        hoarding: loadHoardingPrefs(),
+        showReadingStats: loadShowReadingStats(),
+        autoDelete: loadAutoDeletePrefs(),
+        navOrder: loadNavOrder(),
+      });
+    }
+    syncFromStorage();
+  }, []);
+
+  const setReaderSize = useCallback((size: ReaderSize) => {
+    setState((prev) => {
+      const next = { ...prev.reader, size };
+      saveReaderPrefs(next);
+      return { ...prev, reader: next };
+    });
+  }, []);
+
+  const setTtsRate = useCallback((rate: number) => {
+    setState((prev) => {
+      const next = { ...prev.reader, ttsRate: rate };
+      saveReaderPrefs(next);
+      return { ...prev, reader: next };
+    });
+  }, []);
+
+  const setHoarding = useCallback((prefs: HoardingPrefs) => {
+    saveHoardingPrefs(prefs);
+    setState((prev) => ({ ...prev, hoarding: prefs }));
+  }, []);
+
+  const setShowReadingStats = useCallback((enabled: boolean) => {
+    saveShowReadingStats(enabled);
+    setState((prev) => ({ ...prev, showReadingStats: enabled }));
+  }, []);
+
+  const setAutoDelete = useCallback((prefs: AutoDeletePrefs) => {
+    saveAutoDeletePrefs(prefs);
+    setState((prev) => ({ ...prev, autoDelete: prefs }));
+  }, []);
+
+  const setNavOrder = useCallback((order: string[]) => {
+    saveNavOrder(order);
+    setState((prev) => ({ ...prev, navOrder: order }));
+  }, []);
+
+  return (
+    <DevicePrefsContext.Provider
+      value={{ ...state, setReaderSize, setTtsRate, setHoarding, setShowReadingStats, setAutoDelete, setNavOrder }}
+    >
+      {children}
+    </DevicePrefsContext.Provider>
+  );
+}
+
+export function useDevicePrefs(): DevicePrefsContextValue {
+  const ctx = useContext(DevicePrefsContext);
+  if (!ctx) throw new Error("useDevicePrefs must be used within a DevicePrefsProvider");
+  return ctx;
+}
