@@ -16,9 +16,21 @@ const workSans = Work_Sans({
   subsets: ["latin"],
 });
 
+const DESCRIPTION = "Save articles, read them clean, and keep what you highlight.";
+
 export const metadata: Metadata = {
-  title: "Booklet",
-  description: "Save articles, read them clean, and keep what you highlight.",
+  title: { default: "Booklet", template: "%s · Booklet" },
+  description: DESCRIPTION,
+  applicationName: "Booklet",
+  openGraph: {
+    title: "Booklet",
+    description: DESCRIPTION,
+    siteName: "Booklet",
+    type: "website",
+  },
+  // Proprietary, not-yet-deployed software (see README's License section) --
+  // nothing here should end up in a search index.
+  robots: { index: false, follow: false },
 };
 
 const THEME_INIT_SCRIPT = `
