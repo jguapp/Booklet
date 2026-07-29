@@ -27,6 +27,13 @@ export function HighlightManagePopover({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // While the confirm dialog is open, it's portaled to <body> (escaping
+    // this popover's own `fixed` + `transform`, which would otherwise clip
+    // its backdrop -- see confirm-dialog.tsx), so `ref.current.contains()`
+    // no longer sees clicks inside it as "inside". It has its own
+    // backdrop-click/Escape handling, so just let it own dismissal for the
+    // duration instead of also closing the whole popover out from under it.
+    if (confirming) return;
     function handlePointerDown(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onDismiss();
     }
@@ -44,7 +51,7 @@ export function HighlightManagePopover({
       document.removeEventListener("keydown", handleKey);
       window.removeEventListener("scroll", handleScroll);
     };
-  }, [onDismiss]);
+  }, [onDismiss, confirming]);
 
   function handleSave() {
     const trimmed = draft.trim();
