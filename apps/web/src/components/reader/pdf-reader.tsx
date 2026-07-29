@@ -307,7 +307,14 @@ export function PdfReader({
         </div>
       </div>
 
-      {pending && <HighlightPopover anchorRect={pending.rect} onConfirm={handleConfirm} onDismiss={() => setPending(null)} />}
+      {pending && (
+        <HighlightPopover
+          anchorRect={pending.rect}
+          selectedText={pending.position.text}
+          onConfirm={handleConfirm}
+          onDismiss={() => setPending(null)}
+        />
+      )}
       {managing && (
         <HighlightManagePopover
           anchorRect={managing.rect}
