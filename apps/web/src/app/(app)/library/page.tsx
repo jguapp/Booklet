@@ -40,7 +40,12 @@ function LibraryPageInner() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [tab, setTab] = useState<FilterTab>("ALL");
+  // Defaults to "Reading" (what's actually in progress) rather than "All"
+  // (the entire, potentially-overwhelming backlog) -- see the "knowledge
+  // hoarding" toggle below for the same underlying concern. A fresh save is
+  // always UNREAD, so handleSaved switches to that tab specifically --
+  // otherwise something you just saved would appear to vanish.
+  const [tab, setTab] = useState<FilterTab>("READING");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -106,6 +111,7 @@ function LibraryPageInner() {
   function handleSaved(article: Article) {
     setArticles((prev) => [article, ...prev]);
     setModalOpen(false);
+    setTab("UNREAD");
   }
 
   async function handleToggleArchived(article: Article) {
