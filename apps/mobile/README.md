@@ -1,21 +1,49 @@
 # Booklet mobile app
 
 An Expo/React Native app: continue without an account or log in, see your
-library, save a URL, read an article's extracted text. Reuses the same API
-and `@booklet/shared` types as the web app, per the README roadmap's
-"reusing the same API and data model rather than a rewrite."
+library, save a URL or upload a PDF/EPUB, organize into collections, read
+and highlight, and run Daily Review. Reuses the same API and
+`@booklet/shared` types as the web app, per the README roadmap's "reusing
+the same API and data model rather than a rewrite."
 
 ## Scope
 
 **Local-first, like the web app.** `src/lib/local/db.ts` is an
-AsyncStorage-backed equivalent of the web app's IndexedDB layer (`Article`s
-and `Highlight`s as JSON, keyed by id -- AsyncStorage is a flat key/value
-store, so no real indexes the way IndexedDB has), and `src/lib/data/*.ts`
-is the same local-vs-API repository-pattern swap point the web app uses.
-Logging in migrates whatever's saved locally onto the account via the same
-`POST /api/sync/import` endpoint the web app's migration uses
-(`src/lib/data/sync.ts`) -- mobile just never sends `collections`, since
-there's no collections UI here yet.
+AsyncStorage-backed equivalent of the web app's IndexedDB layer (articles,
+highlights, collections, and article-collection links as JSON, keyed by id
+-- AsyncStorage is a flat key/value store, so no real indexes the way
+IndexedDB has), and `src/lib/data/*.ts` is the same local-vs-API
+repository-pattern swap point the web app uses. Logging in migrates
+whatever's saved locally onto the account via the same `POST
+/api/sync/import` endpoint the web app's migration uses
+(`src/lib/data/sync.ts`), collections included.
+
+**PDF/EPUB** -- upload (via `expo-document-picker`) works the same signed
+in or not, same as web: the extraction endpoint never required an account.
+Unlike web, there's no real page/CFI rendering here (that's DOM canvas and
+iframe rendering, neither of which React Native has) -- PDF/EPUB show as
+extracted text through the same `ArticleScreen` HTML articles use,
+highlighting included. Picked-file uploads needed a platform branch:
+`expo-document-picker`'s native result gives a `{uri, name, type}` object
+real Android/iOS `FormData` streams directly from disk, but the *web*
+target's picker instead returns a real `File` (`asset.file` -- confirmed
+by hand that sending the `{uri, name, type}` form to a real browser's
+`fetch` produces a malformed empty part, a 400 from the API). See
+`saveArticleFromFile`'s `PickedFile` type in `src/lib/data/articles.ts`.
+
+**Collections** -- lighter UI than the web app's: no rename/delete/color,
+just create and toggle membership. Selecting a collection chip shows every
+article with a ✓/+ toggle rather than filtering to members-only -- caught
+by hand that filtering to members-only hides exactly the non-member
+articles the + button exists to add, since a hidden card's button can
+never be tapped.
+
+**Daily Review** -- `DailyReviewScreen` mirrors the web app's `/resurface`
+page: authenticated mode asks `GET /api/digests/current` for the
+server-persisted batch (stable across a reopen or a second device); local
+mode re-runs `selectHighlightsToResurface` from `@booklet/shared` against
+every local highlight on each visit (fine single-device, which is all
+local mode ever is). Same SM-2 feedback loop (`applySm2Review`) either way.
 
 **Highlighting** -- but through a different interaction than the web app's,
 because React Native has no single component that both reports a user's
@@ -53,22 +81,36 @@ which aliases the host machine) by default -- see `src/lib/config.ts`.
 ## Verified, and what wasn't
 
 The web target now actually runs, end to end -- confirmed with Playwright
-against the real dev API: (a) sign up, log in, land on the Library, save a
-URL with real extraction, see it listed; (b) continue without an account,
-save a URL into AsyncStorage, then log in and confirm the same article
-survives the migration into the account; and (c) select a text range in an
-article (simulating a real drag-select via the underlying `<textarea>`
-react-native-web renders a multiline `TextInput` as), create a highlight,
-confirm it persists across a reload, and confirm the highlight's `onPress`
-handler fires correctly with the right id when tapped (proven by a
-temporary `console.log`, since the actual removal it triggers goes through
-`Alert.alert`, and react-native-web's `Alert.alert` is a hard no-op --
-`static alert() {}` in `node_modules/react-native-web/src/exports/Alert` --
-so confirm-and-remove itself couldn't be exercised on this target. Real
-iOS/Android has a fully working native `Alert.alert`; this is a gap in the
-web target used for development convenience, not in the removal code
-itself, but it should be the first thing re-checked on a real device.
-`tsc --noEmit` is clean across the whole app.
+against the real dev API, both signed out and signed in: sign up, log in,
+land on the Library, save a URL with real extraction, see it listed;
+continue without an account, save a URL into AsyncStorage, then log in and
+confirm the same article survives the migration into the account; select
+a text range in an article (simulating a real drag-select via the
+underlying `<textarea>` react-native-web renders a multiline `TextInput`
+as), create a highlight, confirm it persists across a reload, and confirm
+the highlight's `onPress` handler fires correctly with the right id when
+tapped (proven by a temporary `console.log`, since the actual removal it
+triggers goes through `Alert.alert`, and react-native-web's `Alert.alert`
+is a hard no-op -- `static alert() {}` in
+`node_modules/react-native-web/src/exports/Alert` -- so confirm-and-remove
+itself couldn't be exercised on this target; real iOS/Android has a fully
+working native `Alert.alert`, so this is a gap in the web target used for
+development, not in the removal code, but should be the first thing
+re-checked on a real device); create a collection, upload a real EPUB
+(server-verified 200 from `/api/extract-file`, not just a UI check), add
+it to the collection and confirm the ✓/+ toggle and persistence across a
+reload, highlight the uploaded EPUB's extracted text, and run it through
+Daily Review end to end (see the highlight in the batch, mark it
+Remembered, see the "nicely done" empty state). `tsc --noEmit` is clean
+across the whole app.
+
+Also caught and fixed a real bug while testing, beyond the file-upload
+platform branch already described above: the new-collection input had
+`onSubmitEditing` and `onBlur` both wired to the same create handler, so
+pressing Enter (which also blurs the input) could fire it twice before
+React committed the first call's state, sending a duplicate create that
+came back "already exists" -- fixed with a ref-based in-flight guard,
+`creatingCollectionRef`.
 
 Getting there took two separate fixes for pnpm + Metro/React Native
 friction, both now permanent parts of this repo rather than "whoever picks

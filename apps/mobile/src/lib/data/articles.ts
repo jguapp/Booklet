@@ -73,6 +73,91 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     originalFilename: null,
     readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
     progressFraction: 0,
+    tags: [],
+    status: "UNREAD",
+    savedAt: now,
+    readAt: null,
+    archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await localArticles.put(article);
+  return article;
+}
+
+export interface PickedFile {
+  uri: string;
+  name: string;
+  mimeType?: string;
+  // expo-document-picker only sets this on its web implementation ("File
+  // object for parity with web File API, @platform web" per its own
+  // types). Real native (iOS/Android) React Native's FormData accepts a
+  // {uri, name, type} object and streams directly from the picked file's
+  // on-device URI instead -- the bytes never need to be read into JS
+  // memory first, unlike web's Blob-based FormData. Confirmed by hand
+  // that using the {uri, name, type} form on the *web* target sends a
+  // malformed/empty part (a plain object isn't a valid FormData value in
+  // a real browser's fetch) -- webFile is the fix, not a style choice.
+  webFile?: File;
+}
+
+// {uri, name, type} isn't representable in the DOM-derived FormData types
+// TypeScript uses here, so this needs a cast; it's the standard,
+// correct-at-runtime RN pattern for the native (non-web) case.
+function fileFormPart(file: PickedFile, type: string): Blob {
+  if (file.webFile) return file.webFile;
+  return { uri: file.uri, name: file.name, type } as unknown as Blob;
+}
+
+// No local raw-file store on mobile (unlike the web app's localFiles) --
+// there's no real PDF/EPUB renderer here to feed it to and no
+// download-to-device-storage link in this scaffold, only the extracted
+// text (reusing the same highlighting ArticleScreen already has for HTML).
+// The picked file's bytes go straight to the stateless extraction
+// endpoint and are then discarded.
+export async function saveArticleFromFile(file: PickedFile, authenticated: boolean): Promise<Article> {
+  const fileName = file.name;
+  const ext = fileName.toLowerCase().split(".").pop();
+  if (ext !== "pdf" && ext !== "epub") {
+    throw new ApiError(400, "unsupported_type", "Only .pdf and .epub files are supported.");
+  }
+  const type = file.mimeType ?? (ext === "pdf" ? "application/pdf" : "application/epub+zip");
+
+  if (authenticated) {
+    const form = new FormData();
+    form.append("file", fileFormPart(file, type), fileName);
+    return apiFetch<Article>("/api/articles/upload", { method: "POST", body: form });
+  }
+
+  let extracted: ExtractedContent | null = null;
+  let extractionError: string | null = null;
+  try {
+    const form = new FormData();
+    form.append("file", fileFormPart(file, type), fileName);
+    extracted = await apiFetch<ExtractedContent>("/api/extract-file", { method: "POST", body: form, auth: false });
+  } catch (err) {
+    extractionError = err instanceof ApiError ? err.message : "Extraction failed.";
+  }
+
+  const now = new Date().toISOString();
+  const article: Article = {
+    id: generateLocalId(),
+    userId: "local",
+    url: null,
+    title: extracted?.title ?? fileName.replace(/\.(pdf|epub)$/i, ""),
+    author: null,
+    siteName: null,
+    excerpt: null,
+    sourceType: ext === "pdf" ? "PDF" : "EPUB",
+    extractionStatus: extracted ? "SUCCESS" : "FAILED",
+    extractionError,
+    extractedHtml: null,
+    extractedText: extracted?.text ?? null,
+    fileStorageKey: null,
+    originalFilename: fileName,
+    readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
+    progressFraction: 0,
+    tags: [],
     status: "UNREAD",
     savedAt: now,
     readAt: null,

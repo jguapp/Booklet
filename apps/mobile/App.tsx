@@ -6,6 +6,7 @@ import { migrateLocalDataToAccount } from "./src/lib/data/sync";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { LibraryScreen } from "./src/screens/LibraryScreen";
 import { ArticleScreen } from "./src/screens/ArticleScreen";
+import { DailyReviewScreen } from "./src/screens/DailyReviewScreen";
 
 // No navigation library -- a handful of screens and a session check don't
 // need React Navigation's setup (and its native-linking config) for a
@@ -17,7 +18,8 @@ import { ArticleScreen } from "./src/screens/ArticleScreen";
 type Screen =
   | { name: "login" }
   | { name: "library"; authenticated: boolean }
-  | { name: "article"; id: string; authenticated: boolean };
+  | { name: "article"; id: string; authenticated: boolean }
+  | { name: "resurface"; authenticated: boolean };
 
 export default function App() {
   const [checkingSession, setCheckingSession] = useState(true);
@@ -59,12 +61,19 @@ export default function App() {
         <LibraryScreen
           authenticated={screen.authenticated}
           onOpenArticle={(id) => setScreen({ name: "article", id, authenticated: screen.authenticated })}
+          onOpenDailyReview={() => setScreen({ name: "resurface", authenticated: screen.authenticated })}
           onSignedOut={() => setScreen({ name: "login" })}
         />
       )}
       {screen.name === "article" && (
         <ArticleScreen
           articleId={screen.id}
+          authenticated={screen.authenticated}
+          onBack={() => setScreen({ name: "library", authenticated: screen.authenticated })}
+        />
+      )}
+      {screen.name === "resurface" && (
+        <DailyReviewScreen
           authenticated={screen.authenticated}
           onBack={() => setScreen({ name: "library", authenticated: screen.authenticated })}
         />
