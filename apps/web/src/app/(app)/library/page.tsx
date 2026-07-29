@@ -9,10 +9,12 @@ import { Input } from "@/components/ui/input";
 import { IconSearch } from "@/components/ui/icons";
 import { ArticleCard } from "@/components/library/article-card";
 import { SaveArticleModal } from "@/components/library/save-article-modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/cn";
 import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
 import { loadArticlesInCollection, loadCollections } from "@/lib/data/collections";
 import { searchLibrary } from "@/lib/data/search";
+import { loadHoardingPrefs } from "@/lib/data/hoarding-prefs";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
 
@@ -52,6 +54,7 @@ function LibraryPageInner() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [searchResults, setSearchResults] = useState<{ articles: Article[]; highlights: Highlight[] } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [confirmingHoarding, setConfirmingHoarding] = useState<number | null>(null); // current unread count, while the "you sure?" prompt is up
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
@@ -110,6 +113,16 @@ function LibraryPageInner() {
       .sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
   }, [articles, searchResults, isSearching, tab, tagFilter]);
 
+  function handleSaveClick() {
+    const hoarding = loadHoardingPrefs();
+    const unreadCount = articles.filter((a) => a.status === "UNREAD").length;
+    if (hoarding.enabled && unreadCount >= hoarding.maxUnread) {
+      setConfirmingHoarding(unreadCount);
+      return;
+    }
+    setModalOpen(true);
+  }
+
   function handleSaved(article: Article) {
     setArticles((prev) => [article, ...prev]);
     setModalOpen(false);
@@ -147,7 +160,7 @@ function LibraryPageInner() {
             </a>
           )}
         </div>
-        <Button variant="primary" onClick={() => setModalOpen(true)}>
+        <Button variant="primary" onClick={handleSaveClick}>
           Save article
         </Button>
       </div>
@@ -272,6 +285,21 @@ function LibraryPageInner() {
 
       {modalOpen && (
         <SaveArticleModal authenticated={isAuthenticated} onClose={() => setModalOpen(false)} onSaved={handleSaved} />
+      )}
+
+      {confirmingHoarding !== null && (
+        <ConfirmDialog
+          title="Your unread pile is growing"
+          message={`You have ${confirmingHoarding} unread articles already. Consider reading or archiving one before saving more.`}
+          confirmLabel="Save anyway"
+          cancelLabel="Not now"
+          danger={false}
+          onCancel={() => setConfirmingHoarding(null)}
+          onConfirm={() => {
+            setConfirmingHoarding(null);
+            setModalOpen(true);
+          }}
+        />
       )}
     </div>
   );
