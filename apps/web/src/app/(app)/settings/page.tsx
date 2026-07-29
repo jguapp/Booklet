@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ResurfaceFrequency, SessionInfo } from "@booklet/shared";
 import { Button, ButtonLink } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { loadReaderPrefs, saveReaderPrefs } from "@/lib/reader/device-prefs";
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { loadSessions, revokeOtherSessions, revokeSession } from "@/lib/data/sessions";
+import { exportAsMarkdownZip, importUrls, parseImportCsv } from "@/lib/data/export-import";
 import { formatRelativeDate, summarizeUserAgent } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
@@ -65,6 +66,42 @@ export default function SettingsPage() {
   function handleTtsRateChange(rate: number) {
     setTtsRate(rate);
     saveReaderPrefs({ size: readerSize, ttsRate: rate });
+  }
+
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+
+    const rows = parseImportCsv(await file.text());
+    if (rows.length === 0) {
+      setImportStatus("Couldn't find a URL column in that file.");
+      return;
+    }
+
+    setImporting(true);
+    setImportStatus(`Importing 0 / ${rows.length}…`);
+    const result = await importUrls(rows, status === "authenticated", (done, total) =>
+      setImportStatus(`Importing ${done} / ${total}…`),
+    );
+    setImporting(false);
+    setImportStatus(
+      `Imported ${result.imported}, skipped ${result.skipped} already-saved, ${result.failed} failed.`,
+    );
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      await exportAsMarkdownZip(status === "authenticated");
+    } finally {
+      setExporting(false);
+    }
   }
 
   useEffect(() => {
@@ -241,6 +278,46 @@ export default function SettingsPage() {
           {saved && <span className="font-sans text-sm text-accent">Saved.</span>}
         </div>
       </form>
+
+      <section className="mt-10 border-t border-border pt-6">
+        <h2 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+          Import &amp; export
+        </h2>
+        <p className="mb-4 font-sans text-sm text-ink-muted">
+          Import a CSV export from Pocket or Instapaper (each URL is saved and extracted for real, the same as
+          saving one by hand). Export everything as Markdown -- one file per article with its highlights, ready to
+          drop into an Obsidian vault or import into Notion.
+        </p>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={handleImportFile}
+        />
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={importing}
+            onClick={() => importInputRef.current?.click()}
+          >
+            Import from Pocket
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={importing}
+            onClick={() => importInputRef.current?.click()}
+          >
+            Import from Instapaper
+          </Button>
+          <Button type="button" variant="secondary" disabled={exporting} onClick={handleExport}>
+            {exporting ? "Exporting…" : "Export as Markdown"}
+          </Button>
+        </div>
+        {importStatus && <p className="mt-3 font-sans text-sm text-ink-muted">{importStatus}</p>}
+      </section>
 
       <section className="mt-10 border-t border-border pt-6">
         <h2 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Account</h2>
