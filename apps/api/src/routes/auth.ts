@@ -21,8 +21,16 @@ import {
   REFRESH_TOKEN_TTL_MS,
   signAccessToken,
 } from "../lib/auth/tokens.js";
-import { clearRefreshCookie, REFRESH_COOKIE_NAME, setRefreshCookie } from "../lib/auth/cookies.js";
+import {
+  clearOAuthStateCookie,
+  clearRefreshCookie,
+  OAUTH_STATE_COOKIE_NAME,
+  REFRESH_COOKIE_NAME,
+  setOAuthStateCookie,
+  setRefreshCookie,
+} from "../lib/auth/cookies.js";
 import { requireAuth } from "../lib/auth/context.js";
+import { getOAuthProvider } from "../lib/auth/oauth.js";
 import { sendEmail } from "../services/email-service.js";
 
 type UserRow = Awaited<ReturnType<typeof prisma.user.findUniqueOrThrow>>;
@@ -41,6 +49,10 @@ function toUserProfile(user: UserRow): UserProfile {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const WEB_ORIGIN = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+// This server's own public URL -- must exactly match the redirect URI
+// registered with each OAuth provider (a mismatch is one of the most common
+// "invalid_redirect_uri" support questions for this kind of flow).
+const API_ORIGIN = process.env.API_ORIGIN ?? "http://localhost:4000";
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -147,7 +159,9 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     if (typeof email !== "string" || typeof password !== "string") return invalid();
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !verifyPassword(password, user.passwordHash)) return invalid();
+    // A null passwordHash means this account was created via OAuth and has
+    // never set one -- password login just isn't an option for it yet.
+    if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) return invalid();
 
     const { accessToken, accessTokenExpiresAt } = await issueSession(app, reply, user.id, {
       userAgent: request.headers["user-agent"],
@@ -193,6 +207,113 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       accessTokenExpiresAt: accessTokenExpiresAt.toISOString(),
     };
     return reply.send(body);
+    },
+  );
+
+  // Whether each provider has real credentials configured -- the client
+  // uses this to decide whether to show a "Sign in with X" button at all,
+  // rather than showing one that 404s.
+  app.get("/api/auth/oauth/providers", async (_request, reply) => {
+    return reply.send({
+      google: getOAuthProvider("google")?.configured ?? false,
+      github: getOAuthProvider("github")?.configured ?? false,
+    });
+  });
+
+  app.get<{ Params: { provider: string } }>(
+    "/api/auth/oauth/:provider",
+    { config: { rateLimit: AUTH_ATTEMPT_LIMIT } },
+    async (request, reply) => {
+      const provider = getOAuthProvider(request.params.provider);
+      if (!provider || !provider.configured) {
+        return reply.code(404).send({ error: "unknown_provider", message: "That sign-in method isn't available." });
+      }
+
+      const state = generateOpaqueToken();
+      setOAuthStateCookie(reply, state);
+      const redirectUri = `${API_ORIGIN}/api/auth/oauth/${request.params.provider}/callback`;
+      return reply.redirect(provider.authorizeUrl({ redirectUri, state }));
+    },
+  );
+
+  app.get<{ Params: { provider: string }; Querystring: { code?: string; state?: string; error?: string } }>(
+    "/api/auth/oauth/:provider/callback",
+    { config: { rateLimit: AUTH_ATTEMPT_LIMIT } },
+    async (request, reply) => {
+      const failure = () => reply.redirect(`${WEB_ORIGIN}/login?error=oauth_failed`);
+
+      const provider = getOAuthProvider(request.params.provider);
+      if (!provider || !provider.configured) return failure();
+
+      const cookieState = request.cookies[OAUTH_STATE_COOKIE_NAME];
+      clearOAuthStateCookie(reply);
+      const { code, state, error } = request.query;
+      if (error || !code || !state || !cookieState || state !== cookieState) return failure();
+
+      let profile;
+      try {
+        const redirectUri = `${API_ORIGIN}/api/auth/oauth/${request.params.provider}/callback`;
+        profile = await provider.exchangeCode({ code, redirectUri });
+      } catch (err) {
+        app.log.warn(err, "oauth exchange failed");
+        return failure();
+      }
+
+      // 1. Already linked -- sign in as whoever it's linked to.
+      const existingLink = await prisma.oAuthAccount.findUnique({
+        where: { provider_providerAccountId: { provider: request.params.provider, providerAccountId: profile.providerAccountId } },
+      });
+
+      let userId: string;
+      if (existingLink) {
+        userId = existingLink.userId;
+      } else {
+        const existingUser = await prisma.user.findUnique({ where: { email: profile.email } });
+        // 2. No link yet, but a password account already owns this email --
+        // only attach to it if the provider itself vouches the address is
+        // verified, otherwise this would be a way to hijack an account by
+        // registering an OAuth identity under someone else's unverified email.
+        if (existingUser) {
+          if (!profile.emailVerified) return failure();
+          await prisma.oAuthAccount.create({
+            data: { userId: existingUser.id, provider: request.params.provider, providerAccountId: profile.providerAccountId },
+          });
+          userId = existingUser.id;
+          if (!existingUser.emailVerifiedAt) {
+            await prisma.user.update({ where: { id: existingUser.id }, data: { emailVerifiedAt: new Date() } });
+          }
+        } else {
+          // 3. Brand new account -- no password, sign-in is OAuth-only from here.
+          const created = await prisma.user.create({
+            data: {
+              email: profile.email,
+              passwordHash: null,
+              name: profile.name,
+              emailVerifiedAt: profile.emailVerified ? new Date() : null,
+              oauthAccounts: {
+                create: { provider: request.params.provider, providerAccountId: profile.providerAccountId },
+              },
+            },
+          });
+          userId = created.id;
+          if (!profile.emailVerified) {
+            sendVerificationEmail(created.id, created.email).catch((err) =>
+              app.log.warn(err, "verification email failed"),
+            );
+          }
+        }
+      }
+
+      await issueSession(app, reply, userId, {
+        userAgent: request.headers["user-agent"],
+        ipAddress: request.ip,
+      });
+      // The web app's AuthProvider picks this session up itself on mount via
+      // the refresh cookie just set above (same silent-refresh path used for
+      // "still signed in from last time") -- no token needs to travel
+      // through this redirect. /oauth-callback also triggers the
+      // local-data-import step that login()/signup() normally do inline.
+      return reply.redirect(`${WEB_ORIGIN}/oauth-callback`);
     },
   );
 

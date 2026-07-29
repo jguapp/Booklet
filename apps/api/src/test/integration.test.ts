@@ -103,6 +103,32 @@ describe("API integration", () => {
       refreshCookie = `${newCookie!.name}=${newCookie!.value}`;
       accessToken = first.json().accessToken;
     });
+
+    // This process never sets GOOGLE_CLIENT_ID/GITHUB_CLIENT_ID (see
+    // oauth.test.ts for the configured-provider behavior, which needs those
+    // set before oauth.ts is first imported) -- so this is also exactly
+    // what a real deployment with no OAuth apps registered actually does.
+    it("reports both OAuth providers as unconfigured by default", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/auth/oauth/providers" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ google: false, github: false });
+    });
+
+    it("404s starting an OAuth flow for an unconfigured provider", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/auth/oauth/google" });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("404s starting an OAuth flow for an unknown provider", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/auth/oauth/facebook" });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("sends an unconfigured provider's callback back to login with an error", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/auth/oauth/google/callback?code=x&state=y" });
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain("/login?error=oauth_failed");
+    });
   });
 
   describe("articles", () => {

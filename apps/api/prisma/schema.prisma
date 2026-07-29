@@ -48,9 +48,12 @@ enum ResurfaceFrequency {
 // ---------- Models ----------
 
 model User {
-  id              String    @id @default(cuid())
-  email           String    @unique
-  passwordHash    String
+  id String @id @default(cuid())
+  email String @unique
+  // Nullable: an account created via OAuth (see OAuthAccount) never sets
+  // one -- login-by-password just isn't an option for that user, rather
+  // than issuing them a random password they'll never know.
+  passwordHash    String?
   name            String?
   emailVerifiedAt DateTime?
   createdAt       DateTime  @default(now())
@@ -64,9 +67,26 @@ model User {
   digests                 Digest[]
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
+  oauthAccounts           OAuthAccount[]
 
   resurfaceFrequency  ResurfaceFrequency @default(DAILY)
   highlightsPerDigest Int                @default(5)
+}
+
+// One row per (provider, external account) a user has signed in with.
+// Looked up on every OAuth callback to find the existing user; if none
+// matches but a User with the same (provider-verified) email already
+// exists, the account gets linked to it instead of creating a duplicate --
+// see lib/auth/oauth.ts.
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String
+  providerAccountId String
+  createdAt         DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
 }
 
 // Single-use, short-lived tokens for "forgot password" -- only the hash is
