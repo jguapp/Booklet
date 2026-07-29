@@ -1,3 +1,5 @@
 dist/
 .pw-user-data*/
 *.tsbuildinfo
+/test-results
+/playwright-report

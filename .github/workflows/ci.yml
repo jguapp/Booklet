@@ -114,3 +114,45 @@ jobs:
       # network is ever restricted for this runner, this job needs a stub
       # extraction endpoint instead of skipping coverage silently.
       - run: pnpm --filter @booklet/web test:e2e
+
+  test-extension-e2e:
+    runs-on: ubuntu-latest
+    needs: [test-api]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: booklet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/booklet?schema=public
+      WEB_ORIGIN: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @booklet/api exec prisma migrate deploy
+      - run: pnpm --filter @booklet/extension build
+      - run: pnpm --filter @booklet/extension exec playwright install --with-deps chromium
+      # Loading a real extension needs an actual background service worker,
+      # which (confirmed empirically, see e2e/extension.spec.ts) doesn't
+      # register under Chromium's headless mode -- xvfb gives it a real
+      # display to run headed against, same trick used for any headed-only
+      # browser suite on a runner with no physical display.
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: pnpm --filter @booklet/api dev &
+      - name: Wait for the API to be ready
+        run: npx wait-on http://localhost:4000/api/health --timeout 60000
+      - run: xvfb-run -a pnpm --filter @booklet/extension test:e2e
