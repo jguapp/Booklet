@@ -236,7 +236,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
         onThemeChange={setTheme}
         size={size}
         onSizeChange={setSize}
-        progress={isTextRenderable ? progress : article.progressFraction}
+        progress={progress}
       />
       <main className={cn("mx-auto px-6 py-12", usesPdfReader || usesEpubReader ? "max-w-[840px]" : "max-w-[680px]")}>
         <div className="mb-4 flex items-center gap-2 text-ink-faint">
