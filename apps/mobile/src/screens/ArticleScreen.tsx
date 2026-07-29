@@ -1,7 +1,18 @@
-import { useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import type { Article } from "@booklet/shared";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import type { Article, Highlight, HighlightColor } from "@booklet/shared";
+import { computeTextPosition } from "@booklet/shared";
 import { loadArticle } from "../lib/data/articles";
+import { createHighlight, deleteHighlight, loadHighlights } from "../lib/data/highlights";
 
 interface ArticleScreenProps {
   articleId: string;
@@ -9,21 +20,102 @@ interface ArticleScreenProps {
   onBack: () => void;
 }
 
-// Read-only for now -- no highlighting yet. The web app's highlighting is
-// built on the browser's Selection/Range APIs (see lib/reader/dom-range.ts),
-// which don't exist in React Native; a mobile equivalent needs its own
-// text-selection approach, not a port of that code. Same principle as the
-// browser extension: ship the useful slice first, not a stalled attempt at
-// full parity.
+const COLORS: { value: HighlightColor; hex: string; label: string }[] = [
+  { value: "YELLOW", hex: "#F3DE9C", label: "Yellow" },
+  { value: "GREEN", hex: "#BCDFC4", label: "Green" },
+  { value: "BLUE", hex: "#BBD6E8", label: "Blue" },
+  { value: "PINK", hex: "#EFCCDA", label: "Pink" },
+  { value: "ORANGE", hex: "#F1CB9E", label: "Orange" },
+];
+
+interface Segment {
+  key: string;
+  text: string;
+  highlight: Highlight | null;
+}
+
+// Only "text"-type positions are ever produced here -- mobile only deals in
+// article.extractedText, never a PDF/EPUB position (see
+// packages/shared/types/highlight-position.ts). A highlight whose stored
+// offsets no longer fit the current text (extractedText changed since it
+// was created) is skipped rather than mis-rendered.
+function buildSegments(text: string, highlights: Highlight[]): Segment[] {
+  const ranges = highlights
+    .filter((h) => h.position.type === "text")
+    .map((h) => ({ start: (h.position as { start: number }).start, end: (h.position as { end: number }).end, highlight: h }))
+    .filter((r) => r.start >= 0 && r.end <= text.length && r.start < r.end)
+    .sort((a, b) => a.start - b.start);
+
+  const segments: Segment[] = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start < cursor) continue; // overlapping highlight -- skip rather than corrupt rendering
+    if (range.start > cursor) segments.push({ key: `plain-${cursor}`, text: text.slice(cursor, range.start), highlight: null });
+    segments.push({ key: range.highlight.id, text: text.slice(range.start, range.end), highlight: range.highlight });
+    cursor = range.end;
+  }
+  if (cursor < text.length) segments.push({ key: `plain-${cursor}`, text: text.slice(cursor), highlight: null });
+  return segments;
+}
+
 export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScreenProps) {
   const [article, setArticle] = useState<Article | null>(null);
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selecting, setSelecting] = useState(false);
+  const [selection, setSelection] = useState({ start: 0, end: 0 });
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    loadArticle(articleId, authenticated)
-      .then(setArticle)
+    Promise.all([loadArticle(articleId, authenticated), loadHighlights(articleId, authenticated)])
+      .then(([a, h]) => {
+        setArticle(a);
+        setHighlights(h);
+      })
       .finally(() => setLoading(false));
   }, [articleId, authenticated]);
+
+  const text = article?.extractedText ?? "";
+  const segments = useMemo(() => buildSegments(text, highlights), [text, highlights]);
+  const hasSelection = selection.end > selection.start;
+
+  function toggleSelecting() {
+    setSelecting((prev) => !prev);
+    setSelection({ start: 0, end: 0 });
+  }
+
+  async function handleHighlight(color: HighlightColor) {
+    if (!article || !hasSelection || saving) return;
+    setSaving(true);
+    try {
+      const position = computeTextPosition(text, selection.start, selection.end);
+      const created = await createHighlight(
+        { articleId: article.id, selectedText: position.exact, position, color },
+        authenticated,
+      );
+      setHighlights((prev) => [...prev, created]);
+      setSelecting(false);
+      setSelection({ start: 0, end: 0 });
+    } catch {
+      Alert.alert("Couldn't save that highlight", "Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function confirmRemoveHighlight(highlight: Highlight) {
+    Alert.alert("Remove highlight?", undefined, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          await deleteHighlight(highlight.id, authenticated);
+          setHighlights((prev) => prev.filter((h) => h.id !== highlight.id));
+        },
+      },
+    ]);
+  }
 
   if (loading) {
     return (
@@ -45,23 +137,103 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <TouchableOpacity onPress={onBack}>
-        <Text style={styles.back}>← Library</Text>
-      </TouchableOpacity>
-      <Text style={styles.title}>{article.title ?? "Untitled"}</Text>
-      <Text style={styles.meta}>{article.siteName ?? article.author ?? article.sourceType}</Text>
-      <Text style={styles.body}>{article.extractedText ?? "No readable content for this article."}</Text>
-    </ScrollView>
+    <View style={styles.container}>
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={onBack}>
+          <Text style={styles.back}>← Library</Text>
+        </TouchableOpacity>
+        {text.length > 0 && (
+          <TouchableOpacity onPress={toggleSelecting}>
+            <Text style={styles.selectToggle}>{selecting ? "Done" : "Select text"}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>{article.title ?? "Untitled"}</Text>
+        <Text style={styles.meta}>{article.siteName ?? article.author ?? article.sourceType}</Text>
+
+        {selecting ? (
+          // A plain multiline Text can't report a user's selection range or
+          // give per-substring styling at the same time -- RN has no single
+          // "selectable rich text" primitive. TextInput is the only
+          // component that exposes onSelectionChange, so highlighting is a
+          // toggled mode: select in a plain (edit-blocked) TextInput, view
+          // highlights as styled Text segments otherwise. See README.md's
+          // Verified section for what is and isn't confirmed on native.
+          <TextInput
+            style={styles.body}
+            multiline
+            value={text}
+            showSoftInputOnFocus={false}
+            onChangeText={() => {
+              /* no-op: value stays bound to `text`, so RN reverts any edit */
+            }}
+            onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
+          />
+        ) : text ? (
+          <Text style={styles.body}>
+            {segments.map((seg) =>
+              seg.highlight ? (
+                <Text
+                  key={seg.key}
+                  style={{ backgroundColor: COLORS.find((c) => c.value === seg.highlight!.color)?.hex }}
+                  onPress={() => confirmRemoveHighlight(seg.highlight!)}
+                >
+                  {seg.text}
+                </Text>
+              ) : (
+                <Text key={seg.key}>{seg.text}</Text>
+              ),
+            )}
+          </Text>
+        ) : (
+          <Text style={styles.body}>No readable content for this article.</Text>
+        )}
+      </ScrollView>
+
+      {selecting && hasSelection && (
+        <View style={styles.colorBar}>
+          {COLORS.map((c) => (
+            <TouchableOpacity
+              key={c.value}
+              accessibilityLabel={c.label}
+              disabled={saving}
+              style={[styles.swatch, { backgroundColor: c.hex }]}
+              onPress={() => handleHighlight(c.value)}
+            />
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f7f4ee" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: "#f7f4ee" },
-  content: { padding: 20, paddingTop: 56 },
-  back: { color: "#b5502f", fontSize: 14, marginBottom: 16, fontWeight: "600" },
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingTop: 56,
+    paddingHorizontal: 20,
+  },
+  scroll: { flex: 1 },
+  content: { padding: 20, paddingTop: 12 },
+  back: { color: "#b5502f", fontSize: 14, fontWeight: "600" },
+  selectToggle: { color: "#1F6F6B", fontSize: 14, fontWeight: "600" },
   title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 4 },
   meta: { fontSize: 13, color: "#6b6558", marginBottom: 20 },
   body: { fontSize: 16, lineHeight: 26, color: "#1c1a16" },
+  colorBar: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 16,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#ece6d8",
+    backgroundColor: "#fff",
+  },
+  swatch: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: "#ddd6c7" },
 });

@@ -5,7 +5,7 @@
  */
 import type { Article, ArticleListResponse, ExtractedContent } from "@booklet/shared";
 import { apiFetch, ApiError } from "../api";
-import { localArticles, localHighlights } from "../local/db";
+import { generateLocalId, localArticles, localHighlights } from "../local/db";
 
 export { ApiError };
 
@@ -57,7 +57,7 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
 
   const now = new Date().toISOString();
   const article: Article = {
-    id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    id: generateLocalId(),
     userId: "local",
     url,
     title: extracted?.title ?? null,
