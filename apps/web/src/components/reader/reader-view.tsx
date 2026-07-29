@@ -316,7 +316,19 @@ export function ReaderView({ articleId }: { articleId: string }) {
           {article.title}
         </h1>
         <p className="mb-5 font-sans text-xs text-ink-faint">
-          {label}
+          {article.url ? (
+            <a
+              href={article.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-dotted underline-offset-2 transition-colors hover:text-accent"
+              title="Open the original article"
+            >
+              {label}
+            </a>
+          ) : (
+            label
+          )}
           {article.readingTimeEstimate ? ` · ${formatReadingTime(article.readingTimeEstimate)}` : ""}
           {isTextRenderable && remainingMinutes !== null ? ` · ${remainingMinutes} min left` : ""}
         </p>

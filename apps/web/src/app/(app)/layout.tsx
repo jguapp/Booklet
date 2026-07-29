@@ -26,6 +26,7 @@ import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { applyNavOrder } from "@/lib/data/nav-order-prefs";
 import { ApiError } from "@/lib/api/client";
 import { ThemeSwitcher } from "@/components/ui/theme-switcher";
+import { BookletLogo } from "@/components/ui/logo";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ARTICLE_DRAG_MIME, HIGHLIGHT_DRAG_MIME, notifyTrashed } from "@/lib/dnd/trash-drop";
 
@@ -205,11 +206,11 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
-        <div className="flex items-center justify-between px-5 py-6">
+        <div className="flex items-center gap-2 px-5 py-6">
+          <BookletLogo />
           <Link href="/library" className="font-serif text-xl font-semibold text-ink">
             Booklet
           </Link>
-          <ThemeSwitcher />
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
@@ -368,6 +369,10 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
               <span className="block font-medium text-accent">Sync across devices →</span>
             </Link>
           )}
+        </div>
+
+        <div className="border-t border-border px-5 py-3">
+          <ThemeSwitcher />
         </div>
       </aside>
 
