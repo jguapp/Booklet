@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { Article, ArticleListResponse, AuthResponse, UserProfile } from "@booklet/shared";
+import type { AuthResponse, UserProfile } from "@booklet/shared";
 import { API_URL } from "./config";
 
 interface StoredSession {
@@ -77,24 +77,3 @@ export async function login(email: string, password: string): Promise<UserProfil
   return body.user;
 }
 
-export async function loadArticles(): Promise<Article[]> {
-  const articles: Article[] = [];
-  let cursor: string | null = null;
-  let hasMore = true;
-  while (hasMore) {
-    const query = `limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-    const res: ArticleListResponse = await apiFetch<ArticleListResponse>(`/api/articles?${query}`);
-    articles.push(...(res.articles as Article[]));
-    cursor = res.nextCursor;
-    hasMore = cursor !== null;
-  }
-  return articles;
-}
-
-export async function loadArticle(id: string): Promise<Article> {
-  return apiFetch<Article>(`/api/articles/${id}`);
-}
-
-export async function saveArticleFromUrl(url: string): Promise<Article> {
-  return apiFetch<Article>("/api/articles", { method: "POST", body: JSON.stringify({ url }) });
-}

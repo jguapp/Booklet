@@ -1,27 +1,35 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import type { UserProfile } from "@booklet/shared";
 import { getSession } from "./src/lib/api";
+import { migrateLocalDataToAccount } from "./src/lib/data/sync";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { LibraryScreen } from "./src/screens/LibraryScreen";
 import { ArticleScreen } from "./src/screens/ArticleScreen";
 
-// No navigation library -- three screens and a session check don't need
-// React Navigation's setup (and its native-linking config) for a scaffold.
-type Screen = { name: "login" } | { name: "library" } | { name: "article"; id: string };
+// No navigation library -- a handful of screens and a session check don't
+// need React Navigation's setup (and its native-linking config) for a
+// scaffold this size. `authenticated` travels with the library/article
+// screens rather than living in one global flag, matching the web app's
+// "every read/write goes through a repository that takes the caller's
+// current auth state" pattern (lib/data/articles.ts) instead of a
+// module-level branch.
+type Screen =
+  | { name: "login" }
+  | { name: "library"; authenticated: boolean }
+  | { name: "article"; id: string; authenticated: boolean };
 
 export default function App() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [screen, setScreen] = useState<Screen>({ name: "login" });
-  const [, setUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
-    getSession()
-      .then((session) => {
-        if (session) setScreen({ name: "library" });
-      })
-      .finally(() => setCheckingSession(false));
+    async function restore() {
+      const session = await getSession();
+      if (session) setScreen({ name: "library", authenticated: true });
+      setCheckingSession(false);
+    }
+    restore();
   }, []);
 
   if (checkingSession) {
@@ -37,23 +45,29 @@ export default function App() {
       <StatusBar style="auto" />
       {screen.name === "login" && (
         <LoginScreen
-          onLoggedIn={(loggedInUser) => {
-            setUser(loggedInUser);
-            setScreen({ name: "library" });
+          onLoggedIn={async () => {
+            // Best-effort, same as the web app's runMigration -- local data
+            // (if there is any) is left untouched on failure, so it isn't
+            // lost, just not synced yet.
+            await migrateLocalDataToAccount().catch(() => undefined);
+            setScreen({ name: "library", authenticated: true });
           }}
+          onContinueWithoutAccount={() => setScreen({ name: "library", authenticated: false })}
         />
       )}
       {screen.name === "library" && (
         <LibraryScreen
-          onOpenArticle={(id) => setScreen({ name: "article", id })}
-          onLoggedOut={() => {
-            setUser(null);
-            setScreen({ name: "login" });
-          }}
+          authenticated={screen.authenticated}
+          onOpenArticle={(id) => setScreen({ name: "article", id, authenticated: screen.authenticated })}
+          onSignedOut={() => setScreen({ name: "login" })}
         />
       )}
       {screen.name === "article" && (
-        <ArticleScreen articleId={screen.id} onBack={() => setScreen({ name: "library" })} />
+        <ArticleScreen
+          articleId={screen.id}
+          authenticated={screen.authenticated}
+          onBack={() => setScreen({ name: "library", authenticated: screen.authenticated })}
+        />
       )}
     </>
   );

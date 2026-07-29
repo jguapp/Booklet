@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { Article } from "@booklet/shared";
-import { loadArticle } from "../lib/api";
+import { loadArticle } from "../lib/data/articles";
 
 interface ArticleScreenProps {
   articleId: string;
+  authenticated: boolean;
   onBack: () => void;
 }
 
@@ -14,15 +15,15 @@ interface ArticleScreenProps {
 // text-selection approach, not a port of that code. Same principle as the
 // browser extension: ship the useful slice first, not a stalled attempt at
 // full parity.
-export function ArticleScreen({ articleId, onBack }: ArticleScreenProps) {
+export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScreenProps) {
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadArticle(articleId)
+    loadArticle(articleId, authenticated)
       .then(setArticle)
       .finally(() => setLoading(false));
-  }, [articleId]);
+  }, [articleId, authenticated]);
 
   if (loading) {
     return (

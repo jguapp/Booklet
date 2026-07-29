@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { ApiError, login } from "../lib/api";
-import type { UserProfile } from "@booklet/shared";
 
-export function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: UserProfile) => void }) {
+interface LoginScreenProps {
+  onLoggedIn: () => void;
+  onContinueWithoutAccount: () => void;
+}
+
+export function LoginScreen({ onLoggedIn, onContinueWithoutAccount }: LoginScreenProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -13,8 +17,8 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: UserProfile) =>
     setSubmitting(true);
     setError(null);
     try {
-      const user = await login(email.trim(), password);
-      onLoggedIn(user);
+      await login(email.trim(), password);
+      onLoggedIn();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't log in. Try again.");
     } finally {
@@ -26,8 +30,8 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: UserProfile) =>
     <View style={styles.container}>
       <Text style={styles.title}>Booklet</Text>
       <Text style={styles.subtitle}>
-        Sign in to sync your library. This mobile app is account-only for now -- the offline/local
-        mode the web app has isn't ported here yet.
+        No account needed to save and read articles -- sign in only if you want your library synced
+        across devices.
       </Text>
 
       <TextInput
@@ -51,6 +55,10 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: UserProfile) =>
       <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={submitting}>
         {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log in</Text>}
       </TouchableOpacity>
+
+      <TouchableOpacity style={styles.secondaryButton} onPress={onContinueWithoutAccount} disabled={submitting}>
+        <Text style={styles.secondaryButtonText}>Continue without an account</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -70,5 +78,7 @@ const styles = StyleSheet.create({
   },
   button: { backgroundColor: "#b5502f", borderRadius: 6, padding: 14, alignItems: "center", marginTop: 8 },
   buttonText: { color: "#fff", fontWeight: "600", fontSize: 15 },
+  secondaryButton: { padding: 14, alignItems: "center", marginTop: 4 },
+  secondaryButtonText: { color: "#6b6558", fontWeight: "600", fontSize: 14 },
   error: { color: "#b5502f", marginBottom: 12, fontSize: 13 },
 });
