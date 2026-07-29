@@ -24,6 +24,15 @@ export function IconHighlights(props: IconProps) {
   );
 }
 
+export function IconStats(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 16V9M9.5 16V4M15 16v-6" strokeLinecap="round" />
+      <path d="M3 16.5h14" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconRss(props: IconProps) {
   return (
     <svg {...base(props)}>

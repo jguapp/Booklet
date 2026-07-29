@@ -47,6 +47,7 @@ export async function migrateLocalDataToAccount(): Promise<ImportResponse> {
       extractedText: a.extractedText,
       readingTimeEstimate: a.readingTimeEstimate,
       progressFraction: a.progressFraction,
+      activeReadingSeconds: a.activeReadingSeconds,
       tags: a.tags,
       status: a.status,
       savedAt: a.savedAt,

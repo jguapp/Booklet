@@ -37,6 +37,7 @@ export function toArticle(row: ArticleRow): Article {
     originalFilename: row.originalFilename,
     readingTimeEstimate: row.readingTimeEstimate,
     progressFraction: row.progressFraction,
+    activeReadingSeconds: row.activeReadingSeconds,
     tags: row.tags,
     status: row.status,
     savedAt: row.savedAt.toISOString(),
@@ -256,7 +257,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
       if (!existing) return reply.code(404).send({ error: "not_found", message: "Article not found." });
 
-      const { status, progressFraction, tags, favorited, deletedAt } = request.body ?? {};
+      const { status, progressFraction, tags, favorited, deletedAt, activeReadingSecondsDelta } = request.body ?? {};
       if (status !== undefined && !STATUSES.includes(status)) {
         return reply.code(400).send({ error: "invalid_status", message: "Invalid status." });
       }
@@ -280,6 +281,14 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       if (deletedAt !== undefined && deletedAt !== null && typeof deletedAt !== "string") {
         return reply.code(400).send({ error: "invalid_deletedAt", message: "deletedAt must be a string or null." });
       }
+      if (
+        activeReadingSecondsDelta !== undefined &&
+        (typeof activeReadingSecondsDelta !== "number" || activeReadingSecondsDelta < 0 || activeReadingSecondsDelta > 600)
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_reading_seconds", message: "activeReadingSecondsDelta must be 0-600." });
+      }
 
       const now = new Date();
       const article = await prisma.article.update({
@@ -288,6 +297,9 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           ...(progressFraction !== undefined ? { progressFraction } : {}),
           ...(tags !== undefined ? { tags: [...new Set(tags.map((t) => t.trim()))] } : {}),
           ...(favorited !== undefined ? { favorited } : {}),
+          ...(activeReadingSecondsDelta !== undefined
+            ? { activeReadingSeconds: { increment: activeReadingSecondsDelta } }
+            : {}),
           // The client signals trash/restore by presence, not by trusting a
           // client-supplied timestamp -- the server always stamps its own
           // `now()` for "trash it", same reasoning as readAt/archivedAt below.

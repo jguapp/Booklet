@@ -14,6 +14,7 @@ import {
   IconRss,
   IconSettings,
   IconStar,
+  IconStats,
   IconTrash,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
@@ -21,17 +22,21 @@ import { useAuth } from "@/lib/auth/auth-provider";
 import { createCollection, deleteCollection, loadCollections, updateCollection } from "@/lib/data/collections";
 import { trashArticleById } from "@/lib/data/articles";
 import { deleteHighlight } from "@/lib/data/highlights";
+import { loadShowReadingStats } from "@/lib/data/stats-prefs";
 import { ApiError } from "@/lib/api/client";
 import { ThemeSwitcher } from "@/components/ui/theme-switcher";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ARTICLE_DRAG_MIME, HIGHLIGHT_DRAG_MIME, notifyTrashed } from "@/lib/dnd/trash-drop";
 
-const NAV_ITEMS = [
+const BASE_NAV_ITEMS = [
   { href: "/library", label: "Library", Icon: IconLibrary },
   { href: "/highlights", label: "Highlights", Icon: IconHighlights },
   { href: "/favorites", label: "Favorites", Icon: IconStar },
   { href: "/rss", label: "RSS", Icon: IconRss },
   { href: "/resurface", label: "Daily Review", Icon: IconResurface },
+];
+const STATS_NAV_ITEM = { href: "/stats", label: "Stats", Icon: IconStats };
+const TAIL_NAV_ITEMS = [
   { href: "/trash", label: "Trash", Icon: IconTrash },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
@@ -57,6 +62,20 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [showStats, setShowStats] = useState(false);
+
+  // Device-local, off by default -- see stats-prefs.ts. Read after mount,
+  // same reasoning as every other device pref in this app (no localStorage
+  // during SSR, so this can't be the initial state without a hydration
+  // mismatch).
+  useEffect(() => {
+    function syncFromPrefs() {
+      setShowStats(loadShowReadingStats());
+    }
+    syncFromPrefs();
+  }, []);
+
+  const navItems = showStats ? [...BASE_NAV_ITEMS, STATS_NAV_ITEM, ...TAIL_NAV_ITEMS] : [...BASE_NAV_ITEMS, ...TAIL_NAV_ITEMS];
 
   const activeCollectionId = searchParams.get("collection");
 
@@ -157,7 +176,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
-          {NAV_ITEMS.map(({ href, label, Icon }) => {
+          {navItems.map(({ href, label, Icon }) => {
             const active = (pathname === href || pathname?.startsWith(`${href}/`)) && !activeCollectionId;
             const isTrash = href === "/trash";
             return (

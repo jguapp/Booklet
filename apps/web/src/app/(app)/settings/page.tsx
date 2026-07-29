@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth/auth-provider";
 import { loadSessions, revokeOtherSessions, revokeSession } from "@/lib/data/sessions";
 import { exportAsMarkdownZip, importUrls, parseImportCsv } from "@/lib/data/export-import";
 import { loadHoardingPrefs, saveHoardingPrefs } from "@/lib/data/hoarding-prefs";
+import { loadShowReadingStats, saveShowReadingStats } from "@/lib/data/stats-prefs";
 import { formatRelativeDate, summarizeUserAgent } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
@@ -47,6 +48,7 @@ export default function SettingsPage() {
   const [ttsRate, setTtsRate] = useState(1);
   const [hoardingEnabled, setHoardingEnabled] = useState(false);
   const [maxUnread, setMaxUnread] = useState(25);
+  const [showStats, setShowStats] = useState(false);
   const [saved, setSaved] = useState(false);
   const [resendStatus, setResendStatus] = useState<"idle" | "sending" | "sent">("idle");
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
@@ -61,6 +63,7 @@ export default function SettingsPage() {
       const hoarding = loadHoardingPrefs();
       setHoardingEnabled(hoarding.enabled);
       setMaxUnread(hoarding.maxUnread);
+      setShowStats(loadShowReadingStats());
     }
     syncFromDevicePrefs();
   }, []);
@@ -84,6 +87,11 @@ export default function SettingsPage() {
     const clamped = Math.max(1, Math.min(500, value || 1));
     setMaxUnread(clamped);
     saveHoardingPrefs({ enabled: hoardingEnabled, maxUnread: clamped });
+  }
+
+  function handleShowStatsChange(enabled: boolean) {
+    setShowStats(enabled);
+    saveShowReadingStats(enabled);
   }
 
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -333,6 +341,35 @@ export default function SettingsPage() {
               />
             </label>
           )}
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Reading stats</h2>
+          <p className="font-sans text-xs text-ink-faint">
+            Streaks, time spent, and completion rate -- a visible payoff for the resurfacing loop. Off by default.
+          </p>
+          <div className="flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Reading stats">
+            <button
+              type="button"
+              onClick={() => handleShowStatsChange(false)}
+              className={cn(
+                "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                !showStats ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+              )}
+            >
+              Off
+            </button>
+            <button
+              type="button"
+              onClick={() => handleShowStatsChange(true)}
+              className={cn(
+                "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                showStats ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+              )}
+            >
+              On
+            </button>
+          </div>
         </section>
 
         <div className="flex items-center gap-3">

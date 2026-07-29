@@ -117,12 +117,17 @@ async function getAllByIndex<T>(storeName: string, indexName: string, value: str
   return promisify(store.index(indexName).getAll(value));
 }
 
-/** Records saved before `tags`/`favorited` existed predate them in
- * IndexedDB -- there's no migration path for existing records, only for
- * object stores, so old rows are missing fields added since. Normalize on
- * read instead. */
+/** Records saved before `tags`/`favorited`/`activeReadingSeconds` existed
+ * predate them in IndexedDB -- there's no migration path for existing
+ * records, only for object stores, so old rows are missing fields added
+ * since. Normalize on read instead. */
 function normalizeArticle(article: Article): Article {
-  return { ...article, tags: article.tags ?? [], favorited: article.favorited ?? false };
+  return {
+    ...article,
+    tags: article.tags ?? [],
+    favorited: article.favorited ?? false,
+    activeReadingSeconds: article.activeReadingSeconds ?? 0,
+  };
 }
 
 const TRASH_RETENTION_DAYS = 30;
