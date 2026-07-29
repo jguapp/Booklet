@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "dev": "node build.mjs --watch"
+    "dev": "node build.mjs --watch",
+    "icons": "node icons/render.mjs",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@types/chrome": "^0.1.19",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.3"

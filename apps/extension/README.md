@@ -19,11 +19,27 @@ pnpm --filter @booklet/extension dev     # rebuilds on change
 ```
 
 Then in Chrome: `chrome://extensions` → enable Developer mode → **Load
-unpacked** → select `apps/extension/dist`.
+unpacked** → select `apps/extension/dist`. In Firefox:
+`about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** →
+select `apps/extension/dist/manifest.json`.
 
 Points at `http://localhost:4000` by default (see `src/config.ts`). Change
 that -- and the matching `host_permissions` entry in `manifest.json` -- to
 point at a deployed API instead.
+
+## Firefox support
+
+`manifest.json`'s `background` declares both `service_worker` (Chrome) and
+`scripts` (Firefox versions before MV3 service-worker support landed) so
+one manifest works on both, plus a `browser_specific_settings.gecko.id` --
+Firefox requires a stable id for a MV3 add-on. The extension code itself
+uses the `chrome.*` namespace throughout (not `browser.*`); Firefox ships
+`chrome.*` as a compatibility alias with the same promise-based calling
+convention this code already uses, so no polyfill was needed.
+
+Not done: publishing to addons.mozilla.org (needs a Mozilla developer
+account this environment doesn't have) and Safari support (needs Xcode's
+`safari-web-extension-converter`, macOS-only).
 
 ## What's here
 
@@ -39,15 +55,33 @@ point at a deployed API instead.
 
 ## Verified
 
-Loaded in a real Chromium instance (via Playwright's
-`launchPersistentContext` + `--load-extension`, not just "it builds"): the
-manifest loads without errors, login persists a session via
+`e2e/extension.spec.ts` loads the real built `dist/` into an actual
+Chromium instance (via Playwright's `launchPersistentContext` +
+`--load-extension`, not just "it builds") and checks: the manifest loads
+and registers a background service worker, login persists a session via
 `chrome.storage.local`, and an authenticated fetch from the
 `chrome-extension://` origin successfully creates a real article through the
 API (this is also what confirmed the API's CORS needed to explicitly allow
 `chrome-extension://` origins -- browser extensions aren't `http(s)://`
 origins, so the existing WEB_ORIGIN/localhost allowance didn't cover them).
 
-Not yet done: publishing to the Chrome Web Store (needs a developer account
-this environment doesn't have) and an icon set (needs actual design work,
-not something to fake with placeholder art).
+```bash
+pnpm --filter @booklet/extension build
+pnpm --filter @booklet/api dev            # needs a live API on :4000
+pnpm --filter @booklet/extension test:e2e
+```
+
+Runs headed, not headless -- confirmed empirically that Chromium's headless
+mode (new or old) never registers the background service worker for a
+loaded extension, headless or not. CI runs it under `xvfb-run` for exactly
+that reason (see `test-extension-e2e` in `.github/workflows/ci.yml`).
+
+Icon set: `icons/icon.svg` is the source (a bookmark-ribbon mark in the web
+app's accent teal); `icons/icon{16,32,48,128}.png` are rendered from it and
+referenced from both `icons` and `action.default_icon` in `manifest.json`.
+After editing the SVG, regenerate with `pnpm --filter @booklet/extension
+icons` (`icons/render.mjs` -- rasterizes via headless Chromium, already a
+devDependency for e2e, so no image-editing dependency was needed).
+
+Not yet done: publishing to the Chrome Web Store or addons.mozilla.org
+(both need developer accounts this environment doesn't have).

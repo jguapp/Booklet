@@ -6,13 +6,14 @@ const watch = process.argv.includes("--watch");
 mkdirSync("dist", { recursive: true });
 cpSync("manifest.json", "dist/manifest.json");
 cpSync("src/popup.html", "dist/popup.html");
+cpSync("icons", "dist/icons", { recursive: true, filter: (src) => !src.endsWith(".svg") });
 
 const options = {
   entryPoints: ["src/popup.ts", "src/background.ts"],
   bundle: true,
   outdir: "dist",
   format: "esm",
-  target: "chrome110",
+  target: ["chrome110", "firefox109"],
   sourcemap: true,
 };
 
