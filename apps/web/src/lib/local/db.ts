@@ -113,9 +113,16 @@ async function getAllByIndex<T>(storeName: string, indexName: string, value: str
   return promisify(store.index(indexName).getAll(value));
 }
 
+/** Records saved before `tags` existed predate it in IndexedDB -- there's no
+ * migration path for existing records, only for object stores, so old rows
+ * are missing fields added since. Normalize on read instead. */
+function normalizeArticle(article: Article): Article {
+  return { ...article, tags: article.tags ?? [] };
+}
+
 export const localArticles = {
-  getAll: () => getAll<Article>(ARTICLES_STORE),
-  get: (id: string) => getOne<Article>(ARTICLES_STORE, id),
+  getAll: () => getAll<Article>(ARTICLES_STORE).then((articles) => articles.map(normalizeArticle)),
+  get: (id: string) => getOne<Article>(ARTICLES_STORE, id).then((a) => (a ? normalizeArticle(a) : a)),
   put: (article: Article) => put(ARTICLES_STORE, article),
   delete: (id: string) => remove(ARTICLES_STORE, id),
   clear: () => clear(ARTICLES_STORE),
