@@ -18,8 +18,12 @@ import {
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { createCollection, deleteCollection, loadCollections, updateCollection } from "@/lib/data/collections";
+import { trashArticleById } from "@/lib/data/articles";
+import { deleteHighlight } from "@/lib/data/highlights";
 import { ApiError } from "@/lib/api/client";
 import { ThemeSwitcher } from "@/components/ui/theme-switcher";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ARTICLE_DRAG_MIME, HIGHLIGHT_DRAG_MIME, notifyTrashed } from "@/lib/dnd/trash-drop";
 
 const NAV_ITEMS = [
   { href: "/library", label: "Library", Icon: IconLibrary },
@@ -111,6 +115,35 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     if (activeCollectionId === c.id) router.push("/library");
   }
 
+  // Drag-and-drop onto the Trash nav link (article-card.tsx / highlight-
+  // list-item.tsx are the drag sources). An article drops straight to
+  // trash, same single click as its own trash button -- it's reversible
+  // for 30 days. A highlight has no trash tier (permanent delete is its
+  // only "delete"), so it goes through the same real confirm its own
+  // delete button already requires -- a drag gesture shouldn't skip that.
+  const [dragOverTrash, setDragOverTrash] = useState(false);
+  const [pendingHighlightDrop, setPendingHighlightDrop] = useState<string | null>(null);
+
+  function handleTrashDragOver(e: React.DragEvent) {
+    if (e.dataTransfer.types.includes(ARTICLE_DRAG_MIME) || e.dataTransfer.types.includes(HIGHLIGHT_DRAG_MIME)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  }
+
+  async function handleTrashDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOverTrash(false);
+    const articleId = e.dataTransfer.getData(ARTICLE_DRAG_MIME);
+    const highlightId = e.dataTransfer.getData(HIGHLIGHT_DRAG_MIME);
+    if (articleId) {
+      await trashArticleById(articleId, isAuthenticated);
+      notifyTrashed();
+    } else if (highlightId) {
+      setPendingHighlightDrop(highlightId);
+    }
+  }
+
   return (
     <div className="flex min-h-screen">
       <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
@@ -124,13 +157,19 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
           {NAV_ITEMS.map(({ href, label, Icon }) => {
             const active = (pathname === href || pathname?.startsWith(`${href}/`)) && !activeCollectionId;
+            const isTrash = href === "/trash";
             return (
               <Link
                 key={href}
                 href={href}
+                onDragOver={isTrash ? handleTrashDragOver : undefined}
+                onDragEnter={isTrash ? () => setDragOverTrash(true) : undefined}
+                onDragLeave={isTrash ? () => setDragOverTrash(false) : undefined}
+                onDrop={isTrash ? handleTrashDrop : undefined}
                 className={cn(
                   "flex items-center gap-2.5 rounded-sm px-3 py-2 font-sans text-sm font-medium transition-colors",
                   active ? "bg-surface-2 text-accent" : "text-ink-muted hover:bg-surface-2 hover:text-ink",
+                  isTrash && dragOverTrash && "bg-red-500/15 text-red-500 ring-2 ring-red-500/40",
                 )}
               >
                 <Icon className="h-[18px] w-[18px]" />
@@ -262,6 +301,19 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main className="min-w-0 flex-1">{children}</main>
+
+      {pendingHighlightDrop && (
+        <ConfirmDialog
+          title="Delete this highlight?"
+          message="This can't be undone."
+          onCancel={() => setPendingHighlightDrop(null)}
+          onConfirm={async () => {
+            await deleteHighlight(pendingHighlightDrop, isAuthenticated);
+            notifyTrashed();
+            setPendingHighlightDrop(null);
+          }}
+        />
+      )}
     </div>
   );
 }

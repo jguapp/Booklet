@@ -8,6 +8,7 @@ import { IconSearch } from "@/components/ui/icons";
 import { loadArticles } from "@/lib/data/articles";
 import { deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { useOnTrashed } from "@/lib/dnd/trash-drop";
 
 export default function HighlightsPage() {
   const { status, isAuthenticated } = useAuth();
@@ -27,6 +28,7 @@ export default function HighlightsPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  useOnTrashed(refresh);
 
   const articleById = useMemo(() => new Map(articles.map((a) => [a.id, a])), [articles]);
 
