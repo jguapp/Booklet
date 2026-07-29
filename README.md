@@ -1,9 +1,30 @@
-# Booklet
+<div align="center">
 
-Booklet is a read-it-later and annotation app for people who save more than
-they read. Save an article, read it in a clean distraction-free view,
-highlight and annotate as you go, and have those highlights resurface later
+# 📖 Booklet
+
+**A read-it-later and annotation app for people who save more than they read.**
+
+Save an article, PDF, or EPUB. Read it in a clean distraction-free view.
+Highlight and annotate as you go. Have those highlights resurface later
 instead of disappearing into a list you never reopen.
+
+[![CI](https://img.shields.io/github/actions/workflow/status/jguapp/Booklet/ci.yml?branch=main&style=for-the-badge&label=CI&logo=githubactions&logoColor=white)](https://github.com/jguapp/Booklet/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-proprietary-red?style=for-the-badge)
+![Node](https://img.shields.io/badge/node-22.13%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)
+![pnpm](https://img.shields.io/badge/pnpm-11-F69220?style=for-the-badge&logo=pnpm&logoColor=white)
+
+![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next-black.svg?style=for-the-badge&logo=next.js&logoColor=white)
+![React](https://img.shields.io/badge/react-%2320232a.svg?style=for-the-badge&logo=react&logoColor=%2361DAFB)
+![Fastify](https://img.shields.io/badge/Fastify-000000?style=for-the-badge&logo=fastify&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-2D3748?style=for-the-badge&logo=prisma&logoColor=white)
+![TailwindCSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=for-the-badge&logo=tailwind-css&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)
+![Vitest](https://img.shields.io/badge/Vitest-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
+
+</div>
 
 No account is required to use any of this — saves and highlights live in
 the browser (IndexedDB) by default. Creating an account is opt-in and exists
@@ -25,20 +46,27 @@ throughout:
       Annotation, Collection, Digest, Session, and password-reset/email-
       verification tokens, migrated to a live database
 - [x] Auth — sign up / log in / log out, password reset, email verification,
-      and per-device session management (list + revoke, "log out other
-      devices"). Email/password, short-lived JWT access tokens, rotated
-      opaque refresh tokens stored hashed server-side. **Entirely
-      optional** — every route works signed out
+      per-device session management (list + revoke, "log out other
+      devices"), and **OAuth (Google + GitHub)** alongside email/password.
+      Short-lived JWT access tokens, rotated opaque refresh tokens stored
+      hashed server-side. Every provider — email/password included — is
+      **entirely optional**: every route works signed out, and OAuth only
+      appears in the UI once a provider's credentials are configured
 - [x] Save article by URL — server-side fetch + Readability extraction, with
       SSRF hardening (blocks private/loopback/link-local targets on every
-      redirect hop)
+      redirect hop). Remote images are fetched server-side and inlined as
+      base64 `data:` URIs, so a saved article's images survive even after
+      the source page disappears
 - [x] Save PDF/EPUB — server-side extraction via the same stateless endpoint
       either way, signed in or not. Real rendering, not extracted text: PDF
       pages render via pdfjs-dist (canvas + a precisely-positioned text
       layer for selection), EPUB chapters render via epub.js (paginated,
       real iframe rendering). Highlights anchor by page+rects (PDF) or CFI
-      range (EPUB) — the `HighlightPosition` variants the schema reserved
-      for this are no longer unused
+      range (EPUB)
+- [x] Dictionary lookup — select any word in an article, PDF, or EPUB and
+      look it up inline (Apple Books-style popover), no separate tab
+- [x] Text-to-speech — read any saved article aloud with play/pause/resume/
+      stop controls, backed by the browser's native Web Speech API
 - [x] Reading list / library view — IndexedDB-backed when signed out, synced
       via the API when signed in, same UI either way. Delete, archive,
       organize into collections (folders), and tag (free-form, lighter-weight
@@ -49,11 +77,12 @@ throughout:
       mode has no full-text index at all, so both modes behave the same way
       instead of signed-in users getting relevance-ranked results local mode
       structurally can't match
-- [x] Reading progress persistence — periodic + visibility-triggered saves
-      (not just on navigate-away — a hard reload or tab close can interrupt
-      an in-flight async write before that would fire) for all three reader
-      kinds, resuming scroll position (HTML), page (PDF), or chapter
-      (EPUB, via epub.js's own location index) on next open
+- [x] Reading progress — a visual progress bar for every reader (article,
+      PDF, EPUB), plus periodic + visibility-triggered persistence (not just
+      on navigate-away — a hard reload or tab close can interrupt an
+      in-flight async write before that would fire) so the last-visited
+      scroll position (HTML), page (PDF), or chapter (EPUB, via epub.js's
+      own location index) is restored on next open
 - [x] Reader view — light/dark/sepia theming, adjustable type size,
       select-to-highlight with optional notes, drift-tolerant highlight
       re-anchoring
@@ -71,8 +100,12 @@ throughout:
 - [x] Automated tests — unit (SM-2, highlight anchoring), integration (the
       full API surface via Fastify's `.inject()`), and e2e (Playwright: the
       local/anonymous IndexedDB path, real PDF/EPUB rendering and
-      highlighting, and the browser extension loaded for real in Chromium)
-      — see [Testing](#testing)
+      highlighting, dictionary lookup, text-to-speech, OAuth, and the
+      browser extension loaded for real in Chromium) — see
+      [Testing](#testing)
+- [x] CI — GitHub Actions runs the full suite (typecheck/lint, unit,
+      integration, both e2e suites, and a Docker build-and-smoke-test) on
+      every push, and is green — see [Testing](#testing)
 - [x] Browser extension (`apps/extension`) — log in, save the current page
       from the toolbar or a right-click menu. Real icon set, Firefox
       support (one manifest, both browsers) — see `apps/extension/README.md`
@@ -87,39 +120,44 @@ throughout:
       collections, PDF/EPUB upload (as extracted text — no real page/CFI
       rendering, which needs DOM canvas/iframe APIs React Native doesn't
       have), and Daily Review/resurfacing with the same SM-2 feedback loop
-- [x] Deployment configs — Dockerfiles for both apps, `docker-compose.yml`,
-      `DEPLOYMENT.md`. Written carefully but not build-tested (no Docker in
-      the environment that wrote them) — see `DEPLOYMENT.md` for exactly
-      what is and isn't verified
+- [x] Deployment configs — Dockerfiles for both apps and `docker-compose.yml`
+      are build-verified in CI (a real image build plus an API smoke test
+      against a Postgres service container on every push) — see
+      `DEPLOYMENT.md` and [Roadmap](#roadmap) for what's still needed to put
+      them on a real host
 
 ## Testing
 
 ```bash
 pnpm --filter @booklet/shared test      # unit: SM-2 algorithm, highlight-anchor resolution
 pnpm --filter @booklet/api test         # integration: full API via Fastify .inject(), real dev DB
-pnpm --filter @booklet/web test:e2e     # e2e: local/anonymous flow, real PDF + EPUB rendering and highlighting
+pnpm --filter @booklet/web test:e2e     # e2e: local/anonymous flow, real PDF + EPUB rendering, dictionary, TTS
 pnpm --filter @booklet/extension test:e2e   # e2e: loads the real built extension in Chromium (headed -- see its README)
 ```
 
 `apps/web/e2e` covers the local/anonymous save→read→highlight loop, the
 real PDF (`pdf-reader.spec.ts`) and EPUB (`epub-reader.spec.ts`) readers
 end to end (actual canvas rendering and iframe-based pagination in a real
-browser, not mocked), and tags/search/reading-progress persistence
+browser, not mocked), dictionary lookup, text-to-speech (skipped
+automatically in environments with no system TTS voice, such as headless
+CI), and tags/search/reading-progress persistence
 (`tags-search-progress.spec.ts`). `apps/mobile` has no automated test
 suite (`tsc --noEmit` only); its web target was verified manually the same
 way, see `apps/mobile/README.md`.
 
 `.github/workflows/ci.yml` runs the shared/api/web suites (the API and web
-e2e jobs against a real Postgres service container) plus typecheck/lint
-for every package, and the extension's e2e suite under `xvfb` in its own
-job — written and syntax-checked, not yet run for real (no CI runner in
-the environment that wrote it).
+e2e jobs against a real Postgres service container), typecheck/lint for
+every package, the extension's e2e suite under `xvfb`, and a `docker-build`
+job that builds both production images and smoke-tests the API image
+against a real Postgres container — all green on every push to `main`.
 
 ## Roadmap
 
-What's left is mostly things this environment genuinely cannot do (no
-Apple/Google/Mozilla developer account, no Docker, no cloud account, no
-device/simulator) rather than unstarted work:
+What's left is almost entirely things this environment genuinely cannot do
+(no Apple/Google/Mozilla developer account, no cloud hosting account, no
+device/simulator) rather than unstarted work. See the
+[open issues](https://github.com/jguapp/Booklet/issues) for the current
+breakdown, one issue per item below:
 
 - **Mobile app on a real device/simulator** — the web target runs and is
   verified; `ios`/`android` are type-checked only, since this environment
@@ -130,11 +168,14 @@ device/simulator) rather than unstarted work:
   addons.mozilla.org both need developer accounts this environment doesn't
   have. Safari support needs Xcode's `safari-web-extension-converter`
   (macOS-only)
-- **Real production deployment** — the Dockerfiles and `docker-compose.yml`
-  exist and were reasoned through carefully, but have never actually been
-  built (no Docker here) or deployed anywhere
-- **CI actually running for real** — `.github/workflows/ci.yml` is
-  syntax-checked but has never executed on a real GitHub Actions runner
+- **Real production hosting** — the Dockerfiles and `docker-compose.yml`
+  are build-verified in CI (image build + API smoke test against Postgres),
+  but nothing is deployed to an actual host yet. Needs a hosting decision
+  (Fly.io / Railway / a VPS / etc.), a managed Postgres instance, and real
+  `RESEND_API_KEY` / `SENTRY_DSN` / OAuth production credentials
+- **Production OAuth app registration** — Google/GitHub OAuth work today
+  against locally-registered dev credentials; production needs its own
+  registered redirect URIs once a real domain exists
 - Smaller, not-yet-started polish: React Navigation for mobile once it has
   more than a handful of screens; real page/CFI rendering for mobile
   PDF/EPUB (needs a WebView bridge to reuse the web app's pdfjs-dist/
@@ -157,7 +198,7 @@ what's verified and what isn't within these constraints.
 | Mobile | Expo / React Native |
 | Article extraction | Mozilla Readability + jsdom (HTML), pdfjs-dist (PDF), jszip + jsdom (EPUB) |
 | PDF/EPUB rendering | pdfjs-dist (canvas + text layer) and epub.js (paginated, CFI-anchored) in the browser -- real page/chapter rendering, not extracted text |
-| Auth | Email/password, JWT access + refresh tokens (structured to swap in Clerk/Auth0 later without a rewrite); optional — only needed for sync |
+| Auth | Email/password + OAuth (Google, GitHub), JWT access + refresh tokens; every method is optional — only needed for sync |
 | Local storage | IndexedDB (no-account mode is the default, not a fallback) |
 | Email | Resend, with a console-log fallback when unconfigured |
 | Error monitoring | Sentry (`@sentry/node` / `@sentry/browser`), no-op without a DSN |
@@ -178,7 +219,7 @@ packages/
 docker-compose.yml, apps/*/Dockerfile, DEPLOYMENT.md
                   Deployment configs (see DEPLOYMENT.md for verification status)
 .github/workflows/ci.yml
-                  CI: typecheck/lint, unit + integration + e2e tests
+                  CI: typecheck/lint, unit + integration + e2e tests, Docker build
 ```
 
 ## Getting started
