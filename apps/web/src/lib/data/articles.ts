@@ -10,10 +10,24 @@ import type {
   ArticleStatus,
   ExtractedContent,
 } from "@booklet/shared";
-import { apiFetch, ApiError } from "@/lib/api/client";
+import { apiFetch, apiFetchBlob, ApiError } from "@/lib/api/client";
 import { localArticles, localFiles } from "@/lib/local/db";
 
 export { ApiError };
+
+/** Raw PDF/EPUB bytes for the real (page/CFI) readers -- local file from IndexedDB, or the auth-gated download route. */
+export async function loadArticleFile(articleId: string, authenticated: boolean): Promise<Blob | null> {
+  if (!authenticated) {
+    const file = await localFiles.get(articleId);
+    return file?.blob ?? null;
+  }
+  try {
+    return await apiFetchBlob(`/api/articles/${articleId}/file`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
 
 async function extractContent(url: string): Promise<ExtractedContent> {
   return apiFetch<ExtractedContent>("/api/extract", {

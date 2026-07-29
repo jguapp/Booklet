@@ -1,0 +1,75 @@
+/*
+ * The minimal subset of pdfjs-dist's own web/pdf_viewer.css needed to make
+ * its TextLayer class (which only builds DOM structure + inline per-span
+ * transforms, not full styling) render as invisible, correctly-positioned,
+ * selectable text over the canvas. Extracted rather than importing the
+ * full stylesheet (6000+ lines, built around pdfjs's own reference
+ * viewer's .pdfViewer/.page DOM structure and toolbar/annotation-editor
+ * chrome this reader doesn't use) to avoid leaking an enormous, mostly
+ * irrelevant global stylesheet into the rest of the app.
+ *
+ * --scale-factor must be set inline on .page (to the current PDF.js
+ * viewport's `scale`) by the component -- everything else in this file is
+ * pdfjs's own derivation chain from that one value.
+ */
+
+.page {
+  --user-unit: 1;
+  --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
+  position: relative;
+}
+
+.canvasWrapper {
+  position: relative;
+}
+
+.canvasWrapper canvas {
+  display: block;
+}
+
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-align: initial;
+  letter-spacing: normal;
+  word-spacing: normal;
+  transform-origin: 0 0;
+  z-index: 1;
+}
+
+.textLayer :global(span),
+.textLayer :global(br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.textLayer :global(span)::selection {
+  background: rgba(31, 111, 107, 0.35);
+}
+
+.textLayer > :global(:not(.markedContent)),
+.textLayer :global(.markedContent span:not(.markedContent)) {
+  --font-height: 0;
+  font-size: calc(var(--total-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x));
+}
+
+.textLayer :global(.markedContent) {
+  display: contents;
+}
+
+.highlightOverlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
