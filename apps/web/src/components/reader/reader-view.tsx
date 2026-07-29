@@ -177,21 +177,22 @@ export function ReaderView({ articleId }: { articleId: string }) {
     };
   }, [articleId, isAuthenticated]);
 
-  // Auto-mark as read on reaching the end -- the same transition manually
-  // clicking the "Reading" tab already makes (Booklet's closest concept to
-  // "read"; see the three-way ArticleStatus enum). Only fires out of UNREAD
-  // so it never fights a user who already archived the article, and the ref
-  // guard stops a duplicate call racing the `article` state update that
-  // would otherwise let the effect fire again before status catches up.
-  const autoMarkedReadRef = useRef(false);
+  // Auto-archive on reaching the end -- "Reading" means in progress, not
+  // done, so finishing moves it out of the active queue the same way
+  // manually clicking the "Archived" tab already does. Fires out of either
+  // UNREAD or READING (started it, then finished in the same sitting), but
+  // never re-fires once already archived. The ref guard stops a duplicate
+  // call racing the `article` state update that would otherwise let the
+  // effect fire again before status catches up.
+  const autoArchivedRef = useRef(false);
   useEffect(() => {
-    autoMarkedReadRef.current = false;
+    autoArchivedRef.current = false;
   }, [articleId]);
   useEffect(() => {
-    if (autoMarkedReadRef.current || !article || article.status !== "UNREAD") return;
+    if (autoArchivedRef.current || !article || article.status === "ARCHIVED") return;
     if (progress < AUTO_READ_PROGRESS_THRESHOLD) return;
-    autoMarkedReadRef.current = true;
-    updateArticleStatus(article, "READING", isAuthenticated).then(setArticle);
+    autoArchivedRef.current = true;
+    updateArticleStatus(article, "ARCHIVED", isAuthenticated).then(setArticle);
   }, [progress, article, isAuthenticated]);
 
   // Hooks can't be called after the !loaded/!article early returns below, so

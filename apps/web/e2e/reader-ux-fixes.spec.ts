@@ -56,7 +56,7 @@ test("the highlight popover appears right above the selected text, not offset by
   expect(Math.abs(popoverBox!.y + popoverBox!.height - selectionTop)).toBeLessThan(100);
 });
 
-test("reaching the end of an article automatically marks it as read", async ({ page }) => {
+test("reaching the end of an article automatically archives it", async ({ page }) => {
   await page.goto("/library");
   await saveUrl(page, "https://en.wikipedia.org/wiki/Tag_(metadata)"); // long article -- actually scrollable
 
@@ -69,5 +69,5 @@ test("reaching the end of an article automatically marks it as read", async ({ p
 
   await page.goto("/library");
   const card = page.locator("a[href^='/reader/']").first();
-  await expect(card.getByText("Reading", { exact: true })).toBeVisible();
+  await expect(card.getByText("Archived", { exact: true })).toBeVisible();
 });
