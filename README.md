@@ -32,10 +32,13 @@ throughout:
 - [x] Save article by URL — server-side fetch + Readability extraction, with
       SSRF hardening (blocks private/loopback/link-local targets on every
       redirect hop)
-- [x] Save PDF/EPUB — server-side (signed in) or client-side via the same
-      extraction endpoint (signed out, PDF only — see Roadmap for why EPUB
-      needs an account for now). Renders as extracted text through the same
-      highlighter as HTML articles, not the original page/CFI layout
+- [x] Save PDF/EPUB — server-side extraction via the same stateless endpoint
+      either way, signed in or not. Real rendering, not extracted text: PDF
+      pages render via pdfjs-dist (canvas + a precisely-positioned text
+      layer for selection), EPUB chapters render via epub.js (paginated,
+      real iframe rendering). Highlights anchor by page+rects (PDF) or CFI
+      range (EPUB) — the `HighlightPosition` variants the schema reserved
+      for this are no longer unused
 - [x] Reading list / library view — IndexedDB-backed when signed out, synced
       via the API when signed in, same UI either way. Delete, archive, and
       organize into collections (folders) in both modes
@@ -54,14 +57,21 @@ throughout:
       articles, highlights, and collections onto it instead of stranding them
 - [x] API rate limiting, error monitoring (Sentry, no-op without a DSN)
 - [x] Automated tests — unit (SM-2, highlight anchoring), integration (the
-      full API surface via Fastify's `.inject()`), and e2e (Playwright,
-      exercising the local/anonymous IndexedDB path in a real browser) — see
-      [Testing](#testing)
+      full API surface via Fastify's `.inject()`), and e2e (Playwright: the
+      local/anonymous IndexedDB path, real PDF/EPUB rendering and
+      highlighting, and the browser extension loaded for real in Chromium)
+      — see [Testing](#testing)
 - [x] Browser extension (`apps/extension`) — log in, save the current page
-      from the toolbar or a right-click menu
-- [~] Mobile app (`apps/mobile`) — Expo/React Native scaffold: login,
-      library, read-only article view. Type-checks clean; hasn't run on a
-      device or simulator yet — see `apps/mobile/README.md`
+      from the toolbar or a right-click menu. Real icon set, Firefox
+      support (one manifest, both browsers) — see `apps/extension/README.md`
+- [x] Mobile app (`apps/mobile`) — Expo/React Native, and actually running
+      (web target, verified via Playwright against the real dev API — no
+      simulator/device in this environment, see that app's README for
+      exactly what is and isn't covered). Local-first like the web app
+      (AsyncStorage instead of IndexedDB, same repository-pattern swap
+      point), with highlighting (a toggled select-then-highlight flow --
+      React Native has no single component that both reports a text
+      selection and renders per-range styling, unlike a browser)
 - [x] Deployment configs — Dockerfiles for both apps, `docker-compose.yml`,
       `DEPLOYMENT.md`. Written carefully but not build-tested (no Docker in
       the environment that wrote them) — see `DEPLOYMENT.md` for exactly
@@ -70,35 +80,53 @@ throughout:
 ## Testing
 
 ```bash
-pnpm --filter @booklet/shared test    # unit: SM-2 algorithm, highlight-anchor resolution
-pnpm --filter @booklet/api test       # integration: full API via Fastify .inject(), real dev DB
-pnpm --filter @booklet/web test:e2e   # e2e: Playwright, needs the web + api dev servers running
+pnpm --filter @booklet/shared test      # unit: SM-2 algorithm, highlight-anchor resolution
+pnpm --filter @booklet/api test         # integration: full API via Fastify .inject(), real dev DB
+pnpm --filter @booklet/web test:e2e     # e2e: local/anonymous flow, real PDF + EPUB rendering and highlighting
+pnpm --filter @booklet/extension test:e2e   # e2e: loads the real built extension in Chromium (headed -- see its README)
 ```
 
-`.github/workflows/ci.yml` runs all three (the API and e2e jobs against a
-real Postgres service container) on push/PR — written and syntax-checked,
-not yet run for real (no CI runner in the environment that wrote it).
+`apps/web/e2e` covers the local/anonymous save→read→highlight loop plus
+the real PDF (`pdf-reader.spec.ts`) and EPUB (`epub-reader.spec.ts`)
+readers end to end — actual canvas rendering and iframe-based pagination
+in a real browser, not mocked. `apps/mobile` has no automated test suite
+(`tsc --noEmit` only); its web target was verified manually the same way,
+see `apps/mobile/README.md`.
+
+`.github/workflows/ci.yml` runs the shared/api/web suites (the API and web
+e2e jobs against a real Postgres service container) plus typecheck/lint
+for every package, and the extension's e2e suite under `xvfb` in its own
+job — written and syntax-checked, not yet run for real (no CI runner in
+the environment that wrote it).
 
 ## Roadmap
 
-- **Full PDF/EPUB rendering** — today's PDF/EPUB support extracts and
-  highlights text, not the original page layout; `HighlightPosition`'s
-  `pdf` (page + rects) and `epub` (CFI) variants are already reserved in
-  the schema for whenever real page/CFI rendering is worth building
-- **EPUB support for local/anonymous mode** — works today only for signed-in
-  users (server-side extraction via jsdom); local mode would need a
-  client-side EPUB parser, not implemented yet
-- **Mobile app**: get it running on a device/simulator, add highlighting
-  (needs a React-Native-native text-selection approach, not a port of the
-  web app's browser Selection/Range-based one), local-first parity, and
-  eventually a real App Store / Play Store release — needs developer
-  accounts that don't exist yet
-- **Browser extension**: Chrome Web Store publishing (needs a developer
-  account), a real icon set, Firefox/Safari support
-- **Real production deployment**: the Dockerfiles and `docker-compose.yml`
-  exist but have never actually been deployed anywhere
-- Exports, sharing, and other later-stage features are intentionally out of
-  scope until all of the above is solid
+What's left is mostly things this environment genuinely cannot do (no
+Apple/Google/Mozilla developer account, no Docker, no cloud account, no
+device/simulator) rather than unstarted work:
+
+- **Mobile app on a real device/simulator** — the web target runs and is
+  verified; `ios`/`android` are type-checked only, since this environment
+  has no Xcode/iOS Simulator or Android Studio/emulator. Eventually a real
+  App Store / Play Store release, which needs developer accounts that
+  don't exist here either
+- **Browser extension store publishing** — Chrome Web Store and
+  addons.mozilla.org both need developer accounts this environment doesn't
+  have. Safari support needs Xcode's `safari-web-extension-converter`
+  (macOS-only)
+- **Real production deployment** — the Dockerfiles and `docker-compose.yml`
+  exist and were reasoned through carefully, but have never actually been
+  built (no Docker here) or deployed anywhere
+- **CI actually running for real** — `.github/workflows/ci.yml` is
+  syntax-checked but has never executed on a real GitHub Actions runner
+- Smaller, not-yet-started polish: React Navigation for mobile once it has
+  more than a handful of screens; a reading-progress bar for the PDF/EPUB
+  readers (currently only the original HTML article view tracks scroll
+  progress); exports and sharing are intentionally out of scope until
+  everything above is solid
+
+See each app's own README (`apps/mobile`, `apps/extension`) for exactly
+what's verified and what isn't within these constraints.
 
 ## Tech stack
 
@@ -111,6 +139,7 @@ not yet run for real (no CI runner in the environment that wrote it).
 | Browser extension | Manifest V3, esbuild, no framework |
 | Mobile | Expo / React Native |
 | Article extraction | Mozilla Readability + jsdom (HTML), pdfjs-dist (PDF), jszip + jsdom (EPUB) |
+| PDF/EPUB rendering | pdfjs-dist (canvas + text layer) and epub.js (paginated, CFI-anchored) in the browser -- real page/chapter rendering, not extracted text |
 | Auth | Email/password, JWT access + refresh tokens (structured to swap in Clerk/Auth0 later without a rewrite); optional — only needed for sync |
 | Local storage | IndexedDB (no-account mode is the default, not a fallback) |
 | Email | Resend, with a console-log fallback when unconfigured |
@@ -166,11 +195,12 @@ with `pnpm --filter @booklet/api migrate:pglite` instead of `migrate dev`/
 `migrate deploy` when using this database.
 
 **Browser extension:** `pnpm --filter @booklet/extension build`, then load
-`apps/extension/dist` as an unpacked extension. See `apps/extension/README.md`.
+`apps/extension/dist` as an unpacked extension in Chrome or Firefox. See
+`apps/extension/README.md`.
 
 **Mobile app:** `pnpm --filter @booklet/mobile web` (or `ios` / `android`
-with the respective toolchain installed). See `apps/mobile/README.md` for
-what's verified and what isn't.
+with the respective toolchain installed). The web target is verified end
+to end; see `apps/mobile/README.md` for exactly what is and isn't.
 
 **Deploying:** see `DEPLOYMENT.md`.
 
