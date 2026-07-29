@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { waitForSaveModalToClose } from "./helpers";
 
 /**
  * Exercises the real PDF reader (pdf-reader.tsx) end to end -- canvas +
@@ -37,7 +38,7 @@ test("upload a PDF, highlight real rendered text, and see it persist and delete"
   await page.getByRole("button", { name: /upload a file/i }).click();
   await page.locator("input[type='file']").setInputFiles(SAMPLE_PDF);
   await page.getByRole("button", { name: /^save$/i }).click();
-  await expect(page.getByRole("button", { name: /save article/i })).toBeVisible({ timeout: 20_000 });
+  await waitForSaveModalToClose(page);
 
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);

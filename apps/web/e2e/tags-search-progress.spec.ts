@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { waitForSaveModalToClose } from "./helpers";
 
 /**
  * Tags, full-text search, and reading-progress persistence -- all local/
@@ -12,7 +13,7 @@ async function saveUrl(page: import("@playwright/test").Page, url: string) {
   await page.getByRole("heading", { name: /save an article/i }).waitFor();
   await page.getByPlaceholder(/example\.com/).fill(url);
   await page.getByRole("button", { name: /^save$/i }).click();
-  await page.getByRole("heading", { name: /save an article/i }).waitFor({ state: "hidden", timeout: 20_000 });
+  await waitForSaveModalToClose(page);
 }
 
 test("tag an article, filter the library by tag, and see it persist", async ({ page }) => {

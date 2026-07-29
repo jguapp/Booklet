@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { waitForSaveModalToClose } from "./helpers";
 
 /**
  * Does turning PDF/EPUB pages and then leaving the reader via a real in-app
@@ -31,7 +32,7 @@ test("PDF page position survives leaving the reader and coming back, even naviga
   await page.getByRole("button", { name: /upload a file/i }).click();
   await page.locator("input[type='file']").setInputFiles(SAMPLE_PDF);
   await page.getByRole("button", { name: /^save$/i }).click();
-  await expect(page.getByRole("button", { name: /save article/i })).toBeVisible({ timeout: 20_000 });
+  await waitForSaveModalToClose(page);
 
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);
@@ -52,7 +53,7 @@ test("EPUB location survives leaving the reader and coming back", async ({ page 
   await page.getByRole("button", { name: /upload a file/i }).click();
   await page.locator("input[type='file']").setInputFiles(TWO_CHAPTER_EPUB);
   await page.getByRole("button", { name: /^save$/i }).click();
-  await expect(page.getByRole("button", { name: /save article/i })).toBeVisible({ timeout: 20_000 });
+  await waitForSaveModalToClose(page);
 
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);

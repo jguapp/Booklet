@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { waitForSaveModalToClose } from "./helpers";
 
 /**
  * Exercises the real EPUB reader (epub-reader.tsx) end to end -- epub.js
@@ -41,7 +42,7 @@ test("upload an EPUB, highlight real rendered text across chapters, and see it p
   await page.getByRole("button", { name: /upload a file/i }).click();
   await page.locator("input[type='file']").setInputFiles(TWO_CHAPTER_EPUB);
   await page.getByRole("button", { name: /^save$/i }).click();
-  await expect(page.getByRole("button", { name: /save article/i })).toBeVisible({ timeout: 20_000 });
+  await waitForSaveModalToClose(page);
 
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);
