@@ -63,7 +63,7 @@ export function HighlightListItem({
       <div className="flex items-start gap-3">
         <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${DOT_CLASS[highlight.color]}`} />
         <div className="min-w-0 flex-1">
-          <p className="font-serif text-base leading-snug text-ink">"{highlight.selectedText}"</p>
+          <p className="font-serif text-base leading-snug text-ink">&ldquo;{highlight.selectedText}&rdquo;</p>
 
           {editing ? (
             <div className="mt-2.5 flex flex-col gap-2">

@@ -35,25 +35,42 @@ which aliases the host machine) by default -- see `src/lib/config.ts`.
 
 ## Verified, and what wasn't
 
-Type-checks clean (`tsc --noEmit`). Getting Metro's web bundler running in
-this pnpm workspace hit real friction, not fixed yet: an Expo-SDK
-dependency-version mismatch (`expo install --fix` realigned that part) and
-then a `@babel/traverse` / `@babel/core` resolution gap -- Metro's transform
-workers `require()` babel packages from deep inside other dependencies'
-directories, which pnpm's strict per-package `node_modules` doesn't expose
-the way npm/yarn's flatter layout would. This is a known category of
-pnpm + Metro/React-Native friction, not a bug in this app's code; the usual
-fixes are a `.npmrc` with `node-linker=hoisted` (changes dependency
-resolution for the whole monorepo, not just this app -- didn't want to risk
-that blind) or a custom `metro.config.js` resolver. Whoever picks this up
-next should start there.
+The web target now actually runs, end to end -- confirmed with Playwright
+against the real dev API: sign up, log in, land on the Library, save a URL
+(real extraction, not a stub), and see it listed. `tsc --noEmit` is clean
+across the whole app.
 
-This environment also has no iOS Simulator, Android emulator, or physical
-device to run the app on. So unlike the web app (verified via Playwright)
-and the browser extension (verified by loading the real built extension in
-Chromium), none of this has been exercised interactively -- treat it as a
-real, type-checked starting point, not something confirmed working end to
-end the way the rest of this session's work is.
+Getting there took two separate fixes for pnpm + Metro/React Native
+friction, both now permanent parts of this repo rather than "whoever picks
+this up next should start there":
 
-Also out of reach in this environment: publishing to the App Store or Play
-Store, which need Apple/Google developer accounts.
+1. **`main` pointed at `node_modules/expo/AppEntry.js`**, whose own source
+   does `import App from "../../App"` -- raw relative-path filesystem math
+   from wherever the `expo` package physically resolves, not a real
+   monorepo-aware lookup. In a pnpm workspace that's not reliably two
+   directories above this app's root. Fixed by giving the app its own
+   `index.ts` (registers `App` directly, importing `expo` as a normal bare
+   specifier) and pointing `package.json`'s `main` at that instead -- see
+   `index.ts`'s comment.
+2. **Metro couldn't resolve through pnpm's node_modules on Windows.**
+   pnpm links workspace dependencies via NTFS junctions on Windows (not
+   symlinks), confirmed by hand (`Get-Item node_modules/expo | Select
+   LinkType` reported `Junction`); Metro's `unstable_enableSymlinks`
+   resolver option (set in `metro.config.js`) doesn't traverse those the
+   way it does POSIX symlinks. Fixed at the root by setting `nodeLinker:
+   hoisted` in `pnpm-workspace.yaml` -- a flat, real-directory
+   `node_modules` layout with no junctions/symlinks at all. This is a
+   whole-monorepo setting, not mobile-only; see that file's comment for
+   the tradeoff (loses pnpm's strict phantom-dependency protection) and
+   the full regression pass (every package's typecheck/lint/build/test/e2e
+   suite) that verified nothing else broke.
+
+Also needed `@babel/runtime` as an explicit direct dependency (joining
+`@babel/core` / `@babel/traverse`, already pinned for the same reason):
+Metro's transform workers need it resolvable from this app's own
+`node_modules`, and pnpm doesn't hoist transitive deps there by default.
+
+Still real, unresolved gaps: this environment has no iOS Simulator,
+Android emulator, or physical device, so `ios`/`android` remain
+type-checked-only, not run. And still out of reach entirely: publishing to
+the App Store or Play Store, which need Apple/Google developer accounts.

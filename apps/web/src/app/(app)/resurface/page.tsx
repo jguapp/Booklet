@@ -135,14 +135,14 @@ export default function ResurfacePage() {
       {batchIds && batchIds.length === 0 && (
         <div className="rounded-md border border-dashed border-border px-6 py-16 text-center">
           <p className="font-sans text-sm text-ink-muted">
-            No highlights are eligible to resurface right now — check back once you've saved a few.
+            No highlights are eligible to resurface right now — check back once you&apos;ve saved a few.
           </p>
         </div>
       )}
 
       {isDone && batchIds!.length > 0 && (
         <div className="rounded-md border border-dashed border-border px-6 py-16 text-center">
-          <p className="font-sans text-sm text-ink-muted">That's everything for today. Nicely done.</p>
+          <p className="font-sans text-sm text-ink-muted">That&apos;s everything for today. Nicely done.</p>
         </div>
       )}
 
