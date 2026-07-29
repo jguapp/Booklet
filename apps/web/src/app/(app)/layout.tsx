@@ -209,7 +209,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen">
       <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
         <div className="flex items-center gap-2 px-5 py-6">
-          <BookletLogo />
+          <BookletLogo className="mt-1.5" />
           <Link href="/library" className="font-serif text-xl font-semibold text-ink">
             Booklet
           </Link>
@@ -373,7 +373,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           )}
         </div>
 
-        <div className="border-t border-border px-5 py-3">
+        <div className="flex justify-center border-t border-border px-5 py-3">
           <ThemeSwitcher />
         </div>
       </aside>
