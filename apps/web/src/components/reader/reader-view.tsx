@@ -173,14 +173,30 @@ export function ReaderView({ articleId }: { articleId: string }) {
   // IndexedDB write or fetch before the JS context is torn down;
   // visibilitychange fires while the page is still alive, so the write
   // actually gets a chance to land).
+  // Active reading time -- ticks once per second while the tab is actually
+  // visible (not backgrounded), flushed on the same cadence/triggers as
+  // progress below. Unlike progress (a position, last-write-wins), this is
+  // a delta the server adds atomically (see updateArticleProgress), so a
+  // second tab flushing concurrently can't clobber it -- reset to 0 only
+  // after each successful flush attempt.
+  const accumulatedSecondsRef = useRef(0);
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (document.visibilityState === "visible") accumulatedSecondsRef.current += 1;
+    }, 1000);
+    return () => clearInterval(tick);
+  }, []);
+
   useEffect(() => {
     function flush() {
       const currentArticle = articleRef.current;
       if (!currentArticle) return;
       const current = latestProgressRef.current;
-      if (Math.abs(current - currentArticle.progressFraction) > PROGRESS_CHANGE_THRESHOLD) {
-        updateArticleProgress(currentArticle, current, isAuthenticated).catch(() => undefined);
-      }
+      const progressChanged = Math.abs(current - currentArticle.progressFraction) > PROGRESS_CHANGE_THRESHOLD;
+      const secondsDelta = accumulatedSecondsRef.current;
+      if (!progressChanged && secondsDelta === 0) return;
+      accumulatedSecondsRef.current = 0;
+      updateArticleProgress(currentArticle, current, isAuthenticated, secondsDelta).catch(() => undefined);
     }
     function handleVisibilityChange() {
       if (document.visibilityState === "hidden") flush();

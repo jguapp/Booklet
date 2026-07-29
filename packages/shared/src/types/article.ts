@@ -24,6 +24,7 @@ export interface Article {
 
   readingTimeEstimate: number | null;
   progressFraction: number; // 0.0-1.0, normalized regardless of sourceType
+  activeReadingSeconds: number; // actual time spent, not an estimate -- see the reading-stats feature
 
   tags: string[]; // free-form, lighter-weight than Collection -- no separate entity, no color
 
@@ -69,6 +70,10 @@ export interface UpdateArticleRequest {
   favorited?: boolean;
   /** Set to trash it, null to restore. */
   deletedAt?: string | null;
+  /** Seconds to add to activeReadingSeconds since the last flush -- an
+   * atomic increment server-side, not an overwrite, so concurrent
+   * flushes (e.g. two tabs) can't clobber each other. */
+  activeReadingSecondsDelta?: number;
 }
 
 export interface ArticleListResponse {

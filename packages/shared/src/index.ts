@@ -11,3 +11,4 @@ export * from "./types/feed";
 export * from "./highlight-anchor";
 export * from "./resurface";
 export * from "./digest-email";
+export * from "./reading-stats";

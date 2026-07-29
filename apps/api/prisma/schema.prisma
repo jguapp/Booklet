@@ -183,6 +183,11 @@ model Article {
 
   readingTimeEstimate Int? // minutes, computed from extractedText at save time
   progressFraction    Float @default(0) // 0.0-1.0, normalized regardless of sourceType (page/total, CFI/total, or scroll position)
+  // Actual active reading time, seconds -- only accrues while the reader tab
+  // is visible (reader-view.tsx). Written as an atomic increment (a delta
+  // since the last flush), not an overwrite, same periodic timer as
+  // progressFraction -- see the reading-stats feature.
+  activeReadingSeconds Int @default(0)
 
   // Free-form, lighter-weight than Collection on purpose: no separate entity
   // to create/rename/delete, no color, just strings on the article itself.
