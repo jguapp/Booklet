@@ -38,7 +38,7 @@ const THEME_INIT_SCRIPT = `
 (function () {
   try {
     var stored = localStorage.getItem('booklet-theme');
-    var theme = stored === 'light' || stored === 'dark' || stored === 'sepia'
+    var theme = stored === 'light' || stored === 'dark' || stored === 'sepia' || stored === 'kindle'
       ? stored
       : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     document.documentElement.setAttribute('data-theme', theme);

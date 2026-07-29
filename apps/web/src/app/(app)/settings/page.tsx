@@ -24,6 +24,7 @@ const THEMES: { value: Theme; label: string }[] = [
   { value: "light", label: "Light" },
   { value: "sepia", label: "Sepia" },
   { value: "dark", label: "Dark" },
+  { value: "kindle", label: "Kindle" },
 ];
 
 const SIZES: { value: ReaderSize; label: string }[] = [

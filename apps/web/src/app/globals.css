@@ -100,6 +100,26 @@
   --color-highlight-pink: #DDB8C3;
   --color-highlight-orange: #DEAC76;
 }
+/* ---- Kindle (e-ink black & white) -- no hue anywhere, including
+   highlights (distinguished by gray value instead of color) ---- */
+:root[data-theme="kindle"] {
+  --color-paper: #FFFFFF;
+  --color-surface: #F7F7F7;
+  --color-surface-2: #ECECEC;
+  --color-ink: #000000;
+  --color-ink-muted: #4D4D4D;
+  --color-ink-faint: #808080;
+  --color-border: #CCCCCC;
+  --color-accent: #000000;
+  --color-accent-strong: #000000;
+  --color-accent-contrast: #FFFFFF;
+
+  --color-highlight-yellow: #E0E0E0;
+  --color-highlight-green: #C6C6C6;
+  --color-highlight-blue: #ACACAC;
+  --color-highlight-pink: #929292;
+  --color-highlight-orange: #787878;
+}
 
 @theme inline {
   --color-paper: var(--color-paper);
