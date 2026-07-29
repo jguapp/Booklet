@@ -27,10 +27,21 @@
 # loader requires) -- confirmed by literally hitting that failure first.
 
 FROM node:22-slim AS base
+# Prisma's query engine needs libssl at runtime -- node:22-slim doesn't ship
+# it, and the engine falls back to (and warns about) an assumed OpenSSL
+# version without it. Needed in both stages: build for `prisma generate`,
+# runtime for the server actually querying the database.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 WORKDIR /repo
 
 FROM base AS build
+# prisma.config.ts resolves DATABASE_URL eagerly just to *load*, even for
+# `prisma generate`'s pure codegen (no connection actually made) --
+# postinstall (pnpm install triggers it) fails without something here. Real
+# value is supplied at `docker run` time (see docker-compose.yml); this
+# placeholder never leaves the build stage.
+ENV DATABASE_URL="postgresql://user:password@localhost:5432/db?schema=public"
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @booklet/api exec prisma generate

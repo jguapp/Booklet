@@ -10,6 +10,13 @@ env:
   # in a way that matters for typecheck/lint/test, and none of those need a
   # real secret.
   JWT_ACCESS_SECRET: ci-test-secret-not-for-production
+  # Every job triggers apps/api's postinstall (pnpm install runs it for the
+  # whole workspace, not just jobs that filter to @booklet/api) -- prisma
+  # generate resolves DATABASE_URL just to load prisma.config.ts, even
+  # though pure codegen never connects. Jobs that actually need a real
+  # database (test-api, test-web-e2e, test-extension-e2e) set their own
+  # job-level DATABASE_URL, which overrides this.
+  DATABASE_URL: postgresql://user:password@localhost:5432/db?schema=public
 
 jobs:
   typecheck-and-lint:
