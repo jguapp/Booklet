@@ -136,6 +136,13 @@ model Article {
   readingTimeEstimate Int? // minutes, computed from extractedText at save time
   progressFraction    Float @default(0) // 0.0-1.0, normalized regardless of sourceType (page/total, CFI/total, or scroll position)
 
+  // Free-form, lighter-weight than Collection on purpose: no separate entity
+  // to create/rename/delete, no color, just strings on the article itself.
+  // Postgres native array, not a join table -- fine at this app's per-user
+  // scale; a GIN index is the usual next step if "has tag X" filtering ever
+  // needs to be fast against a much bigger table than one person's library.
+  tags String[] @default([])
+
   status     ArticleStatus @default(UNREAD)
   savedAt    DateTime      @default(now())
   readAt     DateTime?

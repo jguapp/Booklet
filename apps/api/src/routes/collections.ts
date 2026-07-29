@@ -1,13 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import type {
-  Article,
-  ArticleSummary,
-  Collection,
-  CreateCollectionRequest,
-  UpdateCollectionRequest,
-} from "@booklet/shared";
+import type { Collection, CreateCollectionRequest, UpdateCollectionRequest } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
+import { toSummary as toArticleSummary } from "./articles.js";
 
 function toCollection(row: {
   id: string;
@@ -29,60 +24,6 @@ function toCollection(row: {
   };
 }
 
-function toArticleSummary(row: Parameters<typeof toArticle>[0]): ArticleSummary {
-  const { extractedHtml: _html, extractedText: _text, ...rest } = toArticle(row);
-  return rest;
-}
-
-function toArticle(row: {
-  id: string;
-  userId: string;
-  url: string | null;
-  title: string | null;
-  author: string | null;
-  siteName: string | null;
-  excerpt: string | null;
-  sourceType: Article["sourceType"];
-  extractionStatus: Article["extractionStatus"];
-  extractionError: string | null;
-  extractedHtml: string | null;
-  extractedText: string | null;
-  fileStorageKey: string | null;
-  originalFilename: string | null;
-  readingTimeEstimate: number | null;
-  progressFraction: number;
-  status: Article["status"];
-  savedAt: Date;
-  readAt: Date | null;
-  archivedAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-}): Article {
-  return {
-    id: row.id,
-    userId: row.userId,
-    url: row.url,
-    title: row.title,
-    author: row.author,
-    siteName: row.siteName,
-    excerpt: row.excerpt,
-    sourceType: row.sourceType,
-    extractionStatus: row.extractionStatus,
-    extractionError: row.extractionError,
-    extractedHtml: row.extractedHtml,
-    extractedText: row.extractedText,
-    fileStorageKey: row.fileStorageKey,
-    originalFilename: row.originalFilename,
-    readingTimeEstimate: row.readingTimeEstimate,
-    progressFraction: row.progressFraction,
-    status: row.status,
-    savedAt: row.savedAt.toISOString(),
-    readAt: row.readAt?.toISOString() ?? null,
-    archivedAt: row.archivedAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  };
-}
 
 export async function registerCollectionRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateCollectionRequest }>(

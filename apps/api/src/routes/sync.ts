@@ -50,6 +50,7 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
           extractedText: a.extractedText ?? null,
           readingTimeEstimate: a.readingTimeEstimate ?? null,
           progressFraction: typeof a.progressFraction === "number" ? a.progressFraction : 0,
+          tags: Array.isArray(a.tags) ? a.tags.filter((t) => typeof t === "string" && t.trim()) : [],
           status: a.status ?? "UNREAD",
           savedAt: a.savedAt ? new Date(a.savedAt) : new Date(),
           readAt: a.readAt ? new Date(a.readAt) : null,

@@ -104,6 +104,19 @@ export function ArticleCard({ article, onToggleArchived, onDelete, collections, 
 
       <p className="font-sans text-xs text-ink-faint">{metaParts.join(" · ")}</p>
 
+      {article.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {article.tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full border border-border bg-surface-2 px-2 py-0.5 font-sans text-[11px] text-ink-muted"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+
       {article.progressFraction > 0 && article.progressFraction < 1 && (
         <div className="h-1 w-full overflow-hidden rounded-full bg-border">
           <div className="h-full bg-accent" style={{ width: `${Math.round(article.progressFraction * 100)}%` }} />

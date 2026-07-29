@@ -103,6 +103,7 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     originalFilename: null,
     readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
     progressFraction: 0,
+    tags: [],
     status: "UNREAD",
     savedAt: now,
     readAt: null,
@@ -153,6 +154,7 @@ export async function saveArticleFromFile(file: File, authenticated: boolean): P
     originalFilename: file.name,
     readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
     progressFraction: 0,
+    tags: [],
     status: "UNREAD",
     savedAt: now,
     readAt: null,
@@ -201,6 +203,19 @@ export async function updateArticleProgress(
     });
   }
   const updated: Article = { ...article, progressFraction, updatedAt: new Date().toISOString() };
+  await localArticles.put(updated);
+  return updated;
+}
+
+export async function updateArticleTags(article: Article, tags: string[], authenticated: boolean): Promise<Article> {
+  const cleaned = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ tags: cleaned }),
+    });
+  }
+  const updated: Article = { ...article, tags: cleaned, updatedAt: new Date().toISOString() };
   await localArticles.put(updated);
   return updated;
 }

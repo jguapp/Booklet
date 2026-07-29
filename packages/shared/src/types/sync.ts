@@ -23,6 +23,7 @@ export interface ImportArticle {
   extractedText: string | null;
   readingTimeEstimate: number | null;
   progressFraction: number;
+  tags: string[];
   status: ArticleStatus;
   savedAt: string;
   readAt: string | null;
