@@ -113,15 +113,35 @@ async function getAllByIndex<T>(storeName: string, indexName: string, value: str
   return promisify(store.index(indexName).getAll(value));
 }
 
-/** Records saved before `tags` existed predate it in IndexedDB -- there's no
- * migration path for existing records, only for object stores, so old rows
- * are missing fields added since. Normalize on read instead. */
+/** Records saved before `tags`/`favorited` existed predate them in
+ * IndexedDB -- there's no migration path for existing records, only for
+ * object stores, so old rows are missing fields added since. Normalize on
+ * read instead. */
 function normalizeArticle(article: Article): Article {
-  return { ...article, tags: article.tags ?? [] };
+  return { ...article, tags: article.tags ?? [], favorited: article.favorited ?? false };
+}
+
+const TRASH_RETENTION_DAYS = 30;
+
+/** Mirrors the server's purgeExpiredTrash (articles.ts) -- no background
+ * worker here either, so this runs lazily whenever the trash view itself is
+ * read rather than on a schedule. */
+async function purgeExpiredLocalTrash(): Promise<void> {
+  const all = await getAll<Article>(ARTICLES_STORE);
+  const cutoff = Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const expired = all.filter((a) => a.deletedAt && new Date(a.deletedAt).getTime() < cutoff);
+  await Promise.all(expired.map((a) => Promise.all([remove(ARTICLES_STORE, a.id), remove(FILES_STORE, a.id)])));
 }
 
 export const localArticles = {
-  getAll: () => getAll<Article>(ARTICLES_STORE).then((articles) => articles.map(normalizeArticle)),
+  // Trash is excluded from the normal list regardless of status, same as
+  // the server -- see getTrash() for the dedicated trash view.
+  getAll: () =>
+    getAll<Article>(ARTICLES_STORE).then((articles) => articles.map(normalizeArticle).filter((a) => !a.deletedAt)),
+  getTrash: () =>
+    purgeExpiredLocalTrash().then(() =>
+      getAll<Article>(ARTICLES_STORE).then((articles) => articles.map(normalizeArticle).filter((a) => !!a.deletedAt)),
+    ),
   get: (id: string) => getOne<Article>(ARTICLES_STORE, id).then((a) => (a ? normalizeArticle(a) : a)),
   put: (article: Article) => put(ARTICLES_STORE, article),
   delete: (id: string) => remove(ARTICLES_STORE, id),

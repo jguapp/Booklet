@@ -32,6 +32,13 @@ export interface Article {
   readAt: string | null;
   archivedAt: string | null;
 
+  favorited: boolean;
+  /** Set instead of actually removing the row -- see Trash. Independent of
+   * `status`, so restoring gives back whatever status it had. Non-null means
+   * "in trash", regardless of how long ago -- the 30-day retention window is
+   * enforced by purging on read, not by this field's presence alone. */
+  deletedAt: string | null;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -59,6 +66,9 @@ export interface UpdateArticleRequest {
   status?: ArticleStatus;
   progressFraction?: number;
   tags?: string[];
+  favorited?: boolean;
+  /** Set to trash it, null to restore. */
+  deletedAt?: string | null;
 }
 
 export interface ArticleListResponse {

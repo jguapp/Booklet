@@ -52,6 +52,7 @@ export async function migrateLocalDataToAccount(): Promise<ImportResponse> {
       savedAt: a.savedAt,
       readAt: a.readAt,
       archivedAt: a.archivedAt,
+      favorited: a.favorited,
     })),
     highlights: highlights.map((h) => ({
       localArticleId: h.articleId,

@@ -4,7 +4,10 @@ import { prisma } from "../lib/prisma.js";
 /** Fetch a user's eligible highlights, hand them to the pure SM-2 selection algorithm, return the full rows it picked. */
 export async function getHighlightsToResurface(userId: string, count: number) {
   const rows = await prisma.highlight.findMany({
-    where: { userId },
+    // A trashed article's highlights shouldn't keep resurfacing -- trashing
+    // is a stronger "I'm done with this" signal than archiving (whose
+    // highlights are still eligible on purpose).
+    where: { userId, article: { deletedAt: null } },
     include: { annotation: true },
   });
 

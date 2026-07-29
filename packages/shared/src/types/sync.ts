@@ -28,6 +28,7 @@ export interface ImportArticle {
   savedAt: string;
   readAt: string | null;
   archivedAt: string | null;
+  favorited: boolean;
 }
 
 export interface ImportHighlight {

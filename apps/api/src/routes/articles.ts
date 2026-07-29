@@ -42,9 +42,29 @@ export function toArticle(row: ArticleRow): Article {
     savedAt: row.savedAt.toISOString(),
     readAt: row.readAt?.toISOString() ?? null,
     archivedAt: row.archivedAt?.toISOString() ?? null,
+    favorited: row.favorited,
+    deletedAt: row.deletedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+const TRASH_RETENTION_DAYS = 30;
+
+/** Best-effort -- called before reading the trash view, not on a schedule
+ * (no background worker in this app). Failing silently just means a purge
+ * happens on the next read instead. */
+async function purgeExpiredTrash(userId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const expired = await prisma.article.findMany({
+    where: { userId, deletedAt: { lt: cutoff } },
+    select: { id: true, fileStorageKey: true },
+  });
+  if (expired.length === 0) return;
+  await prisma.article.deleteMany({ where: { id: { in: expired.map((a) => a.id) } } });
+  await Promise.all(
+    expired.filter((a) => a.fileStorageKey).map((a) => deleteStoredFile(a.fileStorageKey!).catch(() => undefined)),
+  );
 }
 
 export function toSummary(row: ArticleRow): ArticleSummary {
@@ -172,20 +192,35 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
   );
 
   app.get("/api/articles", { preHandler: requireAuth }, async (request, reply) => {
-    const query = request.query as { status?: string; cursor?: string; limit?: string; tag?: string };
+    const query = request.query as {
+      status?: string;
+      cursor?: string;
+      limit?: string;
+      tag?: string;
+      trashed?: string;
+      favorited?: string;
+    };
 
     if (query.status && !STATUSES.includes(query.status as ArticleStatus)) {
       return reply.code(400).send({ error: "invalid_status", message: "Invalid status filter." });
     }
     const limit = Math.min(Math.max(Number(query.limit) || LIST_PAGE_SIZE, 1), 100);
+    const trashed = query.trashed === "true";
+
+    if (trashed) await purgeExpiredTrash(request.userId!);
 
     const rows = await prisma.article.findMany({
       where: {
         userId: request.userId!,
+        // Trash is excluded from every normal query regardless of other
+        // filters, and is the *only* thing returned when explicitly asked
+        // for -- never mixed with the regular list.
+        deletedAt: trashed ? { not: null } : null,
         ...(query.status ? { status: query.status as ArticleStatus } : {}),
         ...(query.tag ? { tags: { has: query.tag } } : {}),
+        ...(query.favorited === "true" ? { favorited: true } : {}),
       },
-      orderBy: [{ savedAt: "desc" }, { id: "desc" }],
+      orderBy: trashed ? [{ deletedAt: "desc" }, { id: "desc" }] : [{ savedAt: "desc" }, { id: "desc" }],
       take: limit + 1,
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
     });
@@ -221,7 +256,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
       if (!existing) return reply.code(404).send({ error: "not_found", message: "Article not found." });
 
-      const { status, progressFraction, tags } = request.body ?? {};
+      const { status, progressFraction, tags, favorited, deletedAt } = request.body ?? {};
       if (status !== undefined && !STATUSES.includes(status)) {
         return reply.code(400).send({ error: "invalid_status", message: "Invalid status." });
       }
@@ -239,6 +274,12 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           .code(400)
           .send({ error: "invalid_tags", message: "tags must be an array of non-empty strings (max 40 chars each)." });
       }
+      if (favorited !== undefined && typeof favorited !== "boolean") {
+        return reply.code(400).send({ error: "invalid_favorited", message: "favorited must be a boolean." });
+      }
+      if (deletedAt !== undefined && deletedAt !== null && typeof deletedAt !== "string") {
+        return reply.code(400).send({ error: "invalid_deletedAt", message: "deletedAt must be a string or null." });
+      }
 
       const now = new Date();
       const article = await prisma.article.update({
@@ -246,6 +287,11 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         data: {
           ...(progressFraction !== undefined ? { progressFraction } : {}),
           ...(tags !== undefined ? { tags: [...new Set(tags.map((t) => t.trim()))] } : {}),
+          ...(favorited !== undefined ? { favorited } : {}),
+          // The client signals trash/restore by presence, not by trusting a
+          // client-supplied timestamp -- the server always stamps its own
+          // `now()` for "trash it", same reasoning as readAt/archivedAt below.
+          ...(deletedAt !== undefined ? { deletedAt: deletedAt === null ? null : now } : {}),
           ...(status !== undefined
             ? {
                 status,
@@ -276,4 +322,22 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       return reply.code(204).send();
     },
   );
+
+  // Empty trash -- bulk-permanent-deletes every currently-trashed article for
+  // this user. Registered as a static route ("/trash"), which Fastify's
+  // router always matches ahead of the ":id" param route above regardless
+  // of registration order, so this never gets swallowed by it.
+  app.delete("/api/articles/trash", { preHandler: requireAuth }, async (request, reply) => {
+    const trashed = await prisma.article.findMany({
+      where: { userId: request.userId!, deletedAt: { not: null } },
+      select: { id: true, fileStorageKey: true },
+    });
+    if (trashed.length > 0) {
+      await prisma.article.deleteMany({ where: { id: { in: trashed.map((a) => a.id) } } });
+      await Promise.all(
+        trashed.filter((a) => a.fileStorageKey).map((a) => deleteStoredFile(a.fileStorageKey!).catch(() => undefined)),
+      );
+    }
+    return reply.code(204).send();
+  });
 }

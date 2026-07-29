@@ -177,6 +177,15 @@ model Article {
   readAt     DateTime?
   archivedAt DateTime?
 
+  favorited Boolean @default(false)
+  // Trash is separate from `status` -- deleting sets this instead of
+  // removing the row outright, independent of whatever status (UNREAD/
+  // READING/ARCHIVED) it had, so restoring gives it back. A row with this
+  // set is excluded from every normal query and shown in the Trash view
+  // instead; rows past the 30-day retention window are purged lazily (see
+  // services/trash-service.ts) rather than needing a cron/scheduled job.
+  deletedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -186,6 +195,8 @@ model Article {
   @@unique([userId, url])
   @@index([userId, status])
   @@index([userId, savedAt])
+  @@index([userId, favorited])
+  @@index([userId, deletedAt])
 }
 
 model Highlight {
