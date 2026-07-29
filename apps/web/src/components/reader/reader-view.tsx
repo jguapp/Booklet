@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Article, ArticleStatus, Highlight, HighlightColor, HighlightPosition } from "@booklet/shared";
 import { useTheme } from "@/lib/theme/theme-provider";
-import { loadArticle, loadArticleFile, updateArticleStatus } from "@/lib/data/articles";
+import { loadArticle, loadArticleFile, updateArticleProgress, updateArticleStatus } from "@/lib/data/articles";
 import { createHighlight, deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { formatReadingTime } from "@/lib/format";
@@ -13,6 +13,7 @@ import { ReaderToolbar, type ReaderSize } from "./reader-toolbar";
 import { ArticleContent } from "./article-content";
 import { PdfReader } from "./pdf-reader";
 import { EpubReader } from "./epub-reader";
+import { TagEditor } from "@/components/library/tag-editor";
 import { SourceIcon } from "@/components/library/source-icon";
 import { cn } from "@/lib/cn";
 
@@ -21,6 +22,9 @@ const STATUS_TABS: { value: ArticleStatus; label: string }[] = [
   { value: "READING", label: "Reading" },
   { value: "ARCHIVED", label: "Archived" },
 ];
+
+const PROGRESS_SAVE_INTERVAL_MS = 4000;
+const PROGRESS_CHANGE_THRESHOLD = 0.01; // don't write on every hair's-width of scroll
 
 export function ReaderView({ articleId }: { articleId: string }) {
   const { theme, setTheme } = useTheme();
@@ -80,16 +84,81 @@ export function ReaderView({ articleId }: { articleId: string }) {
     };
   }, [article, isAuthenticated]);
 
+  // latestProgressRef is the single feed for all three reader kinds (HTML
+  // scroll fraction, PDF page/numPages, EPUB book.locations percentage) --
+  // whoever's actually rendering just reports into it, and one periodic
+  // timer below (not each reader) is responsible for persisting it. articleRef
+  // exists so that timer doesn't need `article` in its own dependency array
+  // (every unrelated field update -- status, tags, a new highlight -- creates
+  // a new article object, which would otherwise restart the save interval).
+  const latestProgressRef = useRef(0);
+  const articleRef = useRef<Article | null>(null);
+  useEffect(() => {
+    articleRef.current = article;
+  }, [article]);
+
   useEffect(() => {
     function handleScroll() {
       const doc = document.documentElement;
       const scrollable = doc.scrollHeight - window.innerHeight;
-      setProgress(scrollable > 0 ? Math.min(1, Math.max(0, doc.scrollTop / scrollable)) : 0);
+      const fraction = scrollable > 0 ? Math.min(1, Math.max(0, doc.scrollTop / scrollable)) : 0;
+      setProgress(fraction);
+      latestProgressRef.current = fraction;
     }
     handleScroll();
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  function handleProgressChange(fraction: number) {
+    setProgress(fraction);
+    latestProgressRef.current = fraction;
+  }
+
+  // Resume scroll position once, after the article (and its text-mode
+  // content) has actually rendered -- PDF/EPUB resume themselves, using
+  // article.progressFraction directly (page number / locations percentage
+  // respectively), since "scroll the window" doesn't mean anything for them.
+  const hasResumedScrollRef = useRef(false);
+  useEffect(() => {
+    if (hasResumedScrollRef.current || !article || article.progressFraction <= 0) return;
+    if (article.sourceType !== "HTML" && !article.extractedHtml) return; // extracted-text fallback path: same idea, still scroll-based
+    hasResumedScrollRef.current = true;
+    const id = requestAnimationFrame(() => {
+      const doc = document.documentElement;
+      const scrollable = doc.scrollHeight - window.innerHeight;
+      if (scrollable > 0) window.scrollTo({ top: scrollable * article.progressFraction });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [article]);
+
+  // Periodic flush, flush-on-unmount (an in-app Link navigation), and
+  // flush-on-visibilitychange (tab switch, mobile backgrounding, and --
+  // critically -- a hard navigation/reload/close, none of which reliably
+  // give React's unmount cleanup enough time to finish an in-flight async
+  // IndexedDB write or fetch before the JS context is torn down;
+  // visibilitychange fires while the page is still alive, so the write
+  // actually gets a chance to land).
+  useEffect(() => {
+    function flush() {
+      const currentArticle = articleRef.current;
+      if (!currentArticle) return;
+      const current = latestProgressRef.current;
+      if (Math.abs(current - currentArticle.progressFraction) > PROGRESS_CHANGE_THRESHOLD) {
+        updateArticleProgress(currentArticle, current, isAuthenticated).catch(() => undefined);
+      }
+    }
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") flush();
+    }
+    const interval = setInterval(flush, PROGRESS_SAVE_INTERVAL_MS);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      flush();
+    };
+  }, [articleId, isAuthenticated]);
 
   async function handleCreateHighlight(
     selectedText: string,
@@ -184,7 +253,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
           {isTextRenderable && remainingMinutes !== null ? ` · ${remainingMinutes} min left` : ""}
         </p>
 
-        <div className="mb-9 flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Article status">
+        <div className="mb-5 flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Article status">
           {STATUS_TABS.map((t) => (
             <button
               key={t.value}
@@ -198,6 +267,10 @@ export function ReaderView({ articleId }: { articleId: string }) {
               {t.label}
             </button>
           ))}
+        </div>
+
+        <div className="mb-9">
+          <TagEditor article={article} authenticated={isAuthenticated} onChange={setArticle} />
         </div>
 
         {article.sourceType !== "HTML" && (
@@ -220,6 +293,8 @@ export function ReaderView({ articleId }: { articleId: string }) {
           <PdfReader
             fileBlob={fileBlob!}
             highlights={highlights}
+            initialProgressFraction={article.progressFraction}
+            onProgressChange={handleProgressChange}
             onCreateHighlight={(position, color, note) => handleCreateHighlight(position.text, position, color, note)}
             onDeleteHighlight={handleDeleteHighlight}
             onSaveNote={handleSaveNote}
@@ -231,6 +306,8 @@ export function ReaderView({ articleId }: { articleId: string }) {
             highlights={highlights}
             theme={theme}
             size={size}
+            initialProgressFraction={article.progressFraction}
+            onProgressChange={handleProgressChange}
             onCreateHighlight={(cfi, selectedText, color, note) =>
               handleCreateHighlight(selectedText, { type: "epub", cfi }, color, note)
             }

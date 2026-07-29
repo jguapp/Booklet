@@ -14,12 +14,12 @@ import { EpubExtractionError, extractEpubText } from "../services/epub-extractio
 import { PdfExtractionError, extractPdfText } from "../services/pdf-extraction.js";
 import { deleteStoredFile, readStoredFile, saveFile } from "../services/storage-service.js";
 
-type ArticleRow = Awaited<ReturnType<typeof prisma.article.findFirstOrThrow>>;
+export type ArticleRow = Awaited<ReturnType<typeof prisma.article.findFirstOrThrow>>;
 
 const STATUSES: ArticleStatus[] = ["UNREAD", "READING", "ARCHIVED"];
 const LIST_PAGE_SIZE = 30;
 
-function toArticle(row: ArticleRow): Article {
+export function toArticle(row: ArticleRow): Article {
   return {
     id: row.id,
     userId: row.userId,
@@ -37,6 +37,7 @@ function toArticle(row: ArticleRow): Article {
     originalFilename: row.originalFilename,
     readingTimeEstimate: row.readingTimeEstimate,
     progressFraction: row.progressFraction,
+    tags: row.tags,
     status: row.status,
     savedAt: row.savedAt.toISOString(),
     readAt: row.readAt?.toISOString() ?? null,
@@ -46,7 +47,7 @@ function toArticle(row: ArticleRow): Article {
   };
 }
 
-function toSummary(row: ArticleRow): ArticleSummary {
+export function toSummary(row: ArticleRow): ArticleSummary {
   const { extractedHtml: _html, extractedText: _text, ...rest } = toArticle(row);
   return rest;
 }
@@ -171,7 +172,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
   );
 
   app.get("/api/articles", { preHandler: requireAuth }, async (request, reply) => {
-    const query = request.query as { status?: string; cursor?: string; limit?: string };
+    const query = request.query as { status?: string; cursor?: string; limit?: string; tag?: string };
 
     if (query.status && !STATUSES.includes(query.status as ArticleStatus)) {
       return reply.code(400).send({ error: "invalid_status", message: "Invalid status filter." });
@@ -182,6 +183,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       where: {
         userId: request.userId!,
         ...(query.status ? { status: query.status as ArticleStatus } : {}),
+        ...(query.tag ? { tags: { has: query.tag } } : {}),
       },
       orderBy: [{ savedAt: "desc" }, { id: "desc" }],
       take: limit + 1,
@@ -219,7 +221,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
       if (!existing) return reply.code(404).send({ error: "not_found", message: "Article not found." });
 
-      const { status, progressFraction } = request.body ?? {};
+      const { status, progressFraction, tags } = request.body ?? {};
       if (status !== undefined && !STATUSES.includes(status)) {
         return reply.code(400).send({ error: "invalid_status", message: "Invalid status." });
       }
@@ -229,12 +231,21 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       ) {
         return reply.code(400).send({ error: "invalid_progress", message: "progressFraction must be 0-1." });
       }
+      if (
+        tags !== undefined &&
+        (!Array.isArray(tags) || tags.some((t) => typeof t !== "string" || !t.trim() || t.length > 40))
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_tags", message: "tags must be an array of non-empty strings (max 40 chars each)." });
+      }
 
       const now = new Date();
       const article = await prisma.article.update({
         where: { id: existing.id },
         data: {
           ...(progressFraction !== undefined ? { progressFraction } : {}),
+          ...(tags !== undefined ? { tags: [...new Set(tags.map((t) => t.trim()))] } : {}),
           ...(status !== undefined
             ? {
                 status,

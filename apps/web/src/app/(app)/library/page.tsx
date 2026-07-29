@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import type { Article, ArticleStatus, Collection } from "@booklet/shared";
+import type { Article, ArticleStatus, Collection, Highlight } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { IconSearch } from "@/components/ui/icons";
@@ -11,6 +12,7 @@ import { SaveArticleModal } from "@/components/library/save-article-modal";
 import { cn } from "@/lib/cn";
 import { deleteArticle, loadArticles, updateArticleStatus } from "@/lib/data/articles";
 import { loadArticlesInCollection, loadCollections } from "@/lib/data/collections";
+import { searchLibrary } from "@/lib/data/search";
 import { useAuth } from "@/lib/auth/auth-provider";
 
 type FilterTab = "ALL" | ArticleStatus;
@@ -39,7 +41,10 @@ function LibraryPageInner() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState<FilterTab>("ALL");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<{ articles: Article[]; highlights: Highlight[] } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
   const refresh = useCallback(() => {
@@ -58,17 +63,45 @@ function LibraryPageInner() {
     refresh();
   }, [refresh]);
 
+  // Debounced so authenticated mode (which asks the server -- see
+  // lib/data/search.ts for why the already-loaded article list can't
+  // answer a body-text search itself) isn't doing it on every keystroke.
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(id);
+  }, [search]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function runSearch() {
+      if (!debouncedSearch) {
+        setSearchResults(null);
+        return;
+      }
+      const results = await searchLibrary(debouncedSearch, isAuthenticated);
+      if (!cancelled) setSearchResults(results as { articles: Article[]; highlights: Highlight[] });
+    }
+    runSearch();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearch, isAuthenticated]);
+
   const activeCollection = useMemo(
     () => collections.find((c) => c.id === collectionId) ?? null,
     [collections, collectionId],
   );
 
+  const allTags = useMemo(() => [...new Set(articles.flatMap((a) => a.tags))].sort(), [articles]);
+
+  const isSearching = debouncedSearch.length > 0;
   const visible = useMemo(() => {
-    return articles
+    const base = isSearching ? (searchResults?.articles ?? []) : articles;
+    return base
       .filter((a) => tab === "ALL" || a.status === tab)
-      .filter((a) => (a.title ?? "").toLowerCase().includes(search.toLowerCase()))
+      .filter((a) => !tagFilter || a.tags.includes(tagFilter))
       .sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
-  }, [articles, tab, search]);
+  }, [articles, searchResults, isSearching, tab, tagFilter]);
 
   function handleSaved(article: Article) {
     setArticles((prev) => [article, ...prev]);
@@ -144,11 +177,11 @@ function LibraryPageInner() {
           ))}
         </div>
 
-        <div className="relative w-full max-w-[220px]">
+        <div className="relative w-full max-w-[280px]">
           <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <Input
             type="text"
-            placeholder="Search by title…"
+            placeholder="Search titles, text, notes…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9"
@@ -156,14 +189,36 @@ function LibraryPageInner() {
         </div>
       </div>
 
+      {allTags.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center gap-1.5">
+          {allTags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => setTagFilter((prev) => (prev === tag ? null : tag))}
+              className={cn(
+                "rounded-full border px-2.5 py-1 font-sans text-xs transition-colors",
+                tagFilter === tag
+                  ? "border-accent bg-accent/10 text-accent"
+                  : "border-border bg-surface text-ink-muted hover:text-ink",
+              )}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      )}
+
       {visible.length === 0 ? (
         <div className="rounded-md border border-dashed border-border px-6 py-16 text-center">
           <p className="font-sans text-sm text-ink-muted">
-            {search
+            {isSearching
               ? "No articles match that search."
-              : activeCollection
-                ? "No articles in this collection yet."
-                : "Nothing here yet."}
+              : tagFilter
+                ? `No articles tagged "${tagFilter}".`
+                : activeCollection
+                  ? "No articles in this collection yet."
+                  : "Nothing here yet."}
           </p>
         </div>
       ) : (
@@ -178,6 +233,26 @@ function LibraryPageInner() {
               authenticated={isAuthenticated}
             />
           ))}
+        </div>
+      )}
+
+      {isSearching && searchResults && searchResults.highlights.length > 0 && (
+        <div className="mt-10">
+          <h2 className="mb-3 font-serif text-lg font-semibold text-ink">Highlights</h2>
+          <div className="flex flex-col gap-2">
+            {searchResults.highlights.map((h) => (
+              <Link
+                key={h.id}
+                href={`/reader/${h.articleId}`}
+                className="block rounded-md border border-border bg-surface px-4 py-3 transition-colors hover:border-accent/40"
+              >
+                <p className="font-serif text-sm text-ink">&ldquo;{h.selectedText}&rdquo;</p>
+                {h.annotation && (
+                  <p className="mt-1 font-sans text-xs text-ink-muted">{h.annotation.noteText}</p>
+                )}
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 

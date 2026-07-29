@@ -170,6 +170,104 @@ describe("API integration", () => {
       });
       expect(res.statusCode).toBe(404);
     });
+
+    it("sets, dedupes, and trims tags via PATCH", async () => {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { tags: ["Reading ", "reading", "later"] },
+      });
+      expect(res.statusCode).toBe(200);
+      // "Reading " and "reading" are distinct after trim-only (no case-folding) --
+      // dedup is exact-string, so both survive; this asserts trim happened and
+      // the array shape round-trips, not that near-duplicates are merged.
+      expect(res.json().tags.sort()).toEqual(["Reading", "later", "reading"].sort());
+    });
+
+    it("rejects non-string or oversized tags", async () => {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { tags: ["ok", "x".repeat(41)] },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("filters the article list by tag", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/articles?tag=later",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.articles.some((a: { id: string }) => a.id === articleId)).toBe(true);
+
+      const missTag = await app.inject({
+        method: "GET",
+        url: "/api/articles?tag=nonexistent-tag",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(missTag.json().articles.some((a: { id: string }) => a.id === articleId)).toBe(false);
+    });
+
+    it("persists reading progress via PATCH", async () => {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { progressFraction: 0.42 },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().progressFraction).toBeCloseTo(0.42);
+
+      const reread = await app.inject({
+        method: "GET",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(reread.json().progressFraction).toBeCloseTo(0.42);
+    });
+
+    it("rejects an out-of-range progressFraction", async () => {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { progressFraction: 1.5 },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
+  describe("search", () => {
+    it("requires auth", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/search?q=reading" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns an empty result for a blank query rather than the whole library", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/search?q=",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ articles: [], highlights: [] });
+    });
+
+    it("finds the tagged article by its tag", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/search?q=later",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.articles.some((a: { id: string }) => a.id === articleId)).toBe(true);
+    });
   });
 
   describe("highlights + annotations", () => {
@@ -216,6 +314,22 @@ describe("API integration", () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().annotation.noteText).toBe("an updated thought");
+    });
+
+    it("shows up in search by its selected text and by its note", async () => {
+      const byText = await app.inject({
+        method: "GET",
+        url: "/api/search?q=passage",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(byText.json().highlights.some((h: { id: string }) => h.id === highlightId)).toBe(true);
+
+      const byNote = await app.inject({
+        method: "GET",
+        url: "/api/search?q=updated%20thought",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(byNote.json().highlights.some((h: { id: string }) => h.id === highlightId)).toBe(true);
     });
 
     it("excludes a not-yet-due highlight from the resurfacing digest", async () => {
@@ -291,6 +405,7 @@ describe("API integration", () => {
               extractedText: "hi",
               readingTimeEstimate: 1,
               progressFraction: 0,
+              tags: ["imported-tag"],
               status: "UNREAD",
               savedAt: new Date().toISOString(),
               readAt: null,
@@ -318,6 +433,13 @@ describe("API integration", () => {
       });
       expect(first.statusCode).toBe(200);
       expect(first.json()).toMatchObject({ importedArticles: 1, importedHighlights: 1 });
+
+      const imported = await app.inject({
+        method: "GET",
+        url: "/api/articles?tag=imported-tag",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(imported.json().articles).toHaveLength(1);
 
       const second = await app.inject({
         method: "POST",

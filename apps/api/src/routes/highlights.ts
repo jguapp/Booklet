@@ -17,9 +17,9 @@ const FEEDBACKS: ResurfaceFeedback[] = ["REMEMBERED", "FORGOT"];
 async function findHighlightWithAnnotation(id: string) {
   return prisma.highlight.findUnique({ where: { id }, include: { annotation: true } });
 }
-type HighlightRow = NonNullable<Awaited<ReturnType<typeof findHighlightWithAnnotation>>>;
+export type HighlightRow = NonNullable<Awaited<ReturnType<typeof findHighlightWithAnnotation>>>;
 
-function toHighlight(row: HighlightRow): Highlight {
+export function toHighlight(row: HighlightRow): Highlight {
   return {
     id: row.id,
     articleId: row.articleId,

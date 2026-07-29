@@ -30,6 +30,8 @@ interface EpubReaderProps {
   highlights: Highlight[];
   theme: Theme;
   size: ReaderSize;
+  initialProgressFraction: number;
+  onProgressChange: (fraction: number) => void;
   onCreateHighlight: (cfiRange: string, selectedText: string, color: HighlightColor, note: string) => void;
   onDeleteHighlight: (highlightId: string) => void;
   onSaveNote: (highlightId: string, noteText: string) => void;
@@ -73,6 +75,8 @@ export function EpubReader({
   highlights,
   theme,
   size,
+  initialProgressFraction,
+  onProgressChange,
   onCreateHighlight,
   onDeleteHighlight,
   onSaveNote,
@@ -88,6 +92,17 @@ export function EpubReader({
   useEffect(() => {
     highlightsRef.current = highlights;
   }, [highlights]);
+
+  // Read through refs inside the file-open effect below instead of adding
+  // them as dependencies -- onProgressChange is a fresh function identity
+  // every parent render, and re-opening the whole book on that would both
+  // reset the reading position and re-run the (non-trivial) locations.generate() pass.
+  const initialProgressRef = useRef(initialProgressFraction);
+  const onProgressChangeRef = useRef(onProgressChange);
+  useEffect(() => {
+    initialProgressRef.current = initialProgressFraction;
+    onProgressChangeRef.current = onProgressChange;
+  }, [initialProgressFraction, onProgressChange]);
 
   // Open the book and render it into viewerRef once per file. epub.js owns
   // the iframe(s) inside that div entirely -- nothing else touches its DOM.
@@ -118,11 +133,31 @@ export function EpubReader({
           setPending({ cfiRange, selectedText, rect });
         });
 
-        r.on("relocated", (location: { start: { displayed: { page: number; total: number } } }) => {
-          setLocationLabel(`Page ${location.start.displayed.page} of ${location.start.displayed.total}`);
-        });
+        r.on(
+          "relocated",
+          (location: { start: { displayed: { page: number; total: number }; percentage: number } }) => {
+            setLocationLabel(`Page ${location.start.displayed.page} of ${location.start.displayed.total}`);
+            // 0 until book.locations.generate() (kicked off below) finishes --
+            // harmless: it just means progress isn't reported for the first
+            // few relocations on a book that hasn't been opened before.
+            if (location.start.percentage > 0) onProgressChangeRef.current(location.start.percentage);
+          },
+        );
 
         setRendition(r);
+
+        // Builds a whole-book location index (epub.js's own mechanism for
+        // turning "percentage" and page counts into more than per-section
+        // guesses) -- not needed to render or highlight, only for resuming
+        // at the right spot and reporting accurate progress, so it runs
+        // after display() rather than blocking the reader on it.
+        await book.locations.generate(1024);
+        if (cancelled) return;
+        const resumeAt = initialProgressRef.current;
+        if (resumeAt > 0) {
+          const cfi = book.locations.cfiFromPercentage(resumeAt);
+          if (cfi) await r.display(cfi);
+        }
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Couldn't open this EPUB.");
       }

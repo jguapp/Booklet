@@ -12,6 +12,7 @@ import { registerHighlightRoutes } from "./routes/highlights.js";
 import { registerDigestRoutes } from "./routes/digests.js";
 import { registerSyncRoutes } from "./routes/sync.js";
 import { registerCollectionRoutes } from "./routes/collections.js";
+import { registerSearchRoute } from "./routes/search.js";
 import { captureException, initErrorMonitoring } from "./lib/error-monitoring.js";
 
 /**
@@ -85,6 +86,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerDigestRoutes(app);
   await registerSyncRoutes(app);
   await registerCollectionRoutes(app);
+  await registerSearchRoute(app);
 
   return app;
 }

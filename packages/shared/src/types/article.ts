@@ -1,3 +1,5 @@
+import type { Highlight } from "./highlight";
+
 export type ArticleStatus = "UNREAD" | "READING" | "ARCHIVED";
 export type SourceType = "HTML" | "PDF" | "EPUB";
 export type ExtractionStatus = "PENDING" | "SUCCESS" | "FAILED";
@@ -22,6 +24,8 @@ export interface Article {
 
   readingTimeEstimate: number | null;
   progressFraction: number; // 0.0-1.0, normalized regardless of sourceType
+
+  tags: string[]; // free-form, lighter-weight than Collection -- no separate entity, no color
 
   status: ArticleStatus;
   savedAt: string;
@@ -54,9 +58,16 @@ export interface ExtractedContent {
 export interface UpdateArticleRequest {
   status?: ArticleStatus;
   progressFraction?: number;
+  tags?: string[];
 }
 
 export interface ArticleListResponse {
   articles: ArticleSummary[];
   nextCursor: string | null;
+}
+
+/** GET /api/search */
+export interface SearchResponse {
+  articles: ArticleSummary[];
+  highlights: Highlight[];
 }

@@ -22,6 +22,8 @@ const HIGHLIGHT_FILL: Record<HighlightColor, string> = {
 interface PdfReaderProps {
   fileBlob: Blob;
   highlights: Highlight[];
+  initialProgressFraction: number;
+  onProgressChange: (fraction: number) => void;
   onCreateHighlight: (position: PdfPosition, color: HighlightColor, note: string) => void;
   onDeleteHighlight: (highlightId: string) => void;
   onSaveNote: (highlightId: string, noteText: string) => void;
@@ -58,6 +60,8 @@ function contextAround(pageText: string, selected: string): { prefix: string; su
 export function PdfReader({
   fileBlob,
   highlights,
+  initialProgressFraction,
+  onProgressChange,
   onCreateHighlight,
   onDeleteHighlight,
   onSaveNote,
@@ -77,6 +81,17 @@ export function PdfReader({
   const textLayerRef = useRef<HTMLDivElement>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
 
+  // initialProgressFraction only matters once, right when a document
+  // finishes loading (to pick the starting page) -- read via ref rather
+  // than as an effect dependency so a page turn (which changes the "real"
+  // current fraction upstream) doesn't fight the reader by resetting it.
+  const initialProgressRef = useRef(initialProgressFraction);
+  const onProgressChangeRef = useRef(onProgressChange);
+  useEffect(() => {
+    initialProgressRef.current = initialProgressFraction;
+    onProgressChangeRef.current = onProgressChange;
+  }, [initialProgressFraction, onProgressChange]);
+
   // Load the document once per file. A local (IndexedDB) file and an
   // authenticated (server) file both arrive as a Blob either way -- see
   // lib/data/articles.ts's loadArticleFile -- so this doesn't care which.
@@ -92,7 +107,10 @@ export function PdfReader({
         if (cancelled) return;
         setDoc(loaded);
         setNumPages(loaded.numPages);
-        setPageNumber(1);
+        const resumeFraction = initialProgressRef.current;
+        const startPage =
+          resumeFraction > 0 ? Math.min(loaded.numPages, Math.round(resumeFraction * (loaded.numPages - 1)) + 1) : 1;
+        setPageNumber(startPage);
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Couldn't open this PDF.");
       }
@@ -155,6 +173,11 @@ export function PdfReader({
       renderTaskRef.current?.cancel();
     };
   }, [doc, pageNumber]);
+
+  useEffect(() => {
+    if (numPages <= 1) return;
+    onProgressChangeRef.current((pageNumber - 1) / (numPages - 1));
+  }, [pageNumber, numPages]);
 
   function handleMouseUp() {
     const selection = window.getSelection();
