@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { waitForSaveModalToClose } from "./helpers";
 
 // playwright.config.ts's testDir is e2e/, and Playwright always resolves
 // process.cwd() to the package root (apps/web) regardless of how the test
@@ -33,7 +34,7 @@ test("save an article by URL, read it, highlight it, and see it on the Highlight
   await page.getByRole("button", { name: /^save$/i }).click();
 
   // Extraction hits the real API -- give it real time, not a UI-animation timeout.
-  await expect(page.getByRole("button", { name: /save article/i })).toBeVisible({ timeout: 20_000 });
+  await waitForSaveModalToClose(page);
   const card = page.locator("a[href^='/reader/']").first();
   await expect(card).toBeVisible();
   const cardTitle = await card.locator("h3").textContent();
@@ -81,7 +82,7 @@ test("save an EPUB with no account (EPUB no longer requires signing in)", async 
   await page.locator("input[type='file']").setInputFiles(SAMPLE_EPUB);
   await page.getByRole("button", { name: /^save$/i }).click();
 
-  await expect(page.getByRole("button", { name: /save article/i })).toBeVisible({ timeout: 20_000 });
+  await waitForSaveModalToClose(page);
   await expect(page.locator("text=/Sample Test Book/i").first()).toBeVisible();
 });
 
