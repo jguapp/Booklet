@@ -45,7 +45,6 @@ export function SaveArticleModal({ authenticated, onClose, onSaved }: SaveArticl
     const isPdf = candidate.name.toLowerCase().endsWith(".pdf");
     const isEpub = candidate.name.toLowerCase().endsWith(".epub");
     if (!isPdf && !isEpub) return "Only .pdf and .epub files are supported.";
-    if (isEpub && !authenticated) return "EPUB uploads require an account -- PDF works without one.";
     if (candidate.size > MAX_FILE_BYTES) return "That file is over the 100MB limit.";
     return null;
   }
@@ -161,9 +160,7 @@ export function SaveArticleModal({ authenticated, onClose, onSaved }: SaveArticl
               <p className="font-sans text-sm text-ink-muted">
                 {file ? file.name : "Drag a .pdf or .epub here, or click to browse"}
               </p>
-              <p className="font-sans text-xs text-ink-faint">
-                Up to 100MB{!authenticated ? " · EPUB requires an account" : ""}
-              </p>
+              <p className="font-sans text-xs text-ink-faint">Up to 100MB</p>
               <input
                 ref={fileInputRef}
                 type="file"

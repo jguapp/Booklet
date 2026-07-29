@@ -1,4 +1,10 @@
+import path from "node:path";
 import { expect, test } from "@playwright/test";
+
+// playwright.config.ts's testDir is e2e/, and Playwright always resolves
+// process.cwd() to the package root (apps/web) regardless of how the test
+// command was invoked -- so this is stable without needing import.meta.
+const SAMPLE_EPUB = path.join(process.cwd(), "e2e", "fixtures", "sample.epub");
 
 /**
  * Exercises the local/anonymous (no-account, IndexedDB-backed) path end to
@@ -65,6 +71,18 @@ test("save an article by URL, read it, highlight it, and see it on the Highlight
 
   await page.goto("/highlights");
   await expect(page.locator("text=No highlights yet")).toHaveCount(0);
+});
+
+test("save an EPUB with no account (EPUB no longer requires signing in)", async ({ page }) => {
+  await page.goto("/library");
+
+  await page.getByRole("button", { name: /save article/i }).click();
+  await page.getByRole("button", { name: /upload a file/i }).click();
+  await page.locator("input[type='file']").setInputFiles(SAMPLE_EPUB);
+  await page.getByRole("button", { name: /^save$/i }).click();
+
+  await expect(page.getByRole("button", { name: /save article/i })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator("text=/Sample Test Book/i").first()).toBeVisible();
 });
 
 test("Daily Review shows the empty state when nothing is eligible yet", async ({ page }) => {
