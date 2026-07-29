@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { pickBestVoice } from "./tts-voice";
 
 export type TtsStatus = "idle" | "playing" | "paused";
 
@@ -23,7 +24,21 @@ interface UseTextToSpeechResult {
 export function useTextToSpeech(text: string): UseTextToSpeechResult {
   const [status, setStatus] = useState<TtsStatus>("idle");
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const supported = typeof window !== "undefined" && "speechSynthesis" in window;
+
+  // The voice list loads asynchronously in most browsers -- empty on the
+  // first call until `voiceschanged` fires -- so keep the best pick current
+  // as it becomes available rather than freezing an empty result at mount.
+  useEffect(() => {
+    if (!supported) return;
+    function refreshVoice() {
+      voiceRef.current = pickBestVoice(window.speechSynthesis.getVoices(), document.documentElement.lang || "en");
+    }
+    refreshVoice();
+    window.speechSynthesis.addEventListener("voiceschanged", refreshVoice);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", refreshVoice);
+  }, [supported]);
 
   const stop = useCallback(() => {
     if (supported) window.speechSynthesis.cancel();
@@ -43,6 +58,7 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
     if (!supported || !text.trim()) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
+    if (voiceRef.current) utterance.voice = voiceRef.current;
     utterance.onend = () => setStatus("idle");
     utterance.onerror = () => setStatus("idle");
     utteranceRef.current = utterance;
