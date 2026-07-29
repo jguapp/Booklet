@@ -154,6 +154,18 @@ body {
   transition: background-color 200ms ease, color 200ms ease;
 }
 
+/* The --color-* palette above is already achromatic, but plenty of things
+   in the app don't route through it -- highlight <mark> colors, the
+   delete-confirm red, syntax/status colors, images. A page-wide grayscale
+   filter is the only way to guarantee genuinely zero hue anywhere, matching
+   an e-ink display, rather than hunting down every hardcoded color. Applies
+   to the iframe-rendered EPUB reader too -- a CSS filter on an ancestor
+   composites the entire subtree, iframes included, unlike custom
+   properties (which don't cross the iframe's separate-document boundary). */
+:root[data-theme="kindle"] body {
+  filter: grayscale(1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     transition-duration: 0.01ms !important;
