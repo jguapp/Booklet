@@ -9,6 +9,19 @@ const MAX_REDIRECTS = 5;
 const WORDS_PER_MINUTE = 200;
 const USER_AGENT = "Mozilla/5.0 (compatible; BookletBot/1.0; +https://booklet.app)";
 
+// Images referenced by src="https://original-site.com/..." break the moment
+// that site takes the image down, blocks hotlinking, or gates it behind a
+// login -- and even before any of that, every open of the saved article
+// pings the original site. Inline them as data: URIs instead so a saved
+// article is actually self-contained, the same way an uploaded PDF/EPUB
+// already is. Bounded on every axis since these URLs are attacker-influenced
+// (a malicious page could reference arbitrarily many/large images).
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // 3MB per image
+const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024; // 15MB across the whole article
+const MAX_IMAGES = 30;
+const IMAGE_FETCH_TIMEOUT_MS = 8_000;
+const IMAGE_FETCH_CONCURRENCY = 4;
+
 export class ExtractionError extends Error {}
 
 /**
@@ -19,11 +32,11 @@ export class ExtractionError extends Error {}
  * http://169.254.169.254/ or an internal service).
  */
 export async function fetchAndExtract(rawUrl: string): Promise<ExtractedContent> {
-  const html = await fetchHtml(rawUrl);
+  const pageHtml = await fetchHtml(rawUrl);
 
   let dom: JSDOM;
   try {
-    dom = new JSDOM(html, { url: rawUrl });
+    dom = new JSDOM(pageHtml, { url: rawUrl });
   } catch {
     throw new ExtractionError("Failed to parse the page.");
   }
@@ -38,15 +51,109 @@ export async function fetchAndExtract(rawUrl: string): Promise<ExtractedContent>
   const wordCount = text ? text.split(/\s+/).filter(Boolean).length : 0;
   const readingTimeEstimate = wordCount > 0 ? Math.max(1, Math.round(wordCount / WORDS_PER_MINUTE)) : null;
 
+  // Best-effort: an article with un-inlined (still remote) images is still
+  // a perfectly good save, so a total failure here shouldn't fail the save.
+  // (article.content narrowed into a plain variable -- narrowing on a
+  // property access like article.content doesn't survive into the .catch
+  // closure below, since TS can't prove it stays truthy by then.)
+  const content = article.content;
+  const html = await inlineImages(content, rawUrl).catch(() => content);
+
   return {
     title: article.title?.trim() || dom.window.document.title.trim() || null,
     author: article.byline?.trim() || null,
     siteName: article.siteName?.trim() || null,
     excerpt: article.excerpt?.trim() || null,
-    html: article.content,
+    html,
     text,
     readingTimeEstimate,
   };
+}
+
+// Exported for unit testing -- fetchAndExtract itself needs a real network
+// fetch of the page HTML to test end to end.
+export async function inlineImages(html: string, baseUrl: string): Promise<string> {
+  const fragment = new JSDOM(html);
+  const doc = fragment.window.document;
+  const imgs = Array.from(doc.querySelectorAll("img[src]"));
+  if (imgs.length === 0) return html;
+
+  const uniqueSrcs = [...new Set(imgs.map((img) => img.getAttribute("src")!).filter(Boolean))].slice(0, MAX_IMAGES);
+  const dataUriBySrc = new Map<string, string>();
+  let totalBytes = 0;
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < uniqueSrcs.length && totalBytes < MAX_TOTAL_IMAGE_BYTES) {
+      const src = uniqueSrcs[nextIndex++];
+      const dataUri = await fetchImageAsDataUri(src, baseUrl, MAX_TOTAL_IMAGE_BYTES - totalBytes);
+      if (dataUri) {
+        dataUriBySrc.set(src, dataUri.uri);
+        totalBytes += dataUri.byteLength;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: IMAGE_FETCH_CONCURRENCY }, worker));
+
+  if (dataUriBySrc.size === 0) return html;
+  for (const img of imgs) {
+    const src = img.getAttribute("src");
+    const dataUri = src && dataUriBySrc.get(src);
+    if (dataUri) img.setAttribute("src", dataUri);
+  }
+  return doc.body.innerHTML;
+}
+
+async function fetchImageAsDataUri(
+  src: string,
+  baseUrl: string,
+  remainingBudget: number,
+): Promise<{ uri: string; byteLength: number } | null> {
+  let url: URL;
+  try {
+    url = new URL(src, baseUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+
+  try {
+    await assertPublicHost(url.hostname);
+  } catch {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: { "user-agent": USER_AGENT, accept: "image/*" },
+    });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!res.ok) return null;
+
+  const contentType = res.headers.get("content-type")?.split(";")[0]?.trim();
+  if (!contentType || !contentType.startsWith("image/")) return null;
+
+  const contentLength = Number(res.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > Math.min(MAX_IMAGE_BYTES, remainingBudget)) return null;
+
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
+  if (buffer.length > MAX_IMAGE_BYTES || buffer.length > remainingBudget) return null;
+
+  return { uri: `data:${contentType};base64,${buffer.toString("base64")}`, byteLength: buffer.length };
 }
 
 async function fetchHtml(rawUrl: string): Promise<string> {
