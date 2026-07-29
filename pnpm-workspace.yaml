@@ -19,6 +19,12 @@ packages:
 nodeLinker: hoisted
 allowBuilds:
   '@prisma/engines': true
+  # Both pulled in transitively by epubjs. core-js's postinstall is a
+  # well-known, widely-documented sponsorship message printed to the
+  # terminal (nothing else); es5-ext's is an equivalent no-op-for-behavior
+  # informational script. Neither modifies anything outside node_modules.
+  core-js: true
+  es5-ext: true
   esbuild: true
   prisma: true
   sharp: true

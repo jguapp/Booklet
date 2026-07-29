@@ -67,3 +67,35 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+/**
+ * Same auth/retry contract as apiFetch, for endpoints that return raw bytes
+ * (GET /api/articles/:id/file) rather than JSON -- apiFetch always calls
+ * res.json(), which would throw on a PDF/EPUB response body.
+ */
+export async function apiFetchBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
+  const { auth = true, skipRetry = false, headers, ...rest } = options;
+
+  const finalHeaders = new Headers(headers);
+  if (auth) {
+    const token = getAccessToken();
+    if (token) finalHeaders.set("Authorization", `Bearer ${token}`);
+  }
+
+  const res = await fetch(`${API_URL}${path}`, {
+    ...rest,
+    headers: finalHeaders,
+    credentials: "include",
+  });
+
+  if (res.status === 401 && auth && !skipRetry) {
+    const refreshed = await silentRefresh();
+    if (refreshed) {
+      return apiFetchBlob(path, { ...options, skipRetry: true });
+    }
+    clearAccessToken();
+  }
+
+  if (!res.ok) throw await parseError(res);
+  return res.blob();
+}

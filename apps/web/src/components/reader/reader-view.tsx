@@ -2,16 +2,16 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { Article, ArticleStatus, Highlight, HighlightColor, TextPosition } from "@booklet/shared";
+import type { Article, ArticleStatus, Highlight, HighlightColor, HighlightPosition } from "@booklet/shared";
 import { useTheme } from "@/lib/theme/theme-provider";
-import { loadArticle, updateArticleStatus } from "@/lib/data/articles";
+import { loadArticle, loadArticleFile, updateArticleStatus } from "@/lib/data/articles";
 import { createHighlight, deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { formatReadingTime } from "@/lib/format";
 import { textToParagraphHtml } from "@/lib/reader/text-to-html";
-import { localFiles } from "@/lib/local/db";
 import { ReaderToolbar, type ReaderSize } from "./reader-toolbar";
 import { ArticleContent } from "./article-content";
+import { PdfReader } from "./pdf-reader";
 import { SourceIcon } from "@/components/library/source-icon";
 import { cn } from "@/lib/cn";
 
@@ -29,6 +29,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [progress, setProgress] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [fileBlob, setFileBlob] = useState<Blob | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -46,26 +47,32 @@ export function ReaderView({ articleId }: { articleId: string }) {
     refresh();
   }, [refresh]);
 
-  // Local (no-account) uploads keep the raw file in IndexedDB -- offer a
-  // "download original" link when it's there. Authenticated mode's file
-  // lives server-side behind an auth header a plain <a> can't send, so this
-  // is local-only for now.
+  // The raw file backs both the real PDF/EPUB readers and the "download
+  // original" link. Local (no-account) mode reads it straight from
+  // IndexedDB; authenticated mode's file lives behind an auth-gated route
+  // (GET /api/articles/:id/file) that a plain <a href> can't send a Bearer
+  // token to, so loadArticleFile fetches it as a Blob either way -- see
+  // lib/data/articles.ts.
   useEffect(() => {
     let cancelled = false;
     let objectUrl: string | null = null;
 
-    async function loadLocalFile() {
-      if (isAuthenticated || !article || (article.sourceType !== "PDF" && article.sourceType !== "EPUB")) {
-        if (!cancelled) setDownloadUrl(null);
+    async function loadFile() {
+      if (!article || (article.sourceType !== "PDF" && article.sourceType !== "EPUB")) {
+        if (!cancelled) {
+          setFileBlob(null);
+          setDownloadUrl(null);
+        }
         return;
       }
-      const file = await localFiles.get(article.id);
-      if (cancelled || !file) return;
-      objectUrl = URL.createObjectURL(file.blob);
+      const blob = await loadArticleFile(article.id, isAuthenticated).catch(() => null);
+      if (cancelled || !blob) return;
+      setFileBlob(blob);
+      objectUrl = URL.createObjectURL(blob);
       setDownloadUrl(objectUrl);
     }
 
-    loadLocalFile();
+    loadFile();
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -83,10 +90,15 @@ export function ReaderView({ articleId }: { articleId: string }) {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  async function handleCreateHighlight(position: TextPosition, color: HighlightColor, note: string) {
+  async function handleCreateHighlight(
+    selectedText: string,
+    position: HighlightPosition,
+    color: HighlightColor,
+    note: string,
+  ) {
     if (!article) return;
     const created = await createHighlight(
-      { articleId: article.id, selectedText: position.exact, position, color, noteText: note.trim() || undefined },
+      { articleId: article.id, selectedText, position, color, noteText: note.trim() || undefined },
       isAuthenticated,
     );
     setHighlights((prev) => [...prev, created]);
@@ -134,11 +146,14 @@ export function ReaderView({ articleId }: { articleId: string }) {
     ? Math.max(0, Math.round(article.readingTimeEstimate * (1 - progress)))
     : null;
   const label = article.siteName ?? article.author ?? article.originalFilename ?? "Reader";
-  // PDF/EPUB render through the same text-selection highlighter as HTML --
-  // extracted text wrapped in <p> tags instead of Readability's own markup.
-  // Page/chapter layout doesn't survive that, but selecting and highlighting does.
-  const renderHtml = article.extractedHtml ?? (article.extractedText ? textToParagraphHtml(article.extractedText) : null);
-  const isRenderable = renderHtml !== null;
+  // PDF gets its own real page-rendered reader once the file's loaded (see
+  // pdf-reader.tsx). EPUB and a PDF whose file failed to load fall back to
+  // the extracted-text-through-the-HTML-highlighter path, same as before.
+  const usesPdfReader = article.sourceType === "PDF" && fileBlob !== null;
+  const renderHtml = usesPdfReader
+    ? null
+    : (article.extractedHtml ?? (article.extractedText ? textToParagraphHtml(article.extractedText) : null));
+  const isTextRenderable = renderHtml !== null;
 
   return (
     <div className="min-h-screen bg-paper">
@@ -148,9 +163,9 @@ export function ReaderView({ articleId }: { articleId: string }) {
         onThemeChange={setTheme}
         size={size}
         onSizeChange={setSize}
-        progress={isRenderable ? progress : article.progressFraction}
+        progress={isTextRenderable ? progress : article.progressFraction}
       />
-      <main className="mx-auto max-w-[680px] px-6 py-12">
+      <main className={cn("mx-auto px-6 py-12", usesPdfReader ? "max-w-[840px]" : "max-w-[680px]")}>
         <div className="mb-4 flex items-center gap-2 text-ink-faint">
           <SourceIcon sourceType={article.sourceType} className="h-4 w-4" />
           <span className="font-sans text-xs uppercase tracking-wide">{article.sourceType}</span>
@@ -162,7 +177,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
         <p className="mb-5 font-sans text-xs text-ink-faint">
           {label}
           {article.readingTimeEstimate ? ` · ${formatReadingTime(article.readingTimeEstimate)}` : ""}
-          {isRenderable && remainingMinutes !== null ? ` · ${remainingMinutes} min left` : ""}
+          {isTextRenderable && remainingMinutes !== null ? ` · ${remainingMinutes} min left` : ""}
         </p>
 
         <div className="mb-9 flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Article status">
@@ -183,7 +198,8 @@ export function ReaderView({ articleId }: { articleId: string }) {
 
         {article.sourceType !== "HTML" && (
           <p className="mb-6 font-sans text-xs text-ink-faint">
-            {article.sourceType === "PDF" ? "PDF" : "EPUB"} · shown as extracted text, not the original page layout
+            {article.sourceType === "PDF" ? "PDF" : "EPUB"}
+            {!usesPdfReader ? " · shown as extracted text, not the original page layout" : ""}
             {article.originalFilename ? ` · ${article.originalFilename}` : ""}
             {downloadUrl && (
               <>
@@ -196,12 +212,21 @@ export function ReaderView({ articleId }: { articleId: string }) {
           </p>
         )}
 
-        {isRenderable ? (
+        {usesPdfReader ? (
+          <PdfReader
+            fileBlob={fileBlob!}
+            highlights={highlights}
+            onCreateHighlight={(position, color, note) => handleCreateHighlight(position.text, position, color, note)}
+            onDeleteHighlight={handleDeleteHighlight}
+            onSaveNote={handleSaveNote}
+            onDeleteNote={handleDeleteNote}
+          />
+        ) : isTextRenderable ? (
           <ArticleContent
             html={renderHtml ?? ""}
             highlights={highlights}
             size={size}
-            onCreateHighlight={handleCreateHighlight}
+            onCreateHighlight={(position, color, note) => handleCreateHighlight(position.exact, position, color, note)}
             onDeleteHighlight={handleDeleteHighlight}
             onSaveNote={handleSaveNote}
             onDeleteNote={handleDeleteNote}
