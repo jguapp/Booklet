@@ -1,22 +1,22 @@
 /**
  * The local-vs-synced swap point for highlights -- mirrors the web app's
- * lib/data/highlights.ts, scoped to what the mobile reader actually does
- * (create/list/delete while reading). No notes/annotations or resurfacing
- * feedback UI on mobile yet, so those parts of the web version aren't
- * ported here.
+ * lib/data/highlights.ts, scoped to what the mobile reader and Daily
+ * Review screen actually do (create/list/delete while reading, list-all +
+ * feedback for resurfacing). No notes/annotations UI on mobile yet.
  */
-import type { Highlight, HighlightColor, HighlightPosition } from "@booklet/shared";
+import type { Highlight, HighlightColor, HighlightPosition, UpdateHighlightRequest } from "@booklet/shared";
 import { DEFAULT_SM2_STATE } from "@booklet/shared";
 import { apiFetch, ApiError } from "../api";
 import { generateLocalId, localHighlights } from "../local/db";
 
 export { ApiError };
 
-export async function loadHighlights(articleId: string, authenticated: boolean): Promise<Highlight[]> {
+export async function loadHighlights(articleId: string | undefined, authenticated: boolean): Promise<Highlight[]> {
   if (authenticated) {
-    return apiFetch<Highlight[]>(`/api/highlights?articleId=${encodeURIComponent(articleId)}`);
+    const params = articleId ? `?articleId=${encodeURIComponent(articleId)}` : "";
+    return apiFetch<Highlight[]>(`/api/highlights${params}`);
   }
-  return localHighlights.getForArticle(articleId);
+  return articleId ? localHighlights.getForArticle(articleId) : localHighlights.getAll();
 }
 
 interface CreateHighlightInput {
@@ -60,4 +60,30 @@ export async function deleteHighlight(id: string, authenticated: boolean): Promi
     return;
   }
   await localHighlights.delete(id);
+}
+
+export async function updateHighlightFeedback(
+  highlight: Highlight,
+  patch: UpdateHighlightRequest,
+  authenticated: boolean,
+): Promise<Highlight> {
+  if (authenticated) {
+    return apiFetch<Highlight>(`/api/highlights/${highlight.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  }
+  const updated: Highlight = {
+    ...highlight,
+    ...(patch.color !== undefined ? { color: patch.color } : {}),
+    ...(patch.resurfaceArchivedAt !== undefined ? { resurfaceArchivedAt: patch.resurfaceArchivedAt } : {}),
+    ...(patch.lastSurfacedAt !== undefined ? { lastSurfacedAt: patch.lastSurfacedAt } : {}),
+    ...(patch.surfaceCount !== undefined ? { surfaceCount: patch.surfaceCount } : {}),
+    ...(patch.lastFeedback !== undefined ? { lastFeedback: patch.lastFeedback } : {}),
+    ...(patch.lastFeedbackAt !== undefined ? { lastFeedbackAt: patch.lastFeedbackAt } : {}),
+    ...(patch.easinessFactor !== undefined ? { easinessFactor: patch.easinessFactor } : {}),
+    ...(patch.intervalDays !== undefined ? { intervalDays: patch.intervalDays } : {}),
+    ...(patch.repetitions !== undefined ? { repetitions: patch.repetitions } : {}),
+    ...(patch.nextDueAt !== undefined ? { nextDueAt: patch.nextDueAt } : {}),
+    updatedAt: new Date().toISOString(),
+  };
+  await localHighlights.put(updated);
+  return updated;
 }

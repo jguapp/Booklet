@@ -8,10 +8,19 @@
  * IndexedDB's per-row storage.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { Article, Highlight } from "@booklet/shared";
+import type { Article, Collection, Highlight } from "@booklet/shared";
 
 const ARTICLES_KEY = "booklet_local_articles";
 const HIGHLIGHTS_KEY = "booklet_local_highlights";
+const COLLECTIONS_KEY = "booklet_local_collections";
+const ARTICLE_COLLECTIONS_KEY = "booklet_local_article_collections";
+
+export interface LocalArticleCollection {
+  id: string; // `${articleId}:${collectionId}`
+  articleId: string;
+  collectionId: string;
+  addedAt: string;
+}
 
 // Hermes (React Native's JS engine) doesn't implement crypto.randomUUID()
 // without an extra native module (expo-crypto) -- not worth a new
@@ -76,5 +85,49 @@ export const localHighlights = {
   },
   async clear(): Promise<void> {
     await AsyncStorage.removeItem(HIGHLIGHTS_KEY);
+  },
+};
+
+export const localCollections = {
+  async getAll(): Promise<Collection[]> {
+    return Object.values(await readMap<Collection>(COLLECTIONS_KEY));
+  },
+  async put(collection: Collection): Promise<void> {
+    const map = await readMap<Collection>(COLLECTIONS_KEY);
+    map[collection.id] = collection;
+    await writeMap(COLLECTIONS_KEY, map);
+  },
+  async delete(id: string): Promise<void> {
+    const map = await readMap<Collection>(COLLECTIONS_KEY);
+    delete map[id];
+    await writeMap(COLLECTIONS_KEY, map);
+  },
+  async clear(): Promise<void> {
+    await AsyncStorage.removeItem(COLLECTIONS_KEY);
+  },
+};
+
+export const localArticleCollections = {
+  async getAll(): Promise<LocalArticleCollection[]> {
+    return Object.values(await readMap<LocalArticleCollection>(ARTICLE_COLLECTIONS_KEY));
+  },
+  async getForArticle(articleId: string): Promise<LocalArticleCollection[]> {
+    return (await this.getAll()).filter((l) => l.articleId === articleId);
+  },
+  async getForCollection(collectionId: string): Promise<LocalArticleCollection[]> {
+    return (await this.getAll()).filter((l) => l.collectionId === collectionId);
+  },
+  async put(link: LocalArticleCollection): Promise<void> {
+    const map = await readMap<LocalArticleCollection>(ARTICLE_COLLECTIONS_KEY);
+    map[link.id] = link;
+    await writeMap(ARTICLE_COLLECTIONS_KEY, map);
+  },
+  async delete(id: string): Promise<void> {
+    const map = await readMap<LocalArticleCollection>(ARTICLE_COLLECTIONS_KEY);
+    delete map[id];
+    await writeMap(ARTICLE_COLLECTIONS_KEY, map);
+  },
+  async clear(): Promise<void> {
+    await AsyncStorage.removeItem(ARTICLE_COLLECTIONS_KEY);
   },
 };
