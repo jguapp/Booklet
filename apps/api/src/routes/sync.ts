@@ -55,6 +55,7 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
           savedAt: a.savedAt ? new Date(a.savedAt) : new Date(),
           readAt: a.readAt ? new Date(a.readAt) : null,
           archivedAt: a.archivedAt ? new Date(a.archivedAt) : null,
+          favorited: a.favorited ?? false,
         },
       });
       localIdToServerId.set(a.localId, created.id);

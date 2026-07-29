@@ -32,6 +32,7 @@ export async function registerSearchRoute(app: FastifyInstance): Promise<void> {
       prisma.article.findMany({
         where: {
           userId,
+          deletedAt: null,
           OR: [
             { title: contains },
             { excerpt: contains },

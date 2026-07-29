@@ -57,6 +57,22 @@ export async function loadArticles(authenticated: boolean): Promise<Article[]> {
   return articles;
 }
 
+/** Trash, not the regular library -- excluded from loadArticles() above
+ * regardless of status, same on both the local and server sides. */
+export async function loadTrash(authenticated: boolean): Promise<Article[]> {
+  if (!authenticated) return localArticles.getTrash();
+
+  const articles: Article[] = [];
+  let cursor: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "100", trashed: "true", ...(cursor ? { cursor } : {}) });
+    const res: ArticleListResponse = await apiFetch<ArticleListResponse>(`/api/articles?${params}`);
+    articles.push(...(res.articles as Article[]));
+    cursor = res.nextCursor;
+  } while (cursor);
+  return articles;
+}
+
 export async function loadArticle(id: string, authenticated: boolean): Promise<Article | null> {
   if (!authenticated) return (await localArticles.get(id)) ?? null;
   try {
@@ -108,6 +124,8 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     savedAt: now,
     readAt: null,
     archivedAt: null,
+    favorited: false,
+    deletedAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -159,6 +177,8 @@ export async function saveArticleFromFile(file: File, authenticated: boolean): P
     savedAt: now,
     readAt: null,
     archivedAt: null,
+    favorited: false,
+    deletedAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -220,10 +240,63 @@ export async function updateArticleTags(article: Article, tags: string[], authen
   return updated;
 }
 
-export async function deleteArticle(id: string, authenticated: boolean): Promise<void> {
+export async function updateArticleFavorited(
+  article: Article,
+  favorited: boolean,
+  authenticated: boolean,
+): Promise<Article> {
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ favorited }),
+    });
+  }
+  const updated: Article = { ...article, favorited, updatedAt: new Date().toISOString() };
+  await localArticles.put(updated);
+  return updated;
+}
+
+/** The everyday "delete" action -- moves it to Trash instead of removing it
+ * outright, so it's recoverable for 30 days. See permanentlyDeleteArticle
+ * for the irreversible one (used by the Trash page). */
+export async function trashArticle(article: Article, authenticated: boolean): Promise<Article> {
+  const now = new Date().toISOString();
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ deletedAt: now }),
+    });
+  }
+  const updated: Article = { ...article, deletedAt: now, updatedAt: now };
+  await localArticles.put(updated);
+  return updated;
+}
+
+export async function restoreArticle(article: Article, authenticated: boolean): Promise<Article> {
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ deletedAt: null }),
+    });
+  }
+  const updated: Article = { ...article, deletedAt: null, updatedAt: new Date().toISOString() };
+  await localArticles.put(updated);
+  return updated;
+}
+
+export async function permanentlyDeleteArticle(id: string, authenticated: boolean): Promise<void> {
   if (authenticated) {
     await apiFetch(`/api/articles/${id}`, { method: "DELETE" });
     return;
   }
   await Promise.all([localArticles.delete(id), localFiles.delete(id)]);
+}
+
+export async function emptyTrash(authenticated: boolean): Promise<void> {
+  if (authenticated) {
+    await apiFetch("/api/articles/trash", { method: "DELETE" });
+    return;
+  }
+  const trashed = await localArticles.getTrash();
+  await Promise.all(trashed.map((a) => Promise.all([localArticles.delete(a.id), localFiles.delete(a.id)])));
 }
