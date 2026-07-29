@@ -12,6 +12,34 @@ import { waitForSaveModalToClose } from "./helpers";
 
 test("play, pause, resume, and stop an article being read aloud", async ({ page }) => {
   await page.goto("/library");
+
+  // The SpeechSynthesis *API surface* existing (window.speechSynthesis,
+  // SpeechSynthesisUtterance) doesn't mean synthesis actually works --
+  // headless Linux CI runners typically have no system TTS voices
+  // installed, so speak() never reaches "speaking" even though nothing
+  // throws. Skip rather than fail somewhere that structurally can't
+  // exercise the feature; this ran and passed for real locally (a real
+  // desktop Chromium with a real voice) -- see the commit that added this.
+  const ttsWorks = await page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        if (!("speechSynthesis" in window)) return resolve(false);
+        const utterance = new SpeechSynthesisUtterance("test");
+        const timeout = setTimeout(() => resolve(false), 2000);
+        utterance.onstart = () => {
+          clearTimeout(timeout);
+          window.speechSynthesis.cancel();
+          resolve(true);
+        };
+        utterance.onerror = () => {
+          clearTimeout(timeout);
+          resolve(false);
+        };
+        window.speechSynthesis.speak(utterance);
+      }),
+  );
+  test.skip(!ttsWorks, "No working speech-synthesis backend in this environment (no system TTS voices)");
+
   await page.getByRole("button", { name: /save article/i }).click();
   await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
   await page.getByRole("button", { name: /^save$/i }).click();

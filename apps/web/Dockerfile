@@ -30,6 +30,13 @@ ARG NEXT_PUBLIC_API_URL=http://localhost:4000
 ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN}
+# `pnpm install` here is unfiltered (whole workspace, not just @booklet/web
+# -- see the tradeoff noted above), so it still runs apps/api's postinstall
+# too. That triggers `prisma generate`, which resolves DATABASE_URL just to
+# load prisma.config.ts even though pure codegen never connects -- same fix
+# as apps/api/Dockerfile, placeholder value that never leaves this stage
+# (this image has no database access at runtime at all).
+ENV DATABASE_URL="postgresql://user:password@localhost:5432/db?schema=public"
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @booklet/web build
