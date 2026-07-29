@@ -9,6 +9,7 @@ import { createHighlight, deleteHighlight, deleteNote, loadHighlights, saveNote 
 import { useAuth } from "@/lib/auth/auth-provider";
 import { formatReadingTime } from "@/lib/format";
 import { textToParagraphHtml } from "@/lib/reader/text-to-html";
+import { loadReaderPrefs, saveReaderPrefs } from "@/lib/reader/device-prefs";
 import { ReaderToolbar, type ReaderSize } from "./reader-toolbar";
 import { ArticleContent } from "./article-content";
 import { PdfReader } from "./pdf-reader";
@@ -32,7 +33,23 @@ const AUTO_READ_PROGRESS_THRESHOLD = 0.98; // PDF hits exactly 1 on its last pag
 export function ReaderView({ articleId }: { articleId: string }) {
   const { theme, setTheme } = useTheme();
   const { status: authStatus, isAuthenticated } = useAuth();
-  const [size, setSize] = useState<ReaderSize>("md");
+  const [size, setSizeState] = useState<ReaderSize>("md");
+
+  // Matches ThemeProvider's own pattern for this: the server always renders
+  // the default (no `localStorage` to read there), then this corrects it
+  // client-side right after mount -- a one-frame-later update, not a
+  // hydration mismatch, since the server-rendered output isn't touched.
+  useEffect(() => {
+    function syncFromDevicePrefs() {
+      setSizeState(loadReaderPrefs().size);
+    }
+    syncFromDevicePrefs();
+  }, []);
+
+  function setSize(next: ReaderSize) {
+    setSizeState(next);
+    saveReaderPrefs({ ...loadReaderPrefs(), size: next });
+  }
   const [article, setArticle] = useState<Article | null>(null);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [progress, setProgress] = useState(0);

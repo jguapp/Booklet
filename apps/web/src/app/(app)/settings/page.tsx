@@ -7,6 +7,8 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTheme, type Theme } from "@/lib/theme/theme-provider";
 import { loadUserSettings, saveUserSettings } from "@/lib/mock/store";
+import { loadReaderPrefs, saveReaderPrefs } from "@/lib/reader/device-prefs";
+import type { ReaderSize } from "@/components/reader/reader-toolbar";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { loadSessions, revokeOtherSessions, revokeSession } from "@/lib/data/sessions";
 import { formatRelativeDate, summarizeUserAgent } from "@/lib/format";
@@ -23,15 +25,47 @@ const THEMES: { value: Theme; label: string }[] = [
   { value: "dark", label: "Dark" },
 ];
 
+const SIZES: { value: ReaderSize; label: string }[] = [
+  { value: "sm", label: "Small" },
+  { value: "md", label: "Medium" },
+  { value: "lg", label: "Large" },
+  { value: "xl", label: "X-Large" },
+];
+
+const TTS_RATES = [0.75, 1, 1.25, 1.5, 2];
+
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
   const { status, user, logout, updateSettings, resendVerificationEmail } = useAuth();
   const [frequency, setFrequency] = useState<ResurfaceFrequency>("DAILY");
   const [perDigest, setPerDigest] = useState(5);
+  const [readerSize, setReaderSize] = useState<ReaderSize>("md");
+  const [ttsRate, setTtsRate] = useState(1);
   const [saved, setSaved] = useState(false);
   const [resendStatus, setResendStatus] = useState<"idle" | "sending" | "sent">("idle");
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
+
+  // Device-local, not account-synced -- see device-prefs.ts. Read after
+  // mount, same reasoning as reader-view.tsx's own read of these.
+  useEffect(() => {
+    function syncFromDevicePrefs() {
+      const prefs = loadReaderPrefs();
+      setReaderSize(prefs.size);
+      setTtsRate(prefs.ttsRate);
+    }
+    syncFromDevicePrefs();
+  }, []);
+
+  function handleReaderSizeChange(size: ReaderSize) {
+    setReaderSize(size);
+    saveReaderPrefs({ size, ttsRate });
+  }
+
+  function handleTtsRateChange(rate: number) {
+    setTtsRate(rate);
+    saveReaderPrefs({ size: readerSize, ttsRate: rate });
+  }
 
   useEffect(() => {
     async function syncSettings() {
@@ -150,6 +184,51 @@ export default function SettingsPage() {
                 )}
               >
                 {t.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Default text size
+          </h2>
+          <p className="font-sans text-xs text-ink-faint">
+            Applies to a newly-opened article; this device only, not synced across devices.
+          </p>
+          <div className="flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Default text size">
+            {SIZES.map((s) => (
+              <button
+                key={s.value}
+                type="button"
+                onClick={() => handleReaderSizeChange(s.value)}
+                className={cn(
+                  "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                  readerSize === s.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                )}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Read-aloud speed
+          </h2>
+          <div className="flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Read-aloud speed">
+            {TTS_RATES.map((rate) => (
+              <button
+                key={rate}
+                type="button"
+                onClick={() => handleTtsRateChange(rate)}
+                className={cn(
+                  "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                  ttsRate === rate ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                )}
+              >
+                {rate}×
               </button>
             ))}
           </div>
