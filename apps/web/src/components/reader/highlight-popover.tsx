@@ -43,11 +43,16 @@ export function HighlightPopover({ anchorRect, selectedText, onConfirm, onDismis
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") onDismiss();
     }
+    function handleScroll() {
+      onDismiss();
+    }
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKey);
+    window.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKey);
+      window.removeEventListener("scroll", handleScroll);
     };
   }, [onDismiss]);
 
@@ -67,13 +72,20 @@ export function HighlightPopover({ anchorRect, selectedText, onConfirm, onDismis
       .catch(() => setDictStatus("error"));
   }
 
-  const top = anchorRect.top + window.scrollY - 12;
-  const left = anchorRect.left + window.scrollX + anchorRect.width / 2;
+  // `fixed`, positioned directly from the viewport-relative anchorRect --
+  // deliberately not `absolute` + `window.scrollX/scrollY`, which only
+  // lands correctly when the nearest positioned ancestor is the document
+  // root. This popover's ancestor varies by reader (a local `position:
+  // relative` wrapper nested deep in the page for the HTML reader, versus
+  // near the document root for PDF/EPUB), so document-relative coordinates
+  // landed it far from the actual selection in the HTML case.
+  const top = anchorRect.top - 12;
+  const left = anchorRect.left + anchorRect.width / 2;
 
   return (
     <div
       ref={ref}
-      className="absolute z-50 -translate-x-1/2 -translate-y-full rounded-md border border-border bg-surface p-3 shadow-lg"
+      className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-md border border-border bg-surface p-3 shadow-lg"
       style={{ top, left }}
     >
       <div className="flex items-center gap-1.5">
