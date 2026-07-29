@@ -17,8 +17,6 @@ const TWO_CHAPTER_EPUB = path.join(process.cwd(), "e2e", "fixtures", "two-chapte
 
 async function leaveAndReturnToReader(page: import("@playwright/test").Page) {
   await page.locator('a[title="Back to library"]').click();
-  await page.waitForURL("/");
-  await page.getByRole("link", { name: /continue without an account/i }).click();
   await page.waitForURL(/\/library/);
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);

@@ -37,7 +37,7 @@ export function ReaderToolbar({
       <div className="mx-auto flex max-w-[680px] items-center justify-between gap-4 px-6 py-3">
         <div className="flex items-center gap-3 font-sans text-xs text-ink-muted">
           <Link
-            href="/"
+            href="/library"
             title="Back to library"
             className="flex h-6 w-6 items-center justify-center rounded-full transition-colors hover:bg-surface-2 hover:text-ink"
           >
