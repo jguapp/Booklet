@@ -12,6 +12,7 @@ import type { ReaderSize } from "@/components/reader/reader-toolbar";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { loadSessions, revokeOtherSessions, revokeSession } from "@/lib/data/sessions";
 import { exportAsMarkdownZip, importUrls, parseImportCsv } from "@/lib/data/export-import";
+import { loadHoardingPrefs, saveHoardingPrefs } from "@/lib/data/hoarding-prefs";
 import { formatRelativeDate, summarizeUserAgent } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
@@ -44,6 +45,8 @@ export default function SettingsPage() {
   const [perDigest, setPerDigest] = useState(5);
   const [readerSize, setReaderSize] = useState<ReaderSize>("md");
   const [ttsRate, setTtsRate] = useState(1);
+  const [hoardingEnabled, setHoardingEnabled] = useState(false);
+  const [maxUnread, setMaxUnread] = useState(25);
   const [saved, setSaved] = useState(false);
   const [resendStatus, setResendStatus] = useState<"idle" | "sending" | "sent">("idle");
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
@@ -55,6 +58,9 @@ export default function SettingsPage() {
       const prefs = loadReaderPrefs();
       setReaderSize(prefs.size);
       setTtsRate(prefs.ttsRate);
+      const hoarding = loadHoardingPrefs();
+      setHoardingEnabled(hoarding.enabled);
+      setMaxUnread(hoarding.maxUnread);
     }
     syncFromDevicePrefs();
   }, []);
@@ -67,6 +73,17 @@ export default function SettingsPage() {
   function handleTtsRateChange(rate: number) {
     setTtsRate(rate);
     saveReaderPrefs({ size: readerSize, ttsRate: rate });
+  }
+
+  function handleHoardingEnabledChange(enabled: boolean) {
+    setHoardingEnabled(enabled);
+    saveHoardingPrefs({ enabled, maxUnread });
+  }
+
+  function handleMaxUnreadChange(value: number) {
+    const clamped = Math.max(1, Math.min(500, value || 1));
+    setMaxUnread(clamped);
+    saveHoardingPrefs({ enabled: hoardingEnabled, maxUnread: clamped });
   }
 
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -270,6 +287,52 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Prevent knowledge hoarding
+          </h2>
+          <p className="font-sans text-xs text-ink-faint">
+            Saving is frictionless and reading isn&apos;t -- it&apos;s easy to end up with an unread backlog too
+            big to ever get through. When on, saving while at or above the limit below asks first instead of
+            growing the pile silently.
+          </p>
+          <div className="flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Prevent knowledge hoarding">
+            <button
+              type="button"
+              onClick={() => handleHoardingEnabledChange(false)}
+              className={cn(
+                "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                !hoardingEnabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+              )}
+            >
+              Off
+            </button>
+            <button
+              type="button"
+              onClick={() => handleHoardingEnabledChange(true)}
+              className={cn(
+                "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                hoardingEnabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+              )}
+            >
+              On
+            </button>
+          </div>
+          {hoardingEnabled && (
+            <label className="mt-1 flex flex-col gap-1.5">
+              <span className="font-sans text-sm font-medium text-ink">Unread limit</span>
+              <Input
+                type="number"
+                min={1}
+                max={500}
+                value={maxUnread}
+                onChange={(e) => handleMaxUnreadChange(Number(e.target.value))}
+                className="max-w-[100px]"
+              />
+            </label>
+          )}
         </section>
 
         <div className="flex items-center gap-3">
