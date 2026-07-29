@@ -24,6 +24,16 @@ export function IconHighlights(props: IconProps) {
   );
 }
 
+export function IconRss(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="5.5" cy="14.5" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M4 8.5a7.5 7.5 0 0 1 7.5 7.5" strokeLinecap="round" />
+      <path d="M4 4a12 12 0 0 1 12 12" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconResurface(props: IconProps) {
   return (
     <svg {...base(props)}>

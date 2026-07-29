@@ -4,15 +4,16 @@
  * this; it adds a synced copy on the server (see lib/data/*) while this
  * stays the source of truth for anyone who never creates an account.
  */
-import type { Article, Collection, Highlight } from "@booklet/shared";
+import type { Article, Collection, Feed, Highlight } from "@booklet/shared";
 
 const DB_NAME = "booklet";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const ARTICLES_STORE = "articles";
 const HIGHLIGHTS_STORE = "highlights";
 const COLLECTIONS_STORE = "collections";
 const ARTICLE_COLLECTIONS_STORE = "articleCollections";
 const FILES_STORE = "files";
+const FEEDS_STORE = "feeds";
 
 interface LocalFile {
   id: string; // articleId
@@ -57,6 +58,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(FILES_STORE)) {
         db.createObjectStore(FILES_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(FEEDS_STORE)) {
+        db.createObjectStore(FEEDS_STORE, { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -160,6 +164,13 @@ export const localCollections = {
   put: (collection: Collection) => put(COLLECTIONS_STORE, collection),
   delete: (id: string) => remove(COLLECTIONS_STORE, id),
   clear: () => clear(COLLECTIONS_STORE),
+};
+
+export const localFeeds = {
+  getAll: () => getAll<Feed>(FEEDS_STORE),
+  put: (feed: Feed) => put(FEEDS_STORE, feed),
+  delete: (id: string) => remove(FEEDS_STORE, id),
+  clear: () => clear(FEEDS_STORE),
 };
 
 export const localFiles = {
