@@ -18,6 +18,11 @@ const TWO_CHAPTER_EPUB = path.join(process.cwd(), "e2e", "fixtures", "two-chapte
 async function leaveAndReturnToReader(page: import("@playwright/test").Page) {
   await page.locator('a[title="Back to library"]').click();
   await page.waitForURL(/\/library/);
+  // The library defaults to the "Reading" tab; turning to the last page/
+  // location on the way here can auto-archive the article (see
+  // reader-view.tsx's AUTO_READ_PROGRESS_THRESHOLD), which "Reading" won't
+  // show. "All" always has it regardless of status.
+  await page.getByRole("button", { name: "All", exact: true }).click();
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);
 }

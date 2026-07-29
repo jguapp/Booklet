@@ -33,10 +33,34 @@ test("tag an article, filter the library by tag, and see it persist", async ({ p
   await page.reload();
   await expect(page.locator('button[title^="Remove"]')).toHaveText(["reference×"], { timeout: 10_000 });
 
+  // The library defaults to the "Reading" tab; the tagged article is
+  // UNREAD, so switch to "All" to see it.
   await page.goto("/library");
+  await page.getByRole("button", { name: "All", exact: true }).click();
   await expect(page.getByRole("button", { name: "reference" })).toBeVisible();
   await page.getByRole("button", { name: "reference" }).click();
   await expect(page.getByText("Tag (metadata)")).toBeVisible();
+});
+
+test("library defaults to the Reading tab, hiding an unread article until it's marked Reading", async ({ page }) => {
+  await page.goto("/library");
+  await saveUrl(page, "https://en.wikipedia.org/wiki/Readability");
+  // handleSaved switches to "Unread" so the fresh save doesn't appear to vanish.
+  await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
+
+  // A fresh navigation reverts to the real default -- the just-saved
+  // (UNREAD) article shouldn't be there.
+  await page.goto("/library");
+  await expect(page.getByRole("button", { name: "Reading", exact: true })).toHaveClass(/bg-surface\b/);
+  await expect(page.locator("a[href^='/reader/']")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "All", exact: true }).click();
+  await page.locator("a[href^='/reader/']").first().click();
+  await page.waitForURL(/\/reader\//);
+  await page.getByRole("button", { name: "Reading", exact: true }).click(); // reader-view.tsx's own status tabs
+
+  await page.goto("/library");
+  await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
 });
 
 test("full-text search finds an article by body text, not just its title", async ({ page }) => {
