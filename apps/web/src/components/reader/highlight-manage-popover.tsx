@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { IconPencil, IconTrash } from "@/components/ui/icons";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface HighlightManagePopoverProps {
   anchorRect: DOMRect;
@@ -22,6 +23,7 @@ export function HighlightManagePopover({
 }: HighlightManagePopoverProps) {
   const [editingNote, setEditingNote] = useState(false);
   const [draft, setDraft] = useState(noteText);
+  const [confirming, setConfirming] = useState<"highlight" | "note" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,19 +53,15 @@ export function HighlightManagePopover({
     onDismiss();
   }
 
-  function handleDelete() {
-    if (window.confirm("Delete this highlight? This can't be undone.")) {
-      onDeleteHighlight();
-    }
-  }
-
-  const top = anchorRect.top + window.scrollY - 12;
-  const left = anchorRect.left + window.scrollX + anchorRect.width / 2;
+  // `fixed`, positioned directly from the viewport-relative anchorRect -- see
+  // the matching comment in highlight-popover.tsx for why not `absolute`.
+  const top = anchorRect.top - 12;
+  const left = anchorRect.left + anchorRect.width / 2;
 
   return (
     <div
       ref={ref}
-      className="absolute z-50 w-64 -translate-x-1/2 -translate-y-full rounded-md border border-border bg-surface p-3 shadow-lg"
+      className="fixed z-50 w-64 -translate-x-1/2 -translate-y-full rounded-md border border-border bg-surface p-3 shadow-lg"
       style={{ top, left }}
     >
       {editingNote ? (
@@ -106,7 +104,7 @@ export function HighlightManagePopover({
           {noteText && (
             <button
               type="button"
-              onClick={onDeleteNote}
+              onClick={() => setConfirming("note")}
               title="Delete note"
               className="flex h-7 w-7 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-2 hover:text-ink"
             >
@@ -116,13 +114,26 @@ export function HighlightManagePopover({
           <div className="mx-0.5 h-5 w-px bg-border" />
           <button
             type="button"
-            onClick={handleDelete}
+            onClick={() => setConfirming("highlight")}
             title="Delete highlight"
             className="flex h-7 w-7 items-center justify-center rounded-sm text-ink-muted hover:bg-highlight-orange hover:text-ink"
           >
             <IconTrash className="h-3.5 w-3.5" />
           </button>
         </div>
+      )}
+
+      {confirming && (
+        <ConfirmDialog
+          title={confirming === "highlight" ? "Delete this highlight?" : "Delete this note?"}
+          message="This can't be undone."
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => {
+            if (confirming === "highlight") onDeleteHighlight();
+            else onDeleteNote();
+            setConfirming(null);
+          }}
+        />
       )}
     </div>
   );

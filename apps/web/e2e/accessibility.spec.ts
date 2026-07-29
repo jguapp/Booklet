@@ -2,12 +2,13 @@ import { expect, test } from "@playwright/test";
 
 /**
  * Keyboard/focus-management regression coverage for SaveArticleModal -- the
- * one true modal dialog in the app (everything else is a lightweight
- * dropdown/popover, not a full-page backdrop). Guards against: Tab escaping
- * the dialog into the Library page hidden behind the backdrop, focus not
- * returning to the triggering button on close, and the "Upload a file"
- * dropzone being a mouse-only <div onClick> with no way for a keyboard user
- * to reach the hidden <input type="file"> inside it.
+ * most complex modal dialog in the app (multi-step, with a keyboard-only
+ * dropzone; ConfirmDialog is a full-page-backdrop dialog too, but a much
+ * simpler two-button one). Guards against: Tab escaping the dialog into the
+ * Library page hidden behind the backdrop, focus not returning to the
+ * triggering button on close, and the "Upload a file" dropzone being a
+ * mouse-only <div onClick> with no way for a keyboard user to reach the
+ * hidden <input type="file"> inside it.
  */
 
 test("Tab stays trapped inside the save-article dialog, the upload dropzone is keyboard-reachable, and focus returns to the trigger on close", async ({

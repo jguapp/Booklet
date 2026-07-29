@@ -35,8 +35,6 @@ async function selectWordInFirstParagraph(page: Page, word: string) {
 }
 
 test("upload an EPUB, highlight real rendered text across chapters, and see it persist and delete", async ({ page }) => {
-  page.on("dialog", (dialog) => dialog.accept()); // the manage popover's delete confirm is a real window.confirm()
-
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
   await page.getByRole("button", { name: /upload a file/i }).click();
@@ -72,5 +70,6 @@ test("upload an EPUB, highlight real rendered text across chapters, and see it p
 
   await mark.first().click();
   await page.getByTitle("Delete highlight").click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(mark).toHaveCount(0);
 });

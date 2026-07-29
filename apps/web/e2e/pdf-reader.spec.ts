@@ -31,8 +31,6 @@ async function selectFirstTextLayerSpan(page: import("@playwright/test").Page) {
 }
 
 test("upload a PDF, highlight real rendered text, and see it persist and delete", async ({ page }) => {
-  page.on("dialog", (dialog) => dialog.accept()); // the manage popover's delete confirm is a real window.confirm()
-
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
   await page.getByRole("button", { name: /upload a file/i }).click();
@@ -78,5 +76,6 @@ test("upload a PDF, highlight real rendered text, and see it persist and delete"
 
   await overlay.first().click();
   await page.getByTitle("Delete highlight").click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(overlay).toHaveCount(0);
 });
