@@ -14,6 +14,7 @@ import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus
 import { loadArticlesInCollection, loadCollections } from "@/lib/data/collections";
 import { searchLibrary } from "@/lib/data/search";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { useOnTrashed } from "@/lib/dnd/trash-drop";
 
 type FilterTab = "ALL" | ArticleStatus;
 
@@ -67,6 +68,7 @@ function LibraryPageInner() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  useOnTrashed(refresh); // a drag-and-drop trash drop elsewhere (app layout) doesn't touch this page's own state
 
   // Debounced so authenticated mode (which asks the server -- see
   // lib/data/search.ts for why the already-loaded article list can't

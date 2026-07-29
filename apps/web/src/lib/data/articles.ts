@@ -272,6 +272,21 @@ export async function trashArticle(article: Article, authenticated: boolean): Pr
   return updated;
 }
 
+/** Same as trashArticle, but for callers (drag-and-drop onto the Trash nav
+ * link) that only have an id, not the full Article -- the local path needs
+ * to look the record up first to preserve its other fields when writing it
+ * back, since IndexedDB has no partial-update primitive. */
+export async function trashArticleById(id: string, authenticated: boolean): Promise<void> {
+  const now = new Date().toISOString();
+  if (authenticated) {
+    await apiFetch<Article>(`/api/articles/${id}`, { method: "PATCH", body: JSON.stringify({ deletedAt: now }) });
+    return;
+  }
+  const existing = await localArticles.get(id);
+  if (!existing) return;
+  await localArticles.put({ ...existing, deletedAt: now, updatedAt: now });
+}
+
 export async function restoreArticle(article: Article, authenticated: boolean): Promise<Article> {
   if (authenticated) {
     return apiFetch<Article>(`/api/articles/${article.id}`, {

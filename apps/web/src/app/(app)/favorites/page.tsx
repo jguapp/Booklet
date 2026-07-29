@@ -6,6 +6,7 @@ import { ArticleCard } from "@/components/library/article-card";
 import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
 import { loadCollections } from "@/lib/data/collections";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { useOnTrashed } from "@/lib/dnd/trash-drop";
 
 export default function FavoritesPage() {
   const { status, isAuthenticated } = useAuth();
@@ -27,6 +28,7 @@ export default function FavoritesPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  useOnTrashed(refresh);
 
   const favorites = useMemo(
     () => articles.filter((a) => a.favorited).sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime()),

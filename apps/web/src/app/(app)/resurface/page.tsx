@@ -12,6 +12,7 @@ import { loadHighlights as loadLocalHighlights } from "@/lib/data/highlights";
 import { loadUserSettings } from "@/lib/mock/store";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useToast } from "@/lib/toast/toast-provider";
+import { useOnTrashed } from "@/lib/dnd/trash-drop";
 
 export default function ResurfacePage() {
   const { status, isAuthenticated } = useAuth();
@@ -63,6 +64,7 @@ export default function ResurfacePage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  useOnTrashed(refresh);
 
   const articleById = useMemo(() => new Map(articles.map((a) => [a.id, a])), [articles]);
 

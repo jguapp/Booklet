@@ -7,6 +7,7 @@ import { SourceIcon } from "./source-icon";
 import { StatusBadge } from "./status-badge";
 import { CollectionMenu } from "./collection-menu";
 import { IconArchive, IconInbox, IconStar, IconTrash } from "@/components/ui/icons";
+import { ARTICLE_DRAG_MIME } from "@/lib/dnd/trash-drop";
 import { cn } from "@/lib/cn";
 
 interface ArticleCardProps {
@@ -37,6 +38,11 @@ export function ArticleCard({
   return (
     <Link
       href={`/reader/${article.id}`}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(ARTICLE_DRAG_MIME, article.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
       className="group relative flex flex-col gap-3 rounded-md border border-border bg-surface px-5 py-4 transition-colors hover:border-accent/40"
     >
       <div className="flex items-center justify-between gap-3">
