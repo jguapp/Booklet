@@ -4,10 +4,19 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import type { Collection } from "@booklet/shared";
-import { IconHighlights, IconLibrary, IconLogout, IconPlus, IconResurface, IconSettings } from "@/components/ui/icons";
+import {
+  IconHighlights,
+  IconLibrary,
+  IconLogout,
+  IconPencil,
+  IconPlus,
+  IconResurface,
+  IconSettings,
+  IconTrash,
+} from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth/auth-provider";
-import { createCollection, loadCollections } from "@/lib/data/collections";
+import { createCollection, deleteCollection, loadCollections, updateCollection } from "@/lib/data/collections";
 import { ApiError } from "@/lib/api/client";
 
 const NAV_ITEMS = [
@@ -36,6 +45,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
 
   const activeCollectionId = searchParams.get("collection");
 
@@ -67,6 +78,33 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       // Name collision is the only realistic failure here -- surface it inline rather than losing the input.
       if (err instanceof ApiError) setNewName(name);
     }
+  }
+
+  function startRename(c: Collection) {
+    setEditingId(c.id);
+    setEditName(c.name);
+  }
+
+  async function handleRename(e: React.FormEvent, id: string) {
+    e.preventDefault();
+    const name = editName.trim();
+    setEditingId(null);
+    if (!name) return;
+    try {
+      const updated = await updateCollection(id, { name }, isAuthenticated);
+      setCollections((prev) =>
+        [...prev.filter((c) => c.id !== id), updated].sort((a, b) => a.name.localeCompare(b.name)),
+      );
+    } catch {
+      // Name collision or similar -- just keep the pre-rename name rather than losing the collection.
+    }
+  }
+
+  async function handleDeleteCollection(c: Collection) {
+    if (!window.confirm(`Delete "${c.name}"? Articles stay in your library, just ungrouped.`)) return;
+    await deleteCollection(c.id, isAuthenticated);
+    setCollections((prev) => prev.filter((col) => col.id !== c.id));
+    if (activeCollectionId === c.id) router.push("/library");
   }
 
   return (
@@ -123,28 +161,69 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             </form>
           )}
 
-          {collections.map((c) => (
-            <Link
-              key={c.id}
-              href={`/library?collection=${c.id}`}
-              className={cn(
-                "flex items-center gap-2.5 rounded-sm px-3 py-1.5 font-sans text-sm transition-colors",
-                activeCollectionId === c.id
-                  ? "bg-surface-2 text-accent"
-                  : "text-ink-muted hover:bg-surface-2 hover:text-ink",
-              )}
-            >
-              <span
-                className="h-2 w-2 shrink-0 rounded-full"
-                style={{ backgroundColor: c.color ?? "var(--color-ink-faint)" }}
-                aria-hidden
-              />
-              <span className="truncate">{c.name}</span>
-              {typeof c.articleCount === "number" && (
-                <span className="ml-auto shrink-0 font-sans text-xs text-ink-faint">{c.articleCount}</span>
-              )}
-            </Link>
-          ))}
+          {collections.map((c) =>
+            editingId === c.id ? (
+              <form key={c.id} onSubmit={(e) => handleRename(e, c.id)} className="px-3 py-1">
+                <input
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onBlur={() => setEditingId(null)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                  className="w-full rounded-sm border border-border bg-paper px-2 py-1 font-sans text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                />
+              </form>
+            ) : (
+              <Link
+                key={c.id}
+                href={`/library?collection=${c.id}`}
+                className={cn(
+                  "group flex items-center gap-2.5 rounded-sm px-3 py-1.5 font-sans text-sm transition-colors",
+                  activeCollectionId === c.id
+                    ? "bg-surface-2 text-accent"
+                    : "text-ink-muted hover:bg-surface-2 hover:text-ink",
+                )}
+              >
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: c.color ?? "var(--color-ink-faint)" }}
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                {typeof c.articleCount === "number" && (
+                  <span className="shrink-0 font-sans text-xs text-ink-faint">{c.articleCount}</span>
+                )}
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <button
+                    type="button"
+                    title="Rename collection"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      startRename(c);
+                    }}
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
+                  >
+                    <IconPencil className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete collection"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleDeleteCollection(c);
+                    }}
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
+                  >
+                    <IconTrash className="h-3 w-3" />
+                  </button>
+                </span>
+              </Link>
+            ),
+          )}
         </nav>
 
         <div className="border-t border-border px-3 py-4">
