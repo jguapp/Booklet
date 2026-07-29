@@ -147,6 +147,28 @@ export function parseImportCsv(text: string): ImportRow[] {
     });
 }
 
+/**
+ * Netscape bookmark file format -- what Chrome/Firefox/Safari/Edge all
+ * produce from "Export bookmarks". Every browser's export nests folders
+ * differently, but every real bookmark is always an <a href> somewhere in
+ * the tree, so a flat query sidesteps parsing the folder structure at all.
+ */
+export function parseBookmarksHtml(html: string): ImportRow[] {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const rows: ImportRow[] = [];
+  for (const a of doc.querySelectorAll("a[href]")) {
+    const url = a.getAttribute("href")?.trim() ?? "";
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
+    } catch {
+      continue;
+    }
+    rows.push({ url, title: a.textContent?.trim() || null });
+  }
+  return rows;
+}
+
 export interface ImportResult {
   imported: number;
   skipped: number;
