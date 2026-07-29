@@ -86,6 +86,23 @@ test("save an EPUB with no account (EPUB no longer requires signing in)", async 
   await expect(page.locator("text=/Sample Test Book/i").first()).toBeVisible();
 });
 
+test("images in a saved article are inlined, not left pointing at the original site", async ({ page }) => {
+  await page.goto("/library");
+
+  await page.getByRole("button", { name: /save article/i }).click();
+  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Tag_(metadata)");
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await waitForSaveModalToClose(page);
+
+  await page.locator("a[href^='/reader/']").first().click();
+  await expect(page).toHaveURL(/\/reader\//);
+
+  const img = page.locator("[data-article-content] img").first();
+  await expect(img).toBeVisible({ timeout: 10_000 });
+  const src = await img.getAttribute("src");
+  expect(src).toMatch(/^data:image\//);
+});
+
 test("Daily Review shows the empty state when nothing is eligible yet", async ({ page }) => {
   await page.goto("/resurface");
   await expect(page.getByRole("heading", { name: /daily review/i })).toBeVisible();
