@@ -1,9 +1,11 @@
 # Deployment
 
-This is a starting point, not a verified runbook -- there's no Docker, no
-cloud account, and no CI runner in the environment this was written in, so
-none of it has actually been deployed anywhere. Treat every step here as
-"reasoned through carefully," not "confirmed working."
+This is a starting point, not a verified runbook -- there's no cloud
+account in the environment this was written in, so none of it has actually
+been deployed anywhere for real. Treat every step here as "reasoned through
+carefully and checked as far as this environment allows," not "confirmed
+working in production." The Docker section below is more specific about
+what that means in practice.
 
 ## What you need
 
@@ -42,9 +44,28 @@ yet.
 `apps/api/Dockerfile` and `apps/web/Dockerfile` build each app; `docker-compose.yml`
 wires them up with a real Postgres for local testing of the images
 themselves. Comments in each file explain the specific tradeoffs (the api
-image ships the whole repo rather than a pruned subset; the web image uses
-Next's standalone output, verified against a real `next build`'s file
-layout, but not build-tested end to end).
+image ships the whole repo rather than a pruned subset).
+
+The actual `docker build`/`docker compose up` commands are unverified in
+this specific environment: Docker Desktop is installed but its daemon
+needs WSL2, which isn't installed here, and setting that up needs a
+restart -- out of scope to do unilaterally. Two things stand in for that:
+
+- `.github/workflows/ci.yml`'s `docker-build` job builds both images and
+  boots the api one against a real Postgres service container on a real
+  GitHub Actions runner, on every push/PR.
+- The api image's actual production execution path -- `pnpm --filter
+  @booklet/api build` (esbuild, see `apps/api/scripts/build.mjs`) then
+  `node dist/index.js` under plain Node, no tsx or bundler doing module
+  resolution favors at runtime, exactly what the image's `CMD` does -- was
+  run directly (without Docker in between) against a real database and
+  confirmed to actually boot Fastify and serve a Prisma-backed request.
+  This is what caught two real bugs the Dockerfile alone wouldn't have
+  surfaced without a build tool change: `@booklet/shared` resolves to raw,
+  uncompiled TypeScript (fine for tsx/Next's bundler in dev; plain Node
+  can't load it at all), and the Prisma-generated client's own internal
+  relative imports were missing the `.js` extension plain Node's ESM
+  loader requires (now forced via `schema.prisma`'s `importFileExtension`).
 
 ```bash
 JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))") \
@@ -81,6 +102,10 @@ JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toStr
 - TLS termination, secrets management, backups, autoscaling -- all
   infrastructure concerns for whatever you deploy onto, not this repo's
   job to solve generically
-- CI actually running (`.github/workflows/ci.yml` exists and is
-  syntax-checked, but this environment has no GitHub Actions runner to
-  confirm it passes for real)
+- Actually watching a GitHub Actions run complete: `.github/workflows/ci.yml`
+  is real (not just syntax-checked) and includes typecheck/lint, unit and
+  integration tests, web and extension e2e suites, and the docker-build job
+  described above -- it runs automatically on every push to `main` and
+  every PR, but confirming a specific run went green needs either repo
+  access this environment doesn't have (no `gh` CLI, no API token) or you
+  checking the Actions tab yourself
