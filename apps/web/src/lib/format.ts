@@ -7,6 +7,15 @@ export function formatRelativeDate(iso: string, now: Date = new Date()): string 
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** "Deletes today" / "Deletes in N days" -- retentionDays after `sinceIso`. */
+export function formatDaysRemaining(sinceIso: string, retentionDays: number, now: Date = new Date()): string {
+  const purgeAt = new Date(sinceIso).getTime() + retentionDays * 24 * 60 * 60 * 1000;
+  const daysLeft = Math.ceil((purgeAt - now.getTime()) / (1000 * 60 * 60 * 24));
+  if (daysLeft <= 0) return "Deletes today";
+  if (daysLeft === 1) return "Deletes tomorrow";
+  return `Deletes in ${daysLeft} days`;
+}
+
 export function formatReadingTime(minutes: number | null): string {
   if (minutes === null) return "";
   if (minutes < 1) return "< 1 min read";

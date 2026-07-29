@@ -1,35 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
 import type { Article, Collection } from "@booklet/shared";
 import { formatReadingTime, formatRelativeDate } from "@/lib/format";
 import { SourceIcon } from "./source-icon";
 import { StatusBadge } from "./status-badge";
 import { CollectionMenu } from "./collection-menu";
-import { IconArchive, IconInbox, IconTrash } from "@/components/ui/icons";
+import { IconArchive, IconInbox, IconStar, IconTrash } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
-
-const CONFIRM_WINDOW_MS = 3000;
 
 interface ArticleCardProps {
   article: Article;
   onToggleArchived?: (article: Article) => void;
+  onToggleFavorited?: (article: Article) => void;
   onDelete?: (article: Article) => void;
   collections?: Collection[];
   authenticated?: boolean;
 }
 
-export function ArticleCard({ article, onToggleArchived, onDelete, collections, authenticated }: ArticleCardProps) {
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const confirmTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (confirmTimeout.current) clearTimeout(confirmTimeout.current);
-    };
-  }, []);
-
+export function ArticleCard({
+  article,
+  onToggleArchived,
+  onToggleFavorited,
+  onDelete,
+  collections,
+  authenticated,
+}: ArticleCardProps) {
   const metaParts = [
     article.siteName ?? article.author,
     formatReadingTime(article.readingTimeEstimate),
@@ -37,18 +33,6 @@ export function ArticleCard({ article, onToggleArchived, onDelete, collections, 
   ].filter(Boolean);
 
   const isArchived = article.status === "ARCHIVED";
-
-  function handleDeleteClick(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!confirmingDelete) {
-      setConfirmingDelete(true);
-      confirmTimeout.current = setTimeout(() => setConfirmingDelete(false), CONFIRM_WINDOW_MS);
-      return;
-    }
-    if (confirmTimeout.current) clearTimeout(confirmTimeout.current);
-    onDelete?.(article);
-  }
 
   return (
     <Link
@@ -61,6 +45,25 @@ export function ArticleCard({ article, onToggleArchived, onDelete, collections, 
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={article.status} />
+          {onToggleFavorited && (
+            <button
+              type="button"
+              title={article.favorited ? "Remove from favorites" : "Add to favorites"}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleFavorited(article);
+              }}
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full transition-opacity",
+                article.favorited
+                  ? "text-accent opacity-100"
+                  : "text-ink-faint opacity-0 hover:bg-surface-2 hover:text-ink group-hover:opacity-100 focus-visible:opacity-100",
+              )}
+            >
+              <IconStar className="h-3.5 w-3.5" fill={article.favorited ? "currentColor" : "none"} />
+            </button>
+          )}
           {onToggleArchived && (
             <button
               type="button"
@@ -81,18 +84,15 @@ export function ArticleCard({ article, onToggleArchived, onDelete, collections, 
           {onDelete && (
             <button
               type="button"
-              title={confirmingDelete ? "Click again to permanently delete" : "Delete"}
-              onClick={handleDeleteClick}
-              onBlur={() => setConfirmingDelete(false)}
-              className={cn(
-                "flex h-6 items-center justify-center rounded-full px-1.5 transition-all",
-                confirmingDelete
-                  ? "w-auto gap-1 bg-red-500/15 text-red-500 opacity-100"
-                  : "w-6 text-ink-faint opacity-0 hover:bg-surface-2 hover:text-ink group-hover:opacity-100 focus-visible:opacity-100",
-              )}
+              title="Move to trash"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete(article);
+              }}
+              className="flex h-6 w-6 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface-2 hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
             >
-              <IconTrash className="h-3.5 w-3.5 shrink-0" />
-              {confirmingDelete && <span className="whitespace-nowrap font-sans text-[11px] font-medium">Confirm?</span>}
+              <IconTrash className="h-3.5 w-3.5" />
             </button>
           )}
         </div>

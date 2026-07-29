@@ -36,6 +36,17 @@ export function IconResurface(props: IconProps) {
   );
 }
 
+export function IconStar(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path
+        d="M10 3.2 12.1 7.5l4.7.7-3.4 3.3.8 4.7L10 14l-4.2 2.2.8-4.7-3.4-3.3 4.7-.7 2.1-4.3Z"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function IconSettings(props: IconProps) {
   return (
     <svg {...base(props)}>

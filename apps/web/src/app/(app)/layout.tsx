@@ -12,17 +12,21 @@ import {
   IconPlus,
   IconResurface,
   IconSettings,
+  IconStar,
   IconTrash,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { createCollection, deleteCollection, loadCollections, updateCollection } from "@/lib/data/collections";
 import { ApiError } from "@/lib/api/client";
+import { ThemeSwitcher } from "@/components/ui/theme-switcher";
 
 const NAV_ITEMS = [
   { href: "/library", label: "Library", Icon: IconLibrary },
   { href: "/highlights", label: "Highlights", Icon: IconHighlights },
+  { href: "/favorites", label: "Favorites", Icon: IconStar },
   { href: "/resurface", label: "Daily Review", Icon: IconResurface },
+  { href: "/trash", label: "Trash", Icon: IconTrash },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
 
@@ -110,10 +114,11 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
-        <div className="px-5 py-6">
+        <div className="flex items-center justify-between px-5 py-6">
           <Link href="/library" className="font-serif text-xl font-semibold text-ink">
             Booklet
           </Link>
+          <ThemeSwitcher />
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
