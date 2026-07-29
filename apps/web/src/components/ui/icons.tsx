@@ -69,11 +69,21 @@ export function IconStar(props: IconProps) {
 export function IconSettings(props: IconProps) {
   return (
     <svg {...base(props)}>
-      <circle cx="10" cy="10" r="2.6" />
-      <path
-        d="M10 3v1.6M10 15.4V17M17 10h-1.6M4.6 10H3M14.8 5.2l-1.1 1.1M6.3 13.7l-1.1 1.1M14.8 14.8l-1.1-1.1M6.3 6.3 5.2 5.2"
-        strokeLinecap="round"
-      />
+      <circle cx="10" cy="10" r="3.4" />
+      <circle cx="10" cy="10" r="1" fill="currentColor" stroke="none" />
+      {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
+        <rect
+          key={angle}
+          x="9.2"
+          y="2"
+          width="1.6"
+          height="3.8"
+          rx="0.5"
+          fill="currentColor"
+          stroke="none"
+          transform={`rotate(${angle} 10 10)`}
+        />
+      ))}
     </svg>
   );
 }
