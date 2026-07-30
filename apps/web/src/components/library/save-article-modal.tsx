@@ -158,7 +158,7 @@ export function SaveArticleModal({ authenticated, onClose, onSaved }: SaveArticl
             onClick={() => setMode("url")}
             className={cn(
               "flex flex-1 items-center justify-center gap-1.5 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-              mode === "url" ? "bg-surface text-ink shadow-sm" : "text-ink-muted",
+              mode === "url" ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted",
             )}
           >
             <IconLink className="h-3.5 w-3.5" /> Paste a URL
@@ -168,7 +168,7 @@ export function SaveArticleModal({ authenticated, onClose, onSaved }: SaveArticl
             onClick={() => setMode("file")}
             className={cn(
               "flex flex-1 items-center justify-center gap-1.5 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-              mode === "file" ? "bg-surface text-ink shadow-sm" : "text-ink-muted",
+              mode === "file" ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted",
             )}
           >
             <IconUpload className="h-3.5 w-3.5" /> Upload a file

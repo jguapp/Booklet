@@ -394,7 +394,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
                 onClick={() => handleStatusChange(t.value)}
                 className={cn(
                   "flex-1 rounded-sm py-1.5 font-sans text-xs font-medium transition-colors",
-                  article.status === t.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                  article.status === t.value ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
                 )}
               >
                 {t.label}

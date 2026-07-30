@@ -195,7 +195,7 @@ function LibraryPageInner() {
               onClick={() => setTab(t.value)}
               className={cn(
                 "rounded-sm px-3 py-1.5 font-sans text-sm font-medium transition-colors",
-                tab === t.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                tab === t.value ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               {t.label}

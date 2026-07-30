@@ -7,7 +7,15 @@
 import type { Article, Collection, Feed, Highlight } from "@booklet/shared";
 
 const DB_NAME = "booklet";
-const DB_VERSION = 4;
+// Bumped 4 -> 5: some browsers ended up with a v4 database that never got
+// the `feeds` store created (IDBDatabase.transaction: 'feeds' is not a
+// known object store name -- onupgradeneeded only re-runs when the
+// requested version is actually higher than what's already stored, so a
+// browser already sitting at 4 never re-ran this block once feeds was
+// added to it). Bumping the version forces that upgrade to run for
+// everyone; the `if (!contains(...))` guards below mean this only adds
+// what's missing, never touches existing data in any other store.
+const DB_VERSION = 5;
 const ARTICLES_STORE = "articles";
 const HIGHLIGHTS_STORE = "highlights";
 const COLLECTIONS_STORE = "collections";

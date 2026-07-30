@@ -60,7 +60,7 @@ export default function DigestSettingsPage() {
                 onClick={() => setFrequency(f.value)}
                 className={cn(
                   "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                  frequency === f.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                  frequency === f.value ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
                 )}
               >
                 {f.label}
