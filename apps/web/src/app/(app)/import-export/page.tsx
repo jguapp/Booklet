@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useAuth } from "@/lib/auth/auth-provider";
 import {
+  exportAsAnkiText,
   exportAsMarkdownZip,
   importUrls,
   parseBookmarksHtml,
@@ -45,6 +46,7 @@ const BADGE_CLASS: Record<string, string> = {
   obsidian: "bg-[#7C3AED]/12 text-[#7C3AED]",
   logseq: "bg-[#85C8C8]/20 text-[#4A9999]",
   roam: "bg-ink/10 text-ink",
+  anki: "bg-[#2496DE]/12 text-[#2496DE]",
 };
 
 function ServiceBadge({ id, children }: { id: string; children: React.ReactNode }) {
@@ -101,6 +103,7 @@ export default function ImportExportPage() {
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingAnki, setExportingAnki] = useState(false);
 
   async function runImport(rows: ImportRow[]) {
     if (rows.length === 0) {
@@ -136,6 +139,15 @@ export default function ImportExportPage() {
       await exportAsMarkdownZip(status === "authenticated");
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function handleAnkiExport() {
+    setExportingAnki(true);
+    try {
+      await exportAsAnkiText(status === "authenticated");
+    } finally {
+      setExportingAnki(false);
     }
   }
 
@@ -260,6 +272,16 @@ export default function ImportExportPage() {
             </div>
             <span className="shrink-0 font-sans text-xs font-medium text-ink-faint">Coming soon</span>
           </div>
+
+          <ImportRowCard
+            id="anki"
+            icon={<span className="font-serif text-base font-semibold">A</span>}
+            name="Anki"
+            description="Every highlight as a flashcard (front: the highlight, back: your note or the source) -- Anki's own File > Import reads this with zero setup."
+            buttonLabel={exportingAnki ? "Exporting…" : "Export .txt"}
+            disabled={exportingAnki}
+            onClick={handleAnkiExport}
+          />
         </div>
       </section>
     </div>
