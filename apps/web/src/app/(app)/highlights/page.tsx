@@ -41,7 +41,6 @@ export default function HighlightsPage() {
   // One article selected (via a group card or the dropdown), or searching --
   // either way, grouping into cards doesn't apply, show a flat list.
   const showingOneArticle = articleFilter !== "ALL";
-  const showGrouped = viewMode === "grouped" && !showingOneArticle && !isSearching;
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -78,6 +77,12 @@ export default function HighlightsPage() {
       }))
       .sort((a, b) => b.mostRecentAt - a.mostRecentAt);
   }, [highlights, articleById]);
+
+  // Grouping only means something with 2+ books -- with just one, it's a
+  // single card that hides your highlights behind an extra click instead
+  // of showing them.
+  const canGroup = groups.length > 1;
+  const showGrouped = viewMode === "grouped" && canGroup && !showingOneArticle && !isSearching;
 
   async function handleDelete(highlightId: string) {
     await deleteHighlight(highlightId, isAuthenticated);
@@ -146,7 +151,7 @@ export default function HighlightsPage() {
           ))}
         </select>
 
-        {!showingOneArticle && !isSearching && (
+        {canGroup && !showingOneArticle && !isSearching && (
           <div className="flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Highlights view">
             <button
               type="button"

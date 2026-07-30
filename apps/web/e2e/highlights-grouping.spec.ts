@@ -79,8 +79,23 @@ test("the 'All' toggle shows the flat chronological list across books", async ({
   await expect(page.getByRole("link", { name: "Tag (metadata)" })).toBeVisible();
 });
 
+test("with highlights from only one book, the flat list shows directly -- no pointless single-card group", async ({
+  page,
+}) => {
+  await saveAndHighlight(page, "https://en.wikipedia.org/wiki/Readability", 4);
+
+  await page.goto("/highlights");
+  // A single-card "group" would just hide the one book's highlights behind
+  // an extra click for no benefit -- go straight to the flat list instead.
+  await expect(page.getByRole("button", { name: /Readability.*1 highlight/ })).toHaveCount(0);
+  await expect(page.getByText('"Reading difficulty" redirects here;', { exact: false })).toBeVisible();
+  // Nothing to toggle between when there's only one book either.
+  await expect(page.getByRole("group", { name: "Highlights view" })).toHaveCount(0);
+});
+
 test("searching bypasses grouping and shows matching highlights directly", async ({ page }) => {
   await saveAndHighlight(page, "https://en.wikipedia.org/wiki/Readability", 4);
+  await saveAndHighlight(page, "https://en.wikipedia.org/wiki/Tag_(metadata)", 5);
 
   await page.goto("/highlights");
   await expect(page.getByRole("button", { name: /Readability/ })).toBeVisible();
