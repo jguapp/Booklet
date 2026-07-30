@@ -77,6 +77,39 @@ export async function exportAsMarkdownZip(authenticated: boolean): Promise<void>
   URL.revokeObjectURL(url);
 }
 
+/** Anki's own plain-text importer (File > Import) reads this directly, no
+ * plugin needed: `#`-prefixed header lines configure the field separator
+ * and whether fields may contain HTML, then one card per line. Newlines
+ * within a field aren't allowed in this format, so a multi-line note
+ * becomes `<br>`-joined instead (safe given `#html:true`). */
+function ankiFieldEscape(text: string): string {
+  return text.trim().replace(/\t/g, " ").replace(/\r\n|\r|\n/g, "<br>");
+}
+
+export async function exportAsAnkiText(authenticated: boolean): Promise<void> {
+  const [articles, highlights] = await Promise.all([loadArticles(authenticated), loadHighlights(authenticated)]);
+  const articleById = new Map(articles.map((a) => [a.id, a]));
+
+  const lines = ["#separator:tab", "#html:true"];
+  for (const h of highlights) {
+    const article = articleById.get(h.articleId);
+    const front = ankiFieldEscape(h.selectedText);
+    const back = h.annotation?.noteText
+      ? ankiFieldEscape(h.annotation.noteText)
+      : ankiFieldEscape(`From: ${article?.title ?? "Untitled"}`);
+    if (!front) continue;
+    lines.push(`${front}\t${back}`);
+  }
+
+  const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `booklet-anki-export-${new Date().toISOString().slice(0, 10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export interface ImportRow {
   url: string;
   title: string | null;
