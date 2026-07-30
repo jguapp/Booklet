@@ -401,14 +401,20 @@ export function ReaderView({ articleId }: { articleId: string }) {
         </p>
 
         <div className="mb-5 flex items-center justify-between gap-4">
-          <div className="flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="Article status">
+          {/* Each label sizes to its own content instead of a shared
+              flex-1 width -- "Unread"/"Reading"/"Archived" are different
+              lengths, and forcing them into equal-width segments stretched
+              the shorter labels with awkward padding while cramming the
+              longest ("Archived") against it, reading as lopsided/smushed
+              rather than a clean, evenly-weighted control. */}
+          <div className="flex gap-1.5 rounded-sm bg-surface-2 p-1" role="group" aria-label="Article status">
             {STATUS_TABS.map((t) => (
               <button
                 key={t.value}
                 type="button"
                 onClick={() => handleStatusChange(t.value)}
                 className={cn(
-                  "flex-1 rounded-sm py-1.5 font-sans text-xs font-medium transition-colors",
+                  "rounded-sm px-3 py-1.5 font-sans text-xs font-medium transition-colors",
                   article.status === t.value ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
                 )}
               >
