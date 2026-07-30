@@ -103,6 +103,16 @@ export function EpubReader({
     onSectionTextChangeRef.current = onSectionTextChange;
   }, [initialProgressFraction, onProgressChange, onSectionTextChange]);
 
+  // The CFI of wherever the reader is currently positioned -- kept up to
+  // date on every "relocated" event (see the open() effect below) so the
+  // theme/font-size effect can re-display() at the same spot after a
+  // change. rendition.currentLocation() looks like it should give this
+  // directly, but for a paginated manager it resolves asynchronously and
+  // the public method doesn't return that promise -- it silently returns
+  // undefined, so tracking it ourselves off the event is the only reliable
+  // way to know "where we are" synchronously.
+  const currentCfiRef = useRef<string | null>(null);
+
   // Open the book and render it into viewerRef once per file. epub.js owns
   // the iframe(s) inside that div entirely -- nothing else touches its DOM.
   useEffect(() => {
@@ -151,6 +161,7 @@ export function EpubReader({
           (location: { start: { cfi: string; displayed: { page: number; total: number }; percentage: number } }) => {
             setLocationLabel(`Page ${location.start.displayed.page} of ${location.start.displayed.total}`);
             lastKnownCfi = location.start.cfi;
+            currentCfiRef.current = location.start.cfi;
             if (locationsReady) onProgressChangeRef.current(location.start.percentage);
 
             // Same Contents[]-not-Contents typing mismatch as handleConfirm
@@ -216,6 +227,19 @@ export function EpubReader({
       "::selection": { background: "rgba(31, 111, 107, 0.35)" },
     });
     rendition.themes.fontSize(SIZE_PERCENT[size]);
+
+    // themes.fontSize() only sets a CSS property on the currently-rendered
+    // content -- it never tells epub.js's paginated-layout manager to
+    // recompute column widths/page counts for the new size. Left alone,
+    // the page you're on keeps showing a layout sized for the OLD font:
+    // confirmed by hand that the "Page X of Y" total doesn't change at all
+    // after a font-size change, and text that would now overflow into a
+    // later column becomes genuinely unreachable via Next/Prev, since they
+    // still walk the stale page count -- this is the "text disappears"
+    // bug. Re-displaying the current position forces a full re-layout at
+    // the new size, landing back at (the closest available spot to) where
+    // we actually were.
+    if (currentCfiRef.current) rendition.display(currentCfiRef.current);
   }, [rendition, theme, size]);
 
   // Keep the rendered highlight annotations in sync with the highlights
