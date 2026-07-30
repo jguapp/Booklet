@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { createCollection, deleteCollection, loadCollections, updateCollection } from "@/lib/data/collections";
+import { useOnCollectionsChanged } from "@/lib/data/collections-events";
 import { loadArticles, trashArticleById } from "@/lib/data/articles";
 import { deleteHighlight } from "@/lib/data/highlights";
 import { CollectionTree } from "@/components/library/collection-tree";
@@ -109,6 +110,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     refreshCollections();
   }, [refreshCollections]);
+  useOnCollectionsChanged(refreshCollections); // a collection created from a card's menu elsewhere -- this owns its own separate list
 
   // Cmd+K (Mac) / Ctrl+K (everywhere else) -- global regardless of which
   // page is mounted, since the whole point is not needing to already be on
