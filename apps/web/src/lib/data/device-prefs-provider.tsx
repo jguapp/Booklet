@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
+import { DEFAULT_HIGHLIGHT_BAR_COLORS } from "@booklet/shared";
 import { loadReaderPrefs, saveReaderPrefs, type ReaderPrefs } from "@/lib/reader/device-prefs";
 import { NATIVE_VOICE_ID } from "@/lib/reader/kokoro-tts";
 import { loadHoardingPrefs, saveHoardingPrefs, type HoardingPrefs } from "./hoarding-prefs";
@@ -36,6 +37,7 @@ interface DevicePrefsContextValue extends DevicePrefsState {
   setReaderSize: (size: ReaderSize) => void;
   setTtsRate: (rate: number) => void;
   setTtsVoice: (voice: string) => void;
+  setHighlightBarColors: (colors: string[]) => void;
   setHoarding: (prefs: HoardingPrefs) => void;
   setShowReadingStats: (enabled: boolean) => void;
   setAutoDelete: (prefs: AutoDeletePrefs) => void;
@@ -50,7 +52,7 @@ const DevicePrefsContext = createContext<DevicePrefsContextValue | null>(null);
 // split (see the effect below). No hydration mismatch: nothing here
 // renders differently server- vs client-side on first paint, only after.
 const SERVER_DEFAULTS: DevicePrefsState = {
-  reader: { size: "md", ttsRate: 1, ttsVoice: NATIVE_VOICE_ID },
+  reader: { size: "md", ttsRate: 1, ttsVoice: NATIVE_VOICE_ID, highlightBarColors: DEFAULT_HIGHLIGHT_BAR_COLORS },
   hoarding: { enabled: false, maxUnread: 25 },
   showReadingStats: false,
   autoDelete: { enabled: false, days: 90 },
@@ -99,6 +101,14 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
     });
   }, []);
 
+  const setHighlightBarColors = useCallback((colors: string[]) => {
+    setState((prev) => {
+      const next = { ...prev.reader, highlightBarColors: colors };
+      saveReaderPrefs(next);
+      return { ...prev, reader: next };
+    });
+  }, []);
+
   const setHoarding = useCallback((prefs: HoardingPrefs) => {
     saveHoardingPrefs(prefs);
     setState((prev) => ({ ...prev, hoarding: prefs }));
@@ -131,6 +141,7 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
         setReaderSize,
         setTtsRate,
         setTtsVoice,
+        setHighlightBarColors,
         setHoarding,
         setShowReadingStats,
         setAutoDelete,

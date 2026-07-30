@@ -41,14 +41,6 @@ enum ExtractionStatus {
   FAILED
 }
 
-enum HighlightColor {
-  YELLOW
-  GREEN
-  BLUE
-  PINK
-  ORANGE
-}
-
 enum ResurfaceFeedback {
   REMEMBERED
   FORGOT
@@ -326,7 +318,12 @@ model Highlight {
   /// HighlightPosition for the exact shape per type.
   position Json
 
-  color HighlightColor @default(YELLOW)
+  /// A legacy name ("YELLOW"/"GREEN"/"BLUE"/"PINK"/"ORANGE", the original
+  /// fixed set, still the only ones that auto-adapt per reading theme) or
+  /// a literal #RRGGBB hex the user picked directly -- see packages/shared
+  /// highlight-colors.ts. Used to be a Postgres enum; loosened to text so
+  /// highlight colors could be genuinely user-customizable.
+  color String @default("YELLOW")
 
   lastSurfacedAt DateTime?
   surfaceCount   Int       @default(0)

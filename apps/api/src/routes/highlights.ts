@@ -2,17 +2,16 @@ import type { FastifyInstance } from "fastify";
 import type {
   CreateHighlightRequest,
   Highlight,
-  HighlightColor,
   HighlightPosition,
   ResurfaceFeedback,
   UpdateHighlightRequest,
   UpsertAnnotationRequest,
 } from "@booklet/shared";
+import { isValidHighlightColor } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
 
-const COLORS: HighlightColor[] = ["YELLOW", "GREEN", "BLUE", "PINK", "ORANGE"];
 const FEEDBACKS: ResurfaceFeedback[] = ["REMEMBERED", "FORGOT"];
 
 async function findHighlightWithAnnotation(id: string) {
@@ -74,7 +73,7 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
       if (!isValidPosition(position)) {
         return reply.code(400).send({ error: "invalid_position", message: "Invalid highlight position." });
       }
-      if (!COLORS.includes(color)) {
+      if (typeof color !== "string" || !isValidHighlightColor(color)) {
         return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
       }
 
@@ -142,7 +141,7 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
         nextDueAt,
       } = request.body ?? {};
 
-      if (color !== undefined && !COLORS.includes(color)) {
+      if (color !== undefined && (typeof color !== "string" || !isValidHighlightColor(color))) {
         return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
       }
       if (lastFeedback !== undefined && !FEEDBACKS.includes(lastFeedback)) {

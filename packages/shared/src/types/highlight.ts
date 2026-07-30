@@ -1,7 +1,10 @@
 import type { Annotation } from "./annotation";
 import type { HighlightPosition } from "./highlight-position";
 
-export type HighlightColor = "YELLOW" | "GREEN" | "BLUE" | "PINK" | "ORANGE";
+/** A legacy name ("YELLOW", "GREEN", "BLUE", "PINK", "ORANGE") or a literal
+ * `#RRGGBB` hex value -- see highlight-colors.ts for validation/rendering
+ * helpers and why this isn't a fixed union anymore. */
+export type HighlightColor = string;
 export type ResurfaceFeedback = "REMEMBERED" | "FORGOT";
 
 export interface Highlight {

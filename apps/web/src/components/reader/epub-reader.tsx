@@ -4,18 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import ePub from "epubjs";
 import type { Rendition, Contents } from "epubjs";
 import type { Highlight, HighlightColor } from "@booklet/shared";
+import { highlightColorHex } from "@booklet/shared";
 import type { Theme } from "@/lib/theme/theme-provider";
 import type { ReaderSize } from "./reader-toolbar";
 import { HighlightPopover } from "./highlight-popover";
 import { HighlightManagePopover } from "./highlight-manage-popover";
-
-const HIGHLIGHT_FILL: Record<HighlightColor, string> = {
-  YELLOW: "#F3DE9C",
-  GREEN: "#BCDFC4",
-  BLUE: "#BBD6E8",
-  PINK: "#EFCCDA",
-  ORANGE: "#F1CB9E",
-};
 
 const THEME_COLORS: Record<Theme, { bg: string; fg: string }> = {
   light: { bg: "#FAF9F4", fg: "#211F1A" },
@@ -244,7 +237,7 @@ export function EpubReader({
         },
         "epub-highlight",
         {
-          fill: HIGHLIGHT_FILL[h.color],
+          fill: highlightColorHex(h.color),
           "fill-opacity": "0.55",
           "mix-blend-mode": "multiply",
           // The overlay <svg> marks-pane renders into has pointer-events:

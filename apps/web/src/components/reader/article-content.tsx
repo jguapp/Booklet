@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Highlight, HighlightColor, TextPosition } from "@booklet/shared";
-import { computeTextPosition, resolveTextPosition } from "@booklet/shared";
+import { computeTextPosition, highlightColorHex, isLegacyHighlightColor, resolveTextPosition } from "@booklet/shared";
 import {
   plainTextOf,
   rangeForTextOffsets,
@@ -13,13 +13,27 @@ import { HighlightPopover } from "./highlight-popover";
 import { HighlightManagePopover } from "./highlight-manage-popover";
 import type { ReaderSize } from "./reader-toolbar";
 
-const HIGHLIGHT_CLASS: Record<HighlightColor, string> = {
+// The five legacy names render via these theme-aware CSS custom properties
+// (see globals.css) so they still auto-adapt across light/dark/sepia/
+// Kindle exactly as before. Anything else -- a curated-palette pick beyond
+// the original five, or a fully custom hex -- has no per-theme variant to
+// fall back to, so it renders as the same literal color in every theme via
+// an inline style instead (see highlightColorStyle below).
+const LEGACY_HIGHLIGHT_CLASS: Record<string, string> = {
   YELLOW: "bg-highlight-yellow",
   GREEN: "bg-highlight-green",
   BLUE: "bg-highlight-blue",
   PINK: "bg-highlight-pink",
   ORANGE: "bg-highlight-orange",
 };
+
+function applyHighlightColor(el: HTMLElement, color: string): void {
+  if (isLegacyHighlightColor(color)) {
+    el.classList.add(LEGACY_HIGHLIGHT_CLASS[color]);
+  } else {
+    el.style.backgroundColor = highlightColorHex(color);
+  }
+}
 
 const SIZE_STYLE: Record<ReaderSize, { fontSize: string; lineHeight: string }> = {
   sm: { fontSize: "17px", lineHeight: "1.6" },
@@ -99,7 +113,8 @@ export function ArticleContent({
       const marks = wrapRangeInElements(container, range, () => {
         const mark = document.createElement("mark");
         mark.dataset.highlightId = highlight.id;
-        mark.className = `${HIGHLIGHT_CLASS[highlight.color]} cursor-pointer rounded-[3px] text-inherit`;
+        mark.className = "cursor-pointer rounded-[3px] text-inherit";
+        applyHighlightColor(mark, highlight.color);
         (mark.style as CSSStyleDeclaration & { boxDecorationBreak?: string }).boxDecorationBreak = "clone";
         mark.style.setProperty("-webkit-box-decoration-break", "clone");
         return mark;
