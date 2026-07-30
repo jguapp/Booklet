@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Article, ArticleStatus, Highlight, HighlightColor, HighlightPosition } from "@booklet/shared";
+import { computeRelatedArticles } from "@booklet/shared";
 import { useTheme } from "@/lib/theme/theme-provider";
-import { loadArticle, loadArticleFile, updateArticleProgress, updateArticleStatus } from "@/lib/data/articles";
+import { loadArticle, loadArticleFile, loadArticles, updateArticleProgress, updateArticleStatus } from "@/lib/data/articles";
 import { createHighlight, deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { formatReadingTime } from "@/lib/format";
@@ -43,6 +44,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [pdfPageText, setPdfPageText] = useState("");
   const [epubSectionText, setEpubSectionText] = useState("");
+  const [relatedArticles, setRelatedArticles] = useState<{ articleId: string; articles: Article[] } | null>(null);
 
   const refresh = useCallback(() => {
     if (authStatus === "loading") return;
@@ -212,6 +214,26 @@ export function ReaderView({ articleId }: { articleId: string }) {
     autoArchivedRef.current = true;
     updateArticleStatus(article, "ARCHIVED", isAuthenticated).then(setArticle);
   }, [progress, article, isAuthenticated]);
+
+  // "More from your library" -- computed client-side from tag/title-overlap
+  // (see packages/shared/related-articles.ts; there's no embeddings/semantic-
+  // search infra yet, this is the cheap stand-in), fetched lazily once the
+  // reader nears the end rather than on every visit, since most articles are
+  // closed well before that point and the full list isn't otherwise needed.
+  const relatedFetchedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!article || progress < AUTO_READ_PROGRESS_THRESHOLD || relatedFetchedForRef.current === articleId) return;
+    relatedFetchedForRef.current = articleId;
+    loadArticles(isAuthenticated).then((all) => {
+      const candidates = (all as Article[]).filter((a) => a.deletedAt === null);
+      setRelatedArticles({ articleId, articles: computeRelatedArticles(article, candidates) });
+    });
+  }, [progress, article, isAuthenticated, articleId]);
+  // Tagged with the articleId it was computed for -- on navigating between
+  // two reader pages that reuse this same component instance, this stops
+  // the previous article's related list from flashing before the new
+  // article's own fetch (kicked off by the effect above) resolves.
+  const visibleRelated = relatedArticles?.articleId === articleId ? relatedArticles.articles : [];
 
   // Hooks can't be called after the !loaded/!article early returns below, so
   // this has to live up here -- readableText is just "" (tts.play() is a
@@ -427,6 +449,28 @@ export function ReaderView({ articleId }: { articleId: string }) {
             {article.originalFilename && (
               <p className="mt-1 font-sans text-xs text-ink-faint">{article.originalFilename}</p>
             )}
+          </div>
+        )}
+
+        {visibleRelated.length > 0 && (
+          <div className="mt-12 border-t border-border pt-8">
+            <h2 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              More from your library
+            </h2>
+            <div className="flex flex-col gap-1">
+              {visibleRelated.map((a) => (
+                <Link
+                  key={a.id}
+                  href={`/reader/${a.id}`}
+                  className="rounded-sm px-2 py-2 -mx-2 transition-colors hover:bg-surface-2"
+                >
+                  <p className="truncate font-serif text-sm text-ink">{a.title ?? "Untitled"}</p>
+                  <p className="truncate font-sans text-xs text-ink-faint">
+                    {a.siteName ?? a.author ?? "Saved article"}
+                  </p>
+                </Link>
+              ))}
+            </div>
           </div>
         )}
       </main>
