@@ -30,12 +30,8 @@ test("importing a Kindle clippings export creates one article per book with its 
 
   await expect(page.getByText("Imported 2 highlights from 1 book.")).toBeVisible();
 
+  // A fresh import lands as UNREAD, which is the library's default tab.
   await page.goto("/library");
-  // A fresh import lands as UNREAD, but the Library's default tab is
-  // "Reading" (see handleSaved's comment in library/page.tsx) -- switch
-  // tabs to actually see it, same as any other freshly-saved article would
-  // need if it hadn't gone through the save-article modal's own tab-switch.
-  await page.getByRole("button", { name: "Unread", exact: true }).click();
   await expect(page.getByText("Sample Book")).toBeVisible();
 
   await page.getByText("Sample Book").click();
@@ -62,7 +58,6 @@ test("re-importing the same file doesn't duplicate the book article, only its hi
   await expect(page.getByText("Imported 1 highlight from 1 book.")).toBeVisible();
 
   await page.goto("/library");
-  await page.getByRole("button", { name: "Unread", exact: true }).click();
   await expect(page.getByText("Repeat Book")).toHaveCount(1);
 });
 

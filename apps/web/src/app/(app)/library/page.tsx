@@ -44,12 +44,12 @@ function LibraryPageInner() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loaded, setLoaded] = useState(false);
-  // Defaults to "Reading" (what's actually in progress) rather than "All"
-  // (the entire, potentially-overwhelming backlog) -- see the "knowledge
-  // hoarding" toggle below for the same underlying concern. A fresh save is
-  // always UNREAD, so handleSaved switches to that tab specifically --
-  // otherwise something you just saved would appear to vanish.
-  const [tab, setTab] = useState<FilterTab>("READING");
+  // Defaults to "Unread" -- the actual queue of what's waiting to be read --
+  // rather than "All" (the entire, potentially-overwhelming backlog; see the
+  // "knowledge hoarding" toggle below for the same underlying concern). A
+  // fresh save is always UNREAD, so it shows up here with no special-casing
+  // needed on save.
+  const [tab, setTab] = useState<FilterTab>("UNREAD");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
