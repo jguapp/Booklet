@@ -17,6 +17,7 @@ interface ArticleCardProps {
   onDelete?: (article: Article) => void;
   collections?: Collection[];
   authenticated?: boolean;
+  onCollectionCreated?: (collection: Collection) => void;
 }
 
 export function ArticleCard({
@@ -26,6 +27,7 @@ export function ArticleCard({
   onDelete,
   collections,
   authenticated,
+  onCollectionCreated,
 }: ArticleCardProps) {
   const metaParts = [
     article.siteName ?? article.author,
@@ -85,7 +87,12 @@ export function ArticleCard({
             </button>
           )}
           {collections && authenticated !== undefined && (
-            <CollectionMenu articleId={article.id} allCollections={collections} authenticated={authenticated} />
+            <CollectionMenu
+              articleId={article.id}
+              allCollections={collections}
+              authenticated={authenticated}
+              onCollectionCreated={onCollectionCreated}
+            />
           )}
           {onDelete && (
             <button
