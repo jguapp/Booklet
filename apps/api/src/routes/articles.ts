@@ -7,6 +7,7 @@ import type {
   CreateArticleRequest,
   UpdateArticleRequest,
 } from "@booklet/shared";
+import { canonicalizeUrl } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
@@ -24,6 +25,7 @@ export function toArticle(row: ArticleRow): Article {
     id: row.id,
     userId: row.userId,
     url: row.url,
+    canonicalUrl: row.canonicalUrl,
     title: row.title,
     author: row.author,
     siteName: row.siteName,
@@ -83,8 +85,18 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         return reply.code(400).send({ error: "invalid_url", message: "A URL is required." });
       }
 
-      const existing = await prisma.article.findUnique({
-        where: { userId_url: { userId: request.userId!, url } },
+      const canonicalUrl = canonicalizeUrl(url);
+
+      // Deliberately not scoped to deletedAt: null -- the raw `url` arm
+      // mirrors the DB's own @@unique([userId, url]) constraint (which
+      // doesn't know about soft-delete), so loosening this check here
+      // without also changing that constraint would just trade a friendly
+      // 409 for an unhandled unique-violation crash on the same row.
+      const existing = await prisma.article.findFirst({
+        where: {
+          userId: request.userId!,
+          OR: [{ url }, ...(canonicalUrl ? [{ canonicalUrl }] : [])],
+        },
       });
       if (existing) {
         return reply
@@ -104,6 +116,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         data: {
           userId: request.userId!,
           url,
+          canonicalUrl,
           title: extracted?.title ?? null,
           author: extracted?.author ?? null,
           siteName: extracted?.siteName ?? null,

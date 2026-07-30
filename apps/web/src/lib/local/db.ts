@@ -127,6 +127,7 @@ function normalizeArticle(article: Article): Article {
     tags: article.tags ?? [],
     favorited: article.favorited ?? false,
     activeReadingSeconds: article.activeReadingSeconds ?? 0,
+    canonicalUrl: article.canonicalUrl ?? null,
   };
 }
 

@@ -13,3 +13,4 @@ export * from "./resurface";
 export * from "./digest-email";
 export * from "./reading-stats";
 export * from "./related-articles";
+export * from "./url-canonicalize";
