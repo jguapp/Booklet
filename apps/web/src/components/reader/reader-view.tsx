@@ -493,6 +493,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
             initialProgressFraction={article.progressFraction}
             onProgressChange={handleProgressChange}
             onPageTextChange={setPdfPageText}
+            readingMode={reader.pdfReadingMode}
             onCreateHighlight={(position, color, note) => handleCreateHighlight(position.text, position, color, note)}
             onDeleteHighlight={handleDeleteHighlight}
             onSaveNote={handleSaveNote}

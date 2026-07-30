@@ -39,6 +39,7 @@ interface DevicePrefsContextValue extends DevicePrefsState {
   setTtsVoice: (voice: string) => void;
   setHighlightBarColors: (colors: string[]) => void;
   setShowProgressBar: (enabled: boolean) => void;
+  setPdfReadingMode: (mode: "paginate" | "scroll") => void;
   setHoarding: (prefs: HoardingPrefs) => void;
   setShowReadingStats: (enabled: boolean) => void;
   setAutoDelete: (prefs: AutoDeletePrefs) => void;
@@ -59,6 +60,7 @@ const SERVER_DEFAULTS: DevicePrefsState = {
     ttsVoice: NATIVE_VOICE_ID,
     highlightBarColors: DEFAULT_HIGHLIGHT_BAR_COLORS,
     showProgressBar: true,
+    pdfReadingMode: "paginate",
   },
   hoarding: { enabled: false, maxUnread: 25 },
   showReadingStats: false,
@@ -124,6 +126,14 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
     });
   }, []);
 
+  const setPdfReadingMode = useCallback((mode: "paginate" | "scroll") => {
+    setState((prev) => {
+      const next = { ...prev.reader, pdfReadingMode: mode };
+      saveReaderPrefs(next);
+      return { ...prev, reader: next };
+    });
+  }, []);
+
   const setHoarding = useCallback((prefs: HoardingPrefs) => {
     saveHoardingPrefs(prefs);
     setState((prev) => ({ ...prev, hoarding: prefs }));
@@ -158,6 +168,7 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
         setTtsVoice,
         setHighlightBarColors,
         setShowProgressBar,
+        setPdfReadingMode,
         setHoarding,
         setShowReadingStats,
         setAutoDelete,

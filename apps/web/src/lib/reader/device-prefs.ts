@@ -26,6 +26,11 @@ export interface ReaderPrefs {
    * left, visible regardless of scroll/page position -- optional since
    * not everyone wants a constant reminder of how much is left. */
   showProgressBar: boolean;
+  /** PDF only -- "paginate" (Prev/Next, one page at a time, today's only
+   * mode) or "scroll" (continuously scroll through pages, like the
+   * HTML/EPUB readers). Some readers strongly prefer one over the other,
+   * so this is a toggle, not a product decision. */
+  pdfReadingMode: "paginate" | "scroll";
 }
 
 const DEFAULT_PREFS: ReaderPrefs = {
@@ -34,6 +39,7 @@ const DEFAULT_PREFS: ReaderPrefs = {
   ttsVoice: NATIVE_VOICE_ID,
   highlightBarColors: DEFAULT_HIGHLIGHT_BAR_COLORS,
   showProgressBar: true,
+  pdfReadingMode: "paginate",
 };
 
 export function loadReaderPrefs(): ReaderPrefs {
@@ -53,6 +59,7 @@ export function loadReaderPrefs(): ReaderPrefs {
         : DEFAULT_PREFS.ttsVoice,
       highlightBarColors: sanitizeHighlightBarColors(parsed.highlightBarColors),
       showProgressBar: typeof parsed.showProgressBar === "boolean" ? parsed.showProgressBar : DEFAULT_PREFS.showProgressBar,
+      pdfReadingMode: parsed.pdfReadingMode === "scroll" ? "scroll" : DEFAULT_PREFS.pdfReadingMode,
     };
   } catch {
     return DEFAULT_PREFS;
