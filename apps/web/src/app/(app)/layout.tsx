@@ -176,8 +176,14 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function handleDeleteCollection(c: Collection) {
-    if (!window.confirm(`Delete "${c.name}"? Articles stay in your library, just ungrouped.`)) return;
+  function handleDeleteCollection(c: Collection) {
+    setPendingCollectionDelete(c);
+  }
+
+  async function confirmDeleteCollection() {
+    const c = pendingCollectionDelete;
+    if (!c) return;
+    setPendingCollectionDelete(null);
     await deleteCollection(c.id, isAuthenticated);
     setCollections((prev) => prev.filter((col) => col.id !== c.id));
     if (activeCollectionId === c.id) router.push("/library");
@@ -198,6 +204,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [dragOverTrash, setDragOverTrash] = useState(false);
   const [dragOverHref, setDragOverHref] = useState<string | null>(null);
   const [pendingHighlightDrop, setPendingHighlightDrop] = useState<string | null>(null);
+  const [pendingCollectionDelete, setPendingCollectionDelete] = useState<Collection | null>(null);
 
   function handleNavDragOver(e: React.DragEvent, isTrash: boolean) {
     const types = e.dataTransfer.types;
@@ -419,6 +426,15 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main className="min-w-0 flex-1">{children}</main>
+
+      {pendingCollectionDelete && (
+        <ConfirmDialog
+          title={`Delete "${pendingCollectionDelete.name}"?`}
+          message="Articles stay in your library, just ungrouped."
+          onCancel={() => setPendingCollectionDelete(null)}
+          onConfirm={confirmDeleteCollection}
+        />
+      )}
 
       {pendingHighlightDrop && (
         <ConfirmDialog
