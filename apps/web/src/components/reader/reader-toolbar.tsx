@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Theme } from "@/lib/theme/theme-provider";
+import { IconSidebar } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 
 export type ReaderSize = "sm" | "md" | "lg" | "xl";
@@ -21,6 +22,8 @@ interface ReaderToolbarProps {
   size: ReaderSize;
   onSizeChange: (size: ReaderSize) => void;
   progress: number;
+  showNotebook: boolean;
+  onToggleNotebook: () => void;
 }
 
 export function ReaderToolbar({
@@ -30,6 +33,8 @@ export function ReaderToolbar({
   size,
   onSizeChange,
   progress,
+  showNotebook,
+  onToggleNotebook,
 }: ReaderToolbarProps) {
   const sizeIndex = SIZES.indexOf(size);
 
@@ -103,6 +108,18 @@ export function ReaderToolbar({
             className="text-lg text-ink-muted transition-colors hover:text-accent disabled:opacity-30"
           >
             A
+          </button>
+          <button
+            type="button"
+            title={showNotebook ? "Hide Notebook" : "Show Notebook"}
+            aria-pressed={showNotebook}
+            onClick={onToggleNotebook}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded-full transition-colors",
+              showNotebook ? "bg-surface-2 text-ink" : "text-ink-muted hover:bg-surface-2 hover:text-ink",
+            )}
+          >
+            <IconSidebar className="h-4 w-4" />
           </button>
         </div>
       </div>

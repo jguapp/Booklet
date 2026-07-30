@@ -37,6 +37,10 @@ interface PdfReaderProps {
   /** "paginate" (Prev/Next, one page at a time) or "scroll" (continuously
    * scroll through pages) -- see device-prefs.ts's pdfReadingMode. */
   readingMode: "paginate" | "scroll";
+  /** Set (with a fresh nonce, so re-clicking the same target re-triggers)
+   * to navigate to a page from outside -- e.g. the Notebook panel's
+   * highlights list. */
+  jumpToPage?: { page: number; nonce: number } | null;
 }
 
 interface PendingSelection {
@@ -77,6 +81,7 @@ export function PdfReader({
   onSaveNote,
   onDeleteNote,
   readingMode,
+  jumpToPage,
 }: PdfReaderProps) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState(0);
@@ -313,13 +318,16 @@ export function PdfReader({
   // which pages are "near enough to render" (rootMargin extends the
   // trigger zone past the actual viewport, so a page starts rendering
   // slightly before it's visible) and, among currently-intersecting pages,
-  // which one is "current" for progress/TTS (whichever's top edge is
-  // closest to the viewport's own top, preferring one that's actually
-  // below it).
+  // which one is "current" for progress/TTS (whichever has the largest
+  // share of the viewport actually filled by it -- NOT whichever's top
+  // edge is closest to 0, which sounds equivalent but isn't: a page
+  // scrolled to a top of -0.5px from sub-pixel rounding would lose to the
+  // next page down every time under a top-distance comparison, even
+  // though it still fills nearly the entire viewport).
   useEffect(() => {
     if (readingMode !== "scroll" || !doc || numPages === 0) return;
 
-    const intersecting = new Map<number, number>(); // pageNumber -> boundingClientRect.top
+    const intersecting = new Map<number, number>(); // pageNumber -> intersectionRatio
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -327,7 +335,7 @@ export function PdfReader({
           const target = entry.target as HTMLElement;
           const entryPageNumber = Number(target.dataset.pdfScrollPage);
           if (!entryPageNumber) continue;
-          if (entry.isIntersecting) intersecting.set(entryPageNumber, entry.boundingClientRect.top);
+          if (entry.isIntersecting) intersecting.set(entryPageNumber, entry.intersectionRatio);
           else intersecting.delete(entryPageNumber);
         }
 
@@ -347,20 +355,23 @@ export function PdfReader({
           return changed ? next : prev;
         });
 
-        let best: { pageNumber: number; top: number } | null = null;
-        for (const [entryPageNumber, top] of intersecting) {
-          const better =
-            best === null ||
-            (top >= 0 && (best.top < 0 || top < best.top)) ||
-            (top < 0 && best.top < 0 && top > best.top);
-          if (better) best = { pageNumber: entryPageNumber, top };
+        let best: { pageNumber: number; ratio: number } | null = null;
+        for (const [entryPageNumber, ratio] of intersecting) {
+          if (best === null || ratio > best.ratio) best = { pageNumber: entryPageNumber, ratio };
         }
         if (best) {
           setCurrentScrollPage(best.pageNumber);
           currentScrollPageRef.current = best.pageNumber;
         }
       },
-      { root: null, rootMargin: `${SCROLL_RENDER_MARGIN_PX}px 0px`, threshold: [0, 0.01] },
+      {
+        root: null,
+        rootMargin: `${SCROLL_RENDER_MARGIN_PX}px 0px`,
+        // Dense thresholds -- intersectionRatio needs to be a meaningful,
+        // frequently-updated signal to pick "most visible" correctly, not
+        // just fire once at a couple of coarse crossing points.
+        threshold: Array.from({ length: 21 }, (_, i) => i / 20),
+      },
     );
     scrollObserverRef.current = observer;
     for (const el of scrollSlotElsRef.current.values()) observer.observe(el);
@@ -389,6 +400,25 @@ export function PdfReader({
       map.delete(slotPageNumber);
     }
   }, [pageNumber]);
+
+  // Jump to a page from outside (the Notebook panel's highlights list) --
+  // paginate mode just switches pages, adjusted during render (React's
+  // documented pattern for reacting to a prop change with a state update)
+  // rather than in an effect. Scroll mode instead scrolls that page's slot
+  // into view (reusing the same ref every page-slot already registers
+  // itself into for the IntersectionObserver above) -- a real DOM
+  // operation, not a state update, so it stays in a plain effect below.
+  const [handledJumpNonce, setHandledJumpNonce] = useState<number | null>(null);
+  if (jumpToPage && jumpToPage.nonce !== handledJumpNonce && doc && numPages > 0 && readingMode === "paginate") {
+    setHandledJumpNonce(jumpToPage.nonce);
+    setPageNumber(Math.min(numPages, Math.max(1, jumpToPage.page)));
+  }
+
+  useEffect(() => {
+    if (!jumpToPage || !doc || numPages === 0 || readingMode !== "scroll") return;
+    const target = Math.min(numPages, Math.max(1, jumpToPage.page));
+    scrollSlotElsRef.current.get(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [jumpToPage, doc, numPages, readingMode]);
 
   useEffect(() => {
     if (readingMode !== "scroll") return;
