@@ -3,8 +3,6 @@ import { matchesCollectionFilter } from "@booklet/shared";
 import { apiFetch, ApiError } from "@/lib/api/client";
 import { localArticleCollections, localArticles, localCollections } from "@/lib/local/db";
 
-export { ApiError };
-
 export async function loadCollections(authenticated: boolean): Promise<Collection[]> {
   if (authenticated) return apiFetch<Collection[]>("/api/collections");
 

@@ -12,7 +12,7 @@ import type {
   UserProfile,
   VerifyEmailRequest,
 } from "@booklet/shared";
-import { apiFetch, ApiError } from "@/lib/api/client";
+import { apiFetch } from "@/lib/api/client";
 import { clearAccessToken, getAccessToken, setAccessToken, silentRefresh } from "@/lib/auth/session";
 import { migrateLocalDataToAccount } from "@/lib/data/sync";
 
@@ -198,5 +198,3 @@ export function useAuth(): AuthContextValue {
   if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
   return ctx;
 }
-
-export { ApiError };

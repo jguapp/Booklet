@@ -5,7 +5,7 @@
  */
 import type { Article, ArticleListResponse, ExtractedContent } from "@booklet/shared";
 import { apiFetch, ApiError } from "../api";
-import { generateLocalId, localArticles, localHighlights } from "../local/db";
+import { generateLocalId, localArticles } from "../local/db";
 
 export { ApiError };
 
@@ -177,14 +177,4 @@ export async function saveArticleFromFile(file: PickedFile, authenticated: boole
   };
   await localArticles.put(article);
   return article;
-}
-
-export async function deleteArticle(id: string, authenticated: boolean): Promise<void> {
-  if (authenticated) {
-    await apiFetch(`/api/articles/${id}`, { method: "DELETE" });
-    return;
-  }
-  await localArticles.delete(id);
-  const highlights = await localHighlights.getForArticle(id);
-  await Promise.all(highlights.map((h) => localHighlights.delete(h.id)));
 }

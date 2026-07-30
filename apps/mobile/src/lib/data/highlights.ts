@@ -6,10 +6,8 @@
  */
 import type { Highlight, HighlightColor, HighlightPosition, UpdateHighlightRequest } from "@booklet/shared";
 import { DEFAULT_SM2_STATE } from "@booklet/shared";
-import { apiFetch, ApiError } from "../api";
+import { apiFetch } from "../api";
 import { generateLocalId, localHighlights } from "../local/db";
-
-export { ApiError };
 
 export async function loadHighlights(articleId: string | undefined, authenticated: boolean): Promise<Highlight[]> {
   if (authenticated) {
