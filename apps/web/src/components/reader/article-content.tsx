@@ -107,9 +107,12 @@ export function ArticleContent({
       marksByHighlight.set(highlight.id, marks);
     }
 
-    // Pass 2: note pills insert extra text nodes into the container, which
+    // Pass 2: note pills insert an extra element into the container, which
     // would shift every subsequent DOM-offset lookup above if interleaved --
-    // so this only runs once all offset-sensitive work is done.
+    // so this only runs once all offset-sensitive work is done. Icon-only,
+    // Apple Books style: the note's own text never sits in the reading flow,
+    // only a marker that there is one -- click it (handleContainerClick) to
+    // actually read it in HighlightManagePopover.
     for (const highlight of highlights) {
       if (!highlight.annotation) continue;
       const marks = marksByHighlight.get(highlight.id);
@@ -118,14 +121,10 @@ export function ArticleContent({
       const pill = document.createElement("span");
       pill.dataset.highlightId = highlight.id;
       pill.className =
-        "note-pill inline-flex cursor-pointer items-center gap-1 ml-1.5 rounded-full border border-border bg-surface px-2 py-0.5 align-middle font-sans text-xs font-medium text-accent whitespace-nowrap";
-      pill.title = highlight.annotation.noteText;
+        "note-pill inline-flex h-[18px] w-[18px] cursor-pointer items-center justify-center ml-1 rounded-full border border-border bg-surface align-middle text-accent";
+      pill.title = "Has a note -- click to read";
       pill.innerHTML =
-        '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 3h12M2 8h8M2 13h5"/></svg>';
-      const label = document.createElement("span");
-      const text = highlight.annotation.noteText;
-      label.textContent = text.length > 44 ? `${text.slice(0, 44)}…` : text;
-      pill.appendChild(label);
+        '<svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 8h8M2 13h5"/></svg>';
       marks[marks.length - 1].after(pill);
     }
   }, [highlights, html]);
