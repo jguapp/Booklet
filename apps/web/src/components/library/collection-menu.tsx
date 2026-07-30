@@ -16,7 +16,11 @@ interface CollectionMenuProps {
   authenticated: boolean;
 }
 
-export function CollectionMenu({ articleId, allCollections, authenticated }: CollectionMenuProps) {
+export function CollectionMenu({ articleId, allCollections: allCollectionsProp, authenticated }: CollectionMenuProps) {
+  // Smart collections have no manually-managed membership -- their
+  // contents are computed from a filter, so they don't belong in an
+  // "add this article to..." list.
+  const allCollections = allCollectionsProp.filter((c) => !c.filter);
   const [open, setOpen] = useState(false);
   const [memberIds, setMemberIds] = useState<Set<string> | null>(null);
   const [pending, setPending] = useState<string | null>(null);

@@ -8,7 +8,6 @@ import {
   IconHighlights,
   IconLibrary,
   IconLogout,
-  IconPencil,
   IconPlus,
   IconResurface,
   IconRss,
@@ -22,8 +21,10 @@ import {
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { createCollection, deleteCollection, loadCollections, updateCollection } from "@/lib/data/collections";
+import { useOnCollectionsChanged } from "@/lib/data/collection-events";
 import { loadArticles, trashArticleById } from "@/lib/data/articles";
 import { deleteHighlight } from "@/lib/data/highlights";
+import { CollectionTree } from "@/components/library/collection-tree";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { applyNavOrder } from "@/lib/data/nav-order-prefs";
 import { ApiError } from "@/lib/api/client";
@@ -108,6 +109,17 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     refreshCollections();
   }, [refreshCollections]);
+  useOnCollectionsChanged(refreshCollections);
+
+  async function handleReparentCollection(draggedId: string, targetId: string | null) {
+    try {
+      const updated = await updateCollection(draggedId, { parentId: targetId }, isAuthenticated);
+      setCollections((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    } catch {
+      // Cycle/not-found -- surfaced via the collection just not moving; the
+      // drag interaction itself has no error-message affordance to use.
+    }
+  }
 
   async function handleLogout() {
     await logout();
@@ -317,69 +329,18 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                   </form>
                 )}
 
-                {collections.map((c) =>
-                  editingId === c.id ? (
-                    <form key={c.id} onSubmit={(e) => handleRename(e, c.id)} className="px-3 py-1">
-                      <input
-                        autoFocus
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onBlur={() => setEditingId(null)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") setEditingId(null);
-                        }}
-                        className="w-full rounded-sm border border-border bg-paper px-2 py-1 font-sans text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                      />
-                    </form>
-                  ) : (
-                    <Link
-                      key={c.id}
-                      href={`/library?collection=${c.id}`}
-                      className={cn(
-                        "group flex items-center gap-2.5 rounded-sm px-3 py-1.5 font-sans text-sm transition-colors",
-                        activeCollectionId === c.id
-                          ? "bg-surface-2 text-accent"
-                          : "text-ink-muted hover:bg-surface-2 hover:text-ink",
-                      )}
-                    >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: c.color ?? "var(--color-ink-faint)" }}
-                        aria-hidden
-                      />
-                      <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                      {typeof c.articleCount === "number" && (
-                        <span className="shrink-0 font-sans text-xs text-ink-faint">{c.articleCount}</span>
-                      )}
-                      <span className="flex shrink-0 items-center gap-0.5">
-                        <button
-                          type="button"
-                          title="Rename collection"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            startRename(c);
-                          }}
-                          className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
-                        >
-                          <IconPencil className="h-3 w-3" />
-                        </button>
-                        <button
-                          type="button"
-                          title="Delete collection"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleDeleteCollection(c);
-                          }}
-                          className="flex h-5 w-5 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
-                        >
-                          <IconTrash className="h-3 w-3" />
-                        </button>
-                      </span>
-                    </Link>
-                  ),
-                )}
+                <CollectionTree
+                  collections={collections}
+                  activeCollectionId={activeCollectionId}
+                  editingId={editingId}
+                  editName={editName}
+                  onEditNameChange={setEditName}
+                  onStartRename={startRename}
+                  onRename={handleRename}
+                  onCancelRename={() => setEditingId(null)}
+                  onDelete={handleDeleteCollection}
+                  onReparent={handleReparentCollection}
+                />
               </>
             )}
           </nav>

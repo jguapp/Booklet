@@ -14,3 +14,4 @@ export * from "./digest-email";
 export * from "./reading-stats";
 export * from "./related-articles";
 export * from "./url-canonicalize";
+export * from "./collection-filter";
