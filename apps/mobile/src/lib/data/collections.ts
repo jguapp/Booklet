@@ -38,6 +38,8 @@ export async function createCollection(name: string, authenticated: boolean): Pr
     userId: "local",
     name: trimmed,
     color: null,
+    filter: null,
+    parentId: null,
     createdAt: now,
     updatedAt: now,
     articleCount: 0,
