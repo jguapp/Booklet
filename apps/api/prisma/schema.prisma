@@ -250,6 +250,12 @@ model Article {
   extractionError  String?
   extractedHtml    String?          @db.Text // HTML only -- Readability output rendered in the reader
   extractedText    String?          @db.Text // all types -- HTML/PDF full text, EPUB full book text; search + reading-time estimate
+  // Null for anything not OCR'd (which is most articles -- only a scanned
+  // PDF with no usable text layer goes through OCR at all). "OCR" tells
+  // the reader to show a "may contain errors" notice next to the text,
+  // since Tesseract output has a real, non-trivial error rate a native
+  // text layer or Readability extraction never would.
+  textSource       String? // "NATIVE" | "OCR", see PdfExtractionResult
   fileStorageKey   String? // key into StorageService (filesystem now, S3 later) -- raw fetched HTML snapshot (HTML) or the uploaded file itself (PDF/EPUB), not read on hot paths
   originalFilename String? // PDF/EPUB upload's original filename -- fallback title source when metadata extraction comes up empty
 

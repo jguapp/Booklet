@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { CreateArticleRequest, ExtractedContent } from "@booklet/shared";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
 import { EpubExtractionError, extractEpubText } from "../services/epub-extraction.js";
-import { PdfExtractionError, extractPdfText } from "../services/pdf-extraction.js";
+import { PdfExtractionError, extractPdfText, type PdfExtractionResult } from "../services/pdf-extraction.js";
 
 /**
  * Public (no auth) -- used by both signed-in clients (which then persist via
@@ -64,6 +64,7 @@ export async function registerExtractRoute(app: FastifyInstance): Promise<void> 
           html: null,
           text: result.text,
           readingTimeEstimate: result.readingTimeEstimate,
+          ...(ext === "pdf" ? { textSource: (result as PdfExtractionResult).textSource } : {}),
         };
         return reply.send(body);
       } catch (err) {

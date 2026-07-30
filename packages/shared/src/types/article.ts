@@ -24,6 +24,11 @@ export interface Article {
   extractionError: string | null;
   extractedHtml: string | null; // HTML only -- Readability output rendered in the reader
   extractedText: string | null; // all types -- HTML/PDF full text, EPUB full book text
+  /** Set only for a PDF whose native text layer was empty/unusable --
+   * "OCR" means extractedText came from image recognition (Tesseract)
+   * instead, which can contain real errors a native text layer never
+   * would. Null for everything else. */
+  textSource: "NATIVE" | "OCR" | null;
   fileStorageKey: string | null; // raw HTML snapshot (HTML) or the uploaded file itself (PDF/EPUB)
   originalFilename: string | null; // PDF/EPUB upload's original filename
 
@@ -66,6 +71,9 @@ export interface ExtractedContent {
   html: string | null;
   text: string | null;
   readingTimeEstimate: number | null;
+  /** Set to "OCR" only for a PDF whose text layer was empty/unusable --
+   * see Article.textSource. */
+  textSource?: "NATIVE" | "OCR";
 }
 
 export interface UpdateArticleRequest {

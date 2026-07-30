@@ -120,6 +120,7 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     extractionError,
     extractedHtml: extracted?.html ?? null,
     extractedText: extracted?.text ?? null,
+    textSource: null,
     fileStorageKey: null,
     originalFilename: null,
     readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
@@ -175,6 +176,7 @@ export async function saveArticleFromFile(file: File, authenticated: boolean): P
     extractionError,
     extractedHtml: null,
     extractedText: extracted?.text ?? null,
+    textSource: extracted?.textSource ?? null,
     fileStorageKey: id, // local files are keyed by article id, see lib/local/db localFiles
     originalFilename: file.name,
     readingTimeEstimate: extracted?.readingTimeEstimate ?? null,

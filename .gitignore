@@ -15,8 +15,16 @@ build/
 apps/api/prisma/dev.db
 apps/api/src/generated/
 
-# local dev database (pglite-backed Postgres, dev-only)
-apps/api/.pglite-data/
+# local dev database (pglite-backed Postgres, dev-only) -- the wildcard also
+# covers a renamed-aside .pglite-data.crashed-<timestamp>/ backup left by the
+# "rename rather than delete" recovery from a PGlite crash (see git history/
+# session notes), not just the live directory.
+apps/api/.pglite-data*/
+
+# tesseract.js's downloaded OCR trained-data model (apps/api/src/services/
+# ocr-service.ts) -- fetched to CWD on first use, a multi-MB binary cache,
+# not source.
+apps/api/*.traineddata
 
 # storage (local filesystem article storage in dev)
 apps/api/storage/

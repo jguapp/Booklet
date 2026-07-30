@@ -28,4 +28,8 @@ allowBuilds:
   esbuild: true
   prisma: true
   sharp: true
+  # opencollective-postinstall -- a donation-nag message printed to the
+  # terminal, nothing else (confirmed by reading node_modules/tesseract.js/
+  # package.json directly). Needed for the OCR feature (pdf-extraction.ts).
+  tesseract.js: true
   unrs-resolver: true
