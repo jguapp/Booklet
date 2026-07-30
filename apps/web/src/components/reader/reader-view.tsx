@@ -462,6 +462,14 @@ export function ReaderView({ articleId }: { articleId: string }) {
           </p>
         )}
 
+        {article.skippedImageCount > 0 && (
+          <p className="mb-4 rounded-sm bg-highlight-yellow/40 px-3 py-2 font-sans text-xs text-ink">
+            {article.skippedImageCount === 1
+              ? "1 image was too large to save and is still loading from the original site."
+              : `${article.skippedImageCount} images were too large to save and are still loading from the original site.`}
+          </p>
+        )}
+
         {article.sourceType !== "HTML" && (
           <p className="mb-6 font-sans text-xs text-ink-faint">
             {article.sourceType === "PDF" ? "PDF" : "EPUB"}

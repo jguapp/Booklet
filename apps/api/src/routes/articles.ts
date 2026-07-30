@@ -41,6 +41,7 @@ export function toArticle(row: ArticleRow): Article {
     fileStorageKey: row.fileStorageKey,
     originalFilename: row.originalFilename,
     readingTimeEstimate: row.readingTimeEstimate,
+    skippedImageCount: row.skippedImageCount,
     progressFraction: row.progressFraction,
     activeReadingSeconds: row.activeReadingSeconds,
     tags: row.tags,
@@ -130,6 +131,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           extractedHtml: extracted?.html ?? null,
           extractedText: extracted?.text ?? null,
           readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
+          skippedImageCount: extracted?.skippedImageCount ?? 0,
         },
       });
 
