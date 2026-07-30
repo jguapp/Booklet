@@ -33,6 +33,12 @@ export interface Article {
   originalFilename: string | null; // PDF/EPUB upload's original filename
 
   readingTimeEstimate: number | null;
+  /** How many images in the original page were too large/numerous to
+   * inline (see extraction-service.ts's MAX_IMAGE_BYTES/MAX_TOTAL_IMAGE_BYTES/
+   * MAX_IMAGES) and were left pointing at the original site instead --
+   * meaning they can break if that page later changes. 0 for anything
+   * that isn't an HTML save, or where nothing was skipped. */
+  skippedImageCount: number;
   progressFraction: number; // 0.0-1.0, normalized regardless of sourceType
   activeReadingSeconds: number; // actual time spent, not an estimate -- see the reading-stats feature
 
@@ -74,6 +80,10 @@ export interface ExtractedContent {
   /** Set to "OCR" only for a PDF whose text layer was empty/unusable --
    * see Article.textSource. */
   textSource?: "NATIVE" | "OCR";
+  /** See Article.skippedImageCount. Only ever set by the HTML extraction
+   * path (fetchAndExtract) -- absent (not 0) for PDF/EPUB extraction,
+   * which doesn't inline images at all. */
+  skippedImageCount?: number;
 }
 
 export interface UpdateArticleRequest {

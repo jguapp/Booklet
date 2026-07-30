@@ -57,7 +57,10 @@ export async function fetchAndExtract(rawUrl: string): Promise<ExtractedContent>
   // property access like article.content doesn't survive into the .catch
   // closure below, since TS can't prove it stays truthy by then.)
   const content = article.content;
-  const html = await inlineImages(content, rawUrl).catch(() => content);
+  const { html, skippedImageCount } = await inlineImages(content, rawUrl).catch(() => ({
+    html: content,
+    skippedImageCount: 0,
+  }));
 
   return {
     title: article.title?.trim() || dom.window.document.title.trim() || null,
@@ -67,25 +70,31 @@ export async function fetchAndExtract(rawUrl: string): Promise<ExtractedContent>
     html,
     text,
     readingTimeEstimate,
+    skippedImageCount,
   };
 }
 
 // Exported for unit testing -- fetchAndExtract itself needs a real network
 // fetch of the page HTML to test end to end.
-export async function inlineImages(html: string, baseUrl: string): Promise<string> {
+export async function inlineImages(
+  html: string,
+  baseUrl: string,
+): Promise<{ html: string; skippedImageCount: number }> {
   const fragment = new JSDOM(html);
   const doc = fragment.window.document;
   const imgs = Array.from(doc.querySelectorAll("img[src]"));
-  if (imgs.length === 0) return html;
+  if (imgs.length === 0) return { html, skippedImageCount: 0 };
 
-  const uniqueSrcs = [...new Set(imgs.map((img) => img.getAttribute("src")!).filter(Boolean))].slice(0, MAX_IMAGES);
+  const uniqueSrcs = [...new Set(imgs.map((img) => img.getAttribute("src")!).filter(Boolean))];
+  // Beyond MAX_IMAGES, the rest are skipped outright -- never even attempted.
+  const attemptedSrcs = uniqueSrcs.slice(0, MAX_IMAGES);
   const dataUriBySrc = new Map<string, string>();
   let totalBytes = 0;
   let nextIndex = 0;
 
   async function worker(): Promise<void> {
-    while (nextIndex < uniqueSrcs.length && totalBytes < MAX_TOTAL_IMAGE_BYTES) {
-      const src = uniqueSrcs[nextIndex++];
+    while (nextIndex < attemptedSrcs.length && totalBytes < MAX_TOTAL_IMAGE_BYTES) {
+      const src = attemptedSrcs[nextIndex++];
       const dataUri = await fetchImageAsDataUri(src, baseUrl, MAX_TOTAL_IMAGE_BYTES - totalBytes);
       if (dataUri) {
         dataUriBySrc.set(src, dataUri.uri);
@@ -95,13 +104,19 @@ export async function inlineImages(html: string, baseUrl: string): Promise<strin
   }
   await Promise.all(Array.from({ length: IMAGE_FETCH_CONCURRENCY }, worker));
 
-  if (dataUriBySrc.size === 0) return html;
+  // Every unique image src that didn't end up inlined -- past MAX_IMAGES,
+  // over MAX_IMAGE_BYTES/MAX_TOTAL_IMAGE_BYTES, or just failed to fetch
+  // (dead link, blocked, non-image response). All read the same to the
+  // user: still pointing at the original site, so still able to break.
+  const skippedImageCount = uniqueSrcs.length - dataUriBySrc.size;
+
+  if (dataUriBySrc.size === 0) return { html, skippedImageCount };
   for (const img of imgs) {
     const src = img.getAttribute("src");
     const dataUri = src && dataUriBySrc.get(src);
     if (dataUri) img.setAttribute("src", dataUri);
   }
-  return doc.body.innerHTML;
+  return { html: doc.body.innerHTML, skippedImageCount };
 }
 
 async function fetchImageAsDataUri(

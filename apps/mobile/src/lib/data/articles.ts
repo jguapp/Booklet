@@ -74,6 +74,7 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     fileStorageKey: null,
     originalFilename: null,
     readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
+    skippedImageCount: extracted?.skippedImageCount ?? 0,
     progressFraction: 0,
     activeReadingSeconds: 0,
     tags: [],
@@ -163,6 +164,7 @@ export async function saveArticleFromFile(file: PickedFile, authenticated: boole
     fileStorageKey: null,
     originalFilename: fileName,
     readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
+    skippedImageCount: 0, // PDF/EPUB extraction doesn't inline images at all
     progressFraction: 0,
     activeReadingSeconds: 0,
     tags: [],
