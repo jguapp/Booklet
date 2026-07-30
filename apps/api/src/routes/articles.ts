@@ -14,6 +14,7 @@ import { ExtractionError, fetchAndExtract } from "../services/extraction-service
 import { EpubExtractionError, extractEpubText } from "../services/epub-extraction.js";
 import { PdfExtractionError, extractPdfText } from "../services/pdf-extraction.js";
 import { deleteStoredFile, readStoredFile, saveFile } from "../services/storage-service.js";
+import { fireWebhookEvent } from "../services/webhook-service.js";
 
 export type ArticleRow = Awaited<ReturnType<typeof prisma.article.findFirstOrThrow>>;
 
@@ -130,7 +131,11 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         },
       });
 
-      return reply.code(201).send(toArticle(article));
+      const body = toArticle(article);
+      fireWebhookEvent(request.userId!, "article.created", { id: body.id, url: body.url, title: body.title }).catch(
+        () => undefined,
+      );
+      return reply.code(201).send(body);
     },
   );
 
@@ -179,7 +184,11 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         },
       });
 
-      return reply.code(201).send(toArticle(article));
+      const body = toArticle(article);
+      fireWebhookEvent(request.userId!, "article.created", { id: body.id, url: body.url, title: body.title }).catch(
+        () => undefined,
+      );
+      return reply.code(201).send(body);
     },
   );
 

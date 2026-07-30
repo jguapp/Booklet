@@ -5,7 +5,7 @@ import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { toSummary as toArticleSummary } from "./articles.js";
 
-function toCollection(row: {
+export function toCollection(row: {
   id: string;
   userId: string;
   name: string;

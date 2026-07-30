@@ -13,7 +13,7 @@ import { useAuth } from "@/lib/auth/auth-provider";
 import { loadSessions, revokeOtherSessions, revokeSession } from "@/lib/data/sessions";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { formatRelativeDate, summarizeUserAgent } from "@/lib/format";
-import { IconUpload } from "@/components/ui/icons";
+import { IconCode, IconUpload } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 
 const FREQUENCIES: { value: ResurfaceFrequency; label: string }[] = [
@@ -423,6 +423,18 @@ export default function SettingsPage() {
             <p className="font-sans text-sm font-medium text-ink">Import &amp; export</p>
             <p className="font-sans text-xs text-ink-faint">
               Bring in Pocket/Instapaper, export to Markdown for Obsidian or Notion.
+            </p>
+          </div>
+        </Link>
+        <Link
+          href="/developer"
+          className="flex items-center gap-3 rounded-md border border-border bg-surface px-4 py-3.5 transition-colors hover:border-accent/40"
+        >
+          <IconCode className="h-5 w-5 shrink-0 text-ink-faint" />
+          <div className="min-w-0 flex-1">
+            <p className="font-sans text-sm font-medium text-ink">Developer</p>
+            <p className="font-sans text-xs text-ink-faint">
+              Personal access tokens for the API, and webhooks for automations.
             </p>
           </div>
         </Link>

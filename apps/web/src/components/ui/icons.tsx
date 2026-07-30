@@ -106,6 +106,14 @@ export function IconLogout(props: IconProps) {
   );
 }
 
+export function IconCode(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M7 6 3 10l4 4M13 6l4 4-4 4M11 4 9 16" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function IconSearch(props: IconProps) {
   return (
     <svg {...base(props)}>

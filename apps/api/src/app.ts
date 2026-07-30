@@ -14,6 +14,9 @@ import { registerSyncRoutes } from "./routes/sync.js";
 import { registerCollectionRoutes } from "./routes/collections.js";
 import { registerSearchRoute } from "./routes/search.js";
 import { registerFeedRoutes } from "./routes/feeds.js";
+import { registerApiTokenRoutes } from "./routes/api-tokens.js";
+import { registerWebhookRoutes } from "./routes/webhooks.js";
+import { registerV1Routes } from "./routes/v1.js";
 import { captureException, initErrorMonitoring } from "./lib/error-monitoring.js";
 
 /**
@@ -56,6 +59,16 @@ export async function buildApp(): Promise<FastifyInstance> {
       if (!isDev && process.env.WEB_ORIGIN && origin === process.env.WEB_ORIGIN) return callback(null, true);
       callback(null, false);
     },
+    // Default (this @fastify/cors version) preflight-allows only GET/HEAD/
+    // POST -- silently breaking every authenticated PATCH/PUT/DELETE
+    // request from a real browser (rename/delete a collection, revoke a
+    // token, anything not a plain create). Every previous e2e test in this
+    // suite ran in local/anonymous mode, which serves those same actions
+    // out of IndexedDB and never touches the network, so a real signed-in
+    // session hitting this was previously untested -- caught building the
+    // personal-access-token/webhook feature's first authenticated-mode e2e
+    // coverage, not something new this change introduces.
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
     credentials: true,
   });
 
@@ -89,6 +102,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerCollectionRoutes(app);
   await registerSearchRoute(app);
   await registerFeedRoutes(app);
+  await registerApiTokenRoutes(app);
+  await registerWebhookRoutes(app);
+  await registerV1Routes(app);
 
   return app;
 }
