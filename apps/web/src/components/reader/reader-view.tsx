@@ -59,6 +59,17 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const [epubSectionText, setEpubSectionText] = useState("");
   const [relatedArticles, setRelatedArticles] = useState<{ articleId: string; articles: Article[] } | null>(null);
 
+  // Which reader is actually rendering this article -- PDF/EPUB get their
+  // own real readers (pdf-reader.tsx, epub-reader.tsx) once the file's
+  // loaded; everything else (including a PDF/EPUB whose file failed to
+  // load) falls back to the extracted-text-through-the-HTML-highlighter
+  // path. Computed once, up here (not after the !article early return
+  // below), since it's needed both by hooks that must run unconditionally
+  // (the scroll-progress listener right below, and useTextToSpeech further
+  // down) and by the render logic at the bottom of this component.
+  const usesPdfReader = article?.sourceType === "PDF" && fileBlob !== null;
+  const usesEpubReader = article?.sourceType === "EPUB" && fileBlob !== null;
+
   const refresh = useCallback(() => {
     if (authStatus === "loading") return;
     Promise.all([loadArticle(articleId, isAuthenticated), loadHighlights(isAuthenticated, articleId)]).then(
@@ -131,7 +142,20 @@ export function ReaderView({ articleId }: { articleId: string }) {
     articleRef.current = article;
   }, [article]);
 
+  // Window-scroll-fraction progress only makes sense for the plain-HTML
+  // reader path -- PDF (page/numPages) and EPUB (book.locations
+  // percentage) report their own real progress via handleProgressChange
+  // below. This listener used to be unconditional, which meant *any*
+  // incidental window scroll while a PDF/EPUB reader was mounted (the page
+  // container being taller than the viewport, a highlight popover
+  // shifting layout) would clobber that reader's correct progress with a
+  // value computed from unrelated document scroll geometry -- the actual
+  // cause of both an EPUB getting auto-archived after only a few pages
+  // (stray scroll pushed the shared fraction near 1.0) and a PDF's
+  // progress never updating from page-turns alone (stray scroll kept
+  // overwriting it back down).
   useEffect(() => {
+    if (usesPdfReader || usesEpubReader) return;
     function handleScroll() {
       const doc = document.documentElement;
       const scrollable = doc.scrollHeight - window.innerHeight;
@@ -142,7 +166,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
     handleScroll();
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [usesPdfReader, usesEpubReader]);
 
   function handleProgressChange(fraction: number) {
     setProgress(fraction);
@@ -248,17 +272,14 @@ export function ReaderView({ articleId }: { articleId: string }) {
   // article's own fetch (kicked off by the effect above) resolves.
   const visibleRelated = relatedArticles?.articleId === articleId ? relatedArticles.articles : [];
 
-  // Hooks can't be called after the !loaded/!article early returns below, so
-  // this has to live up here -- readableText is just "" (tts.play() is a
-  // no-op on empty text) until article's actually loaded and the right
-  // reader has reported something. What "read aloud" should read: the
-  // current PDF page, the current EPUB section, or -- since there's no
-  // per-page concept for scrolled HTML -- the whole article's plain text.
-  const usesPdfReaderForTts = article?.sourceType === "PDF" && fileBlob !== null;
-  const usesEpubReaderForTts = article?.sourceType === "EPUB" && fileBlob !== null;
-  const readableText = usesPdfReaderForTts
+  // readableText is just "" (tts.play() is a no-op on empty text) until
+  // article's actually loaded and the right reader has reported something.
+  // What "read aloud" should read: the current PDF page, the current EPUB
+  // section, or -- since there's no per-page concept for scrolled HTML --
+  // the whole article's plain text.
+  const readableText = usesPdfReader
     ? pdfPageText
-    : usesEpubReaderForTts
+    : usesEpubReader
       ? epubSectionText
       : (article?.extractedText ?? "");
   const tts = useTextToSpeech(readableText);
@@ -336,12 +357,6 @@ export function ReaderView({ articleId }: { articleId: string }) {
     ? Math.max(0, Math.round(article.readingTimeEstimate * (1 - progress)))
     : null;
   const label = article.siteName ?? article.author ?? article.originalFilename ?? "Reader";
-  // PDF and EPUB each get their own real reader once the file's loaded
-  // (pdf-reader.tsx, epub-reader.tsx). A source whose file failed to load
-  // (or an old article saved before either reader existed) falls back to
-  // the extracted-text-through-the-HTML-highlighter path, same as before.
-  const usesPdfReader = article.sourceType === "PDF" && fileBlob !== null;
-  const usesEpubReader = article.sourceType === "EPUB" && fileBlob !== null;
   const renderHtml =
     usesPdfReader || usesEpubReader
       ? null
