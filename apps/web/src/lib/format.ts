@@ -26,10 +26,28 @@ export function formatDuration(totalSeconds: number): string {
   return `${totalSeconds}s`;
 }
 
+/** "45 min" / "11h 56m" / "3h" -- long estimates (a whole book, easily
+ * hundreds of minutes) read as a raw minute count otherwise ("716 min"
+ * read), which nobody scans at a glance the way "11h 56m" does. */
+function formatMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
 export function formatReadingTime(minutes: number | null): string {
   if (minutes === null) return "";
   if (minutes < 1) return "< 1 min read";
-  return `${minutes} min read`;
+  return `${formatMinutes(minutes)} read`;
+}
+
+/** Same hour/minute formatting as formatReadingTime, for the "N left"
+ * remaining-time phrasing (reader-view.tsx's byline, the persistent
+ * progress bar) instead of the "N read" total-estimate phrasing. */
+export function formatMinutesLeft(minutes: number): string {
+  if (minutes < 1) return "< 1 min left";
+  return `${formatMinutes(minutes)} left`;
 }
 
 /** Rough, dependency-free summary -- good enough to tell sessions apart, not a real UA parser. */
