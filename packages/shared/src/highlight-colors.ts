@@ -55,7 +55,7 @@ export const CURATED_HIGHLIGHT_PALETTE: HighlightColorOption[] = [
   { id: "#D9E68A", hex: "#D9E68A", label: "Lime" },
   { id: "#8FDCD4", hex: "#8FDCD4", label: "Teal" },
   { id: "#A8AEEA", hex: "#A8AEEA", label: "Indigo" },
-  { id: "#C4A8E8", hex: "#C4A8E8", label: "Purple" },
+  { id: "#89D28F", hex: "#89D28F", label: "Emerald" },
   { id: "#DB8CC7", hex: "#DB8CC7", label: "Magenta" },
   { id: "#C9A876", hex: "#C9A876", label: "Brown" },
   { id: "#E0C468", hex: "#E0C468", label: "Gold" },

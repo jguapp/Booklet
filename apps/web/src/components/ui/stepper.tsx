@@ -36,7 +36,7 @@ export function Stepper({ value, onChange, min, max, step = 1, className, ...res
   }
 
   return (
-    <div className={cn("inline-flex items-center gap-1 rounded-sm bg-surface-2 p-1", className)}>
+    <div className={cn("inline-flex w-fit shrink-0 items-center gap-1 self-start rounded-sm bg-surface-2 p-1", className)}>
       <button
         type="button"
         onClick={() => onChange(Math.max(min, value - step))}
