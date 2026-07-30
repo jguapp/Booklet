@@ -72,6 +72,7 @@ export async function registerExtractRoute(app: FastifyInstance): Promise<void> 
           html: null,
           text: result.text,
           readingTimeEstimate: result.readingTimeEstimate,
+          coverImageUrl: result.coverImageUrl,
           ...(ext === "pdf" ? { textSource: (result as PdfExtractionResult).textSource } : {}),
         };
         return reply.send(body);

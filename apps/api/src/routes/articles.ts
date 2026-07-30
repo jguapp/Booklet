@@ -40,6 +40,7 @@ export function toArticle(row: ArticleRow): Article {
     textSource: row.textSource as "NATIVE" | "OCR" | null,
     fileStorageKey: row.fileStorageKey,
     originalFilename: row.originalFilename,
+    coverImageUrl: row.coverImageUrl,
     readingTimeEstimate: row.readingTimeEstimate,
     skippedImageCount: row.skippedImageCount,
     progressFraction: row.progressFraction,
@@ -132,6 +133,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           extractedText: extracted?.text ?? null,
           readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
           skippedImageCount: extracted?.skippedImageCount ?? 0,
+          coverImageUrl: extracted?.coverImageUrl ?? null,
         },
       });
 
@@ -195,6 +197,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         text: string;
         readingTimeEstimate: number;
         textSource?: "NATIVE" | "OCR";
+        coverImageUrl: string | null;
       } | null = null;
       let extractionError: string | null = null;
       try {
@@ -222,6 +225,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
           fileStorageKey,
           originalFilename,
+          coverImageUrl: extracted?.coverImageUrl ?? null,
         },
       });
 

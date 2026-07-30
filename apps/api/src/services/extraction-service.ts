@@ -21,6 +21,10 @@ const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024; // 15MB across the whole article
 const MAX_IMAGES = 30;
 const IMAGE_FETCH_TIMEOUT_MS = 8_000;
 const IMAGE_FETCH_CONCURRENCY = 4;
+// The cover thumbnail loads on every library card, not just this one
+// article's own reader view -- kept far smaller than a body image so
+// listing 30+ articles doesn't balloon the list response.
+const MAX_COVER_IMAGE_BYTES = 512 * 1024; // 512KB
 
 export class ExtractionError extends Error {}
 
@@ -40,6 +44,12 @@ export async function fetchAndExtract(rawUrl: string): Promise<ExtractedContent>
   } catch {
     throw new ExtractionError("Failed to parse the page.");
   }
+
+  // Read the cover image's URL out of <head> before Readability runs --
+  // Readability.parse() is documented as destructive (it mutates the DOM
+  // it's given while stripping it down to the article body), so anything
+  // not captured beforehand isn't guaranteed to survive.
+  const coverImageSrc = findCoverImageSrc(dom.window.document);
 
   const reader = new Readability(dom.window.document);
   const article = reader.parse();
@@ -62,6 +72,14 @@ export async function fetchAndExtract(rawUrl: string): Promise<ExtractedContent>
     skippedImageCount: 0,
   }));
 
+  // Same best-effort contract as the body images -- a missing/failed cover
+  // thumbnail is cosmetic, never worth failing the whole save over.
+  const coverImageUrl = coverImageSrc
+    ? await fetchImageAsDataUri(coverImageSrc, rawUrl, MAX_COVER_IMAGE_BYTES)
+        .then((result) => result?.uri ?? null)
+        .catch(() => null)
+    : null;
+
   return {
     title: article.title?.trim() || dom.window.document.title.trim() || null,
     author: article.byline?.trim() || null,
@@ -71,7 +89,18 @@ export async function fetchAndExtract(rawUrl: string): Promise<ExtractedContent>
     text,
     readingTimeEstimate,
     skippedImageCount,
+    coverImageUrl,
   };
+}
+
+/** <meta property="og:image">, falling back to <meta name="twitter:image"> --
+ * covers the vast majority of real-world pages (both are near-universal for
+ * anything that wants to look right when shared on social media). */
+function findCoverImageSrc(doc: Document): string | null {
+  const og = doc.querySelector('meta[property="og:image"]')?.getAttribute("content")?.trim();
+  if (og) return og;
+  const twitter = doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content")?.trim();
+  return twitter || null;
 }
 
 // Exported for unit testing -- fetchAndExtract itself needs a real network
