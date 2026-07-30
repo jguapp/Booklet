@@ -9,8 +9,6 @@ import type { Collection } from "@booklet/shared";
 import { apiFetch, ApiError } from "../api";
 import { generateLocalId, localArticleCollections, localCollections } from "../local/db";
 
-export { ApiError };
-
 export async function loadCollections(authenticated: boolean): Promise<Collection[]> {
   if (authenticated) return apiFetch<Collection[]>("/api/collections");
 
