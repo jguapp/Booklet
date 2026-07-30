@@ -15,3 +15,4 @@ export * from "./reading-stats";
 export * from "./related-articles";
 export * from "./url-canonicalize";
 export * from "./collection-filter";
+export * from "./recap";
