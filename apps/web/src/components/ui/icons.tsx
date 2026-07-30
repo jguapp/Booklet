@@ -216,6 +216,14 @@ export function IconPlus(props: IconProps) {
   );
 }
 
+export function IconMinus(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4.5 10h11" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconCheck(props: IconProps) {
   return (
     <svg {...base(props)}>

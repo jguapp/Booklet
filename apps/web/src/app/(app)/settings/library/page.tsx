@@ -1,7 +1,7 @@
 "use client";
 
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
-import { Input } from "@/components/ui/input";
+import { Stepper } from "@/components/ui/stepper";
 import { cn } from "@/lib/cn";
 
 const AUTO_DELETE_PERIODS = [
@@ -68,17 +68,10 @@ export default function LibrarySettingsPage() {
             </button>
           </div>
           {hoarding.enabled && (
-            <label className="mt-1 flex flex-col gap-1.5">
+            <div className="mt-1 flex flex-col gap-1.5">
               <span className="font-sans text-sm font-medium text-ink">Unread limit</span>
-              <Input
-                type="number"
-                min={1}
-                max={500}
-                value={hoarding.maxUnread}
-                onChange={(e) => handleMaxUnreadChange(Number(e.target.value))}
-                className="max-w-[100px]"
-              />
-            </label>
+              <Stepper value={hoarding.maxUnread} onChange={handleMaxUnreadChange} min={1} max={500} aria-label="Unread limit" />
+            </div>
           )}
         </section>
 
