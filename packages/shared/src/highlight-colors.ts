@@ -41,19 +41,25 @@ const LEGACY_IDS = new Set(LEGACY_HIGHLIGHT_COLORS.map((c) => c.id));
 /** A broader set to choose from in the highlight-bar customization
  * setting -- picked to work well specifically as a text-highlight
  * background (soft, desaturated, doesn't fight with the text sitting on
- * top of it), not just "nice colors" in the abstract. */
+ * top of it) *and* to actually look distinct from one another and from
+ * the legacy five at a glance -- an earlier version of this list packed
+ * in ten colors at nearly the same pale, low-saturation tone (e.g. "Mint"
+ * right next to "Teal" right next to Green), which just reads as
+ * near-duplicates in a small swatch. Each of these is deliberately spaced
+ * around the hue wheel away from the legacy five *and* from each other,
+ * with saturation/lightness varied enough (not one flat formula) that
+ * neighbors stay tell-apart-able. */
 export const CURATED_HIGHLIGHT_PALETTE: HighlightColorOption[] = [
   ...LEGACY_HIGHLIGHT_COLORS,
-  { id: "#D9CCEF", hex: "#D9CCEF", label: "Purple" },
-  { id: "#F1C4C4", hex: "#F1C4C4", label: "Red" },
-  { id: "#BEE3DD", hex: "#BEE3DD", label: "Teal" },
-  { id: "#C9EAD0", hex: "#C9EAD0", label: "Mint" },
-  { id: "#F4CBB8", hex: "#F4CBB8", label: "Coral" },
-  { id: "#E1D8F0", hex: "#E1D8F0", label: "Lavender" },
-  { id: "#C3DEF0", hex: "#C3DEF0", label: "Sky" },
-  { id: "#F3D2DE", hex: "#F3D2DE", label: "Rose" },
-  { id: "#EAE0C8", hex: "#EAE0C8", label: "Sand" },
-  { id: "#D3D8DC", hex: "#D3D8DC", label: "Slate" },
+  { id: "#F0A8A8", hex: "#F0A8A8", label: "Red" },
+  { id: "#D9E68A", hex: "#D9E68A", label: "Lime" },
+  { id: "#8FDCD4", hex: "#8FDCD4", label: "Teal" },
+  { id: "#A8AEEA", hex: "#A8AEEA", label: "Indigo" },
+  { id: "#C4A8E8", hex: "#C4A8E8", label: "Purple" },
+  { id: "#DB8CC7", hex: "#DB8CC7", label: "Magenta" },
+  { id: "#C9A876", hex: "#C9A876", label: "Brown" },
+  { id: "#E0C468", hex: "#E0C468", label: "Gold" },
+  { id: "#C2C7CC", hex: "#C2C7CC", label: "Gray" },
 ];
 
 export const DEFAULT_HIGHLIGHT_COLOR = "YELLOW";

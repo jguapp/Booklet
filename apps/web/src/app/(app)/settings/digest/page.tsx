@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ResurfaceFrequency } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Stepper } from "@/components/ui/stepper";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { loadUserSettings, saveUserSettings } from "@/lib/mock/store";
 import { cn } from "@/lib/cn";
@@ -69,17 +69,10 @@ export default function DigestSettingsPage() {
           </div>
         </div>
 
-        <label className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5">
           <span className="font-sans text-sm font-medium text-ink">Highlights per digest</span>
-          <Input
-            type="number"
-            min={1}
-            max={20}
-            value={perDigest}
-            onChange={(e) => setPerDigest(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
-            className="max-w-[100px]"
-          />
-        </label>
+          <Stepper value={perDigest} onChange={setPerDigest} min={1} max={20} aria-label="Highlights per digest" />
+        </div>
 
         <div className="flex items-center gap-3">
           <Button type="submit" variant="primary">

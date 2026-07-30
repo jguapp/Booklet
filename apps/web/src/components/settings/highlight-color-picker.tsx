@@ -5,6 +5,7 @@ import { CURATED_HIGHLIGHT_PALETTE, MAX_HIGHLIGHT_BAR_COLORS, highlightColorHex,
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { Button } from "@/components/ui/button";
 import { IconCheck } from "@/components/ui/icons";
+import { ColorWheelPicker } from "./color-wheel-picker";
 import { cn } from "@/lib/cn";
 
 const PALETTE_LABELS = new Map(CURATED_HIGHLIGHT_PALETTE.map((c) => [c.id, c.label]));
@@ -24,8 +25,9 @@ function normalizeHexInput(raw: string): string {
  * highlightBarColors), not account-synced, same reasoning as text size/TTS
  * voice: what looks good is a property of your own eyes, not your account.
  * Three ways in: toggle any of the curated palette on/off, type a hex code
- * directly, or use the browser's own native color-wheel picker (a real
- * spectrum + hex field, no custom widget needed).
+ * directly, or drag around Booklet's own themed color wheel
+ * (color-wheel-picker.tsx) -- not the browser's native `<input
+ * type="color">`, whose popup is an unstylable OS/browser-chrome dialog.
  */
 export function HighlightColorPicker() {
   const { reader, setHighlightBarColors } = useDevicePrefs();
@@ -106,11 +108,16 @@ export function HighlightColorPicker() {
                 disabled={!active && bar.length >= MAX_HIGHLIGHT_BAR_COLORS}
                 className={cn(
                   "flex h-8 w-8 items-center justify-center rounded-full border-2 transition-transform hover:scale-110 disabled:opacity-40 disabled:hover:scale-100",
-                  active ? "border-ink" : "border-transparent",
+                  // A fixed dark ring, not the theme's --color-ink (which
+                  // flips to a pale color in dark mode) -- these swatches
+                  // are always pale pastels regardless of app theme, so
+                  // the "selected" indicator needs to contrast against the
+                  // *swatch*, not the page background.
+                  active ? "border-[#1B1815]" : "border-transparent",
                 )}
                 style={{ backgroundColor: c.hex }}
               >
-                {active && <IconCheck className="h-3.5 w-3.5 text-ink" />}
+                {active && <IconCheck className="h-3.5 w-3.5 text-[#1B1815]" />}
               </button>
             );
           })}
@@ -120,16 +127,13 @@ export function HighlightColorPicker() {
       <div className="flex flex-col gap-1.5">
         <span className="font-sans text-xs font-medium text-ink-muted">Or pick a fully custom color</span>
         <div className="flex items-center gap-2">
-          <input
-            type="color"
-            aria-label="Pick a custom color"
-            value={isValidHexColor(customHex) ? customHex : "#000000"}
-            onChange={(e) => setCustomHex(e.target.value.toUpperCase())}
-            className="h-9 w-9 shrink-0 cursor-pointer rounded-sm border border-border bg-transparent p-0.5"
+          <ColorWheelPicker
+            initialHex={customHex}
+            onAdd={(hex) => {
+              setCustomHex(hex);
+              addHex(hex);
+            }}
           />
-          <Button type="button" variant="secondary" onClick={() => addHex(customHex)} disabled={bar.length >= MAX_HIGHLIGHT_BAR_COLORS}>
-            Add to bar
-          </Button>
           <div className="mx-1 h-6 w-px bg-border" />
           <input
             type="text"
