@@ -48,9 +48,9 @@ export function ArticleCard({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-ink-faint">
           <SourceIcon sourceType={article.sourceType} className="h-4 w-4" />
+          <StatusBadge status={article.status} />
         </div>
         <div className="flex items-center gap-2">
-          <StatusBadge status={article.status} />
           {onToggleFavorited && (
             <button
               type="button"
