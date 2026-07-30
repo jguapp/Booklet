@@ -12,11 +12,13 @@ import { SaveArticleModal } from "@/components/library/save-article-modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/cn";
 import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
-import { loadArticlesInCollection, loadCollections } from "@/lib/data/collections";
+import { createCollection, loadArticlesInCollection, loadCollections } from "@/lib/data/collections";
+import { notifyCollectionsChanged } from "@/lib/data/collection-events";
 import { searchLibrary } from "@/lib/data/search";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
+import { useToast } from "@/lib/toast/toast-provider";
 
 type FilterTab = "ALL" | ArticleStatus;
 
@@ -56,6 +58,9 @@ function LibraryPageInner() {
   const [searchResults, setSearchResults] = useState<{ articles: Article[]; highlights: Highlight[] } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [confirmingHoarding, setConfirmingHoarding] = useState<number | null>(null); // current unread count, while the "you sure?" prompt is up
+  const [savingSmartCollection, setSavingSmartCollection] = useState(false);
+  const [smartCollectionName, setSmartCollectionName] = useState("");
+  const { toast } = useToast();
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
@@ -113,6 +118,37 @@ function LibraryPageInner() {
       .filter((a) => !tagFilter || a.tags.includes(tagFilter))
       .sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
   }, [articles, searchResults, isSearching, tab, tagFilter]);
+
+  // Only meaningful on the main Library view (not while already inside a
+  // collection) and only once there's actually something narrower than
+  // "everything" to save -- the default ALL/no-tag/no-search state would
+  // just be a "Save as collection" that means "all my articles."
+  const hasActiveFilter = !activeCollection && (tab !== "ALL" || tagFilter !== null || debouncedSearch.length > 0);
+
+  async function handleSaveSmartCollection(e: React.FormEvent) {
+    e.preventDefault();
+    const name = smartCollectionName.trim();
+    if (!name) return;
+    try {
+      await createCollection(
+        {
+          name,
+          filter: {
+            status: tab !== "ALL" ? tab : undefined,
+            tags: tagFilter ? [tagFilter] : undefined,
+            textQuery: debouncedSearch || undefined,
+          },
+        },
+        isAuthenticated,
+      );
+      notifyCollectionsChanged();
+      toast(`Saved "${name}" as a collection -- it'll always match this search.`);
+      setSmartCollectionName("");
+      setSavingSmartCollection(false);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't save that collection.");
+    }
+  }
 
   function handleSaveClick() {
     const unreadCount = articles.filter((a) => a.status === "UNREAD").length;
@@ -214,6 +250,35 @@ function LibraryPageInner() {
           />
         </div>
       </div>
+
+      {hasActiveFilter && (
+        <div className="mb-6">
+          {savingSmartCollection ? (
+            <form onSubmit={handleSaveSmartCollection} className="flex items-center gap-2">
+              <Input
+                autoFocus
+                type="text"
+                placeholder="Collection name"
+                value={smartCollectionName}
+                onChange={(e) => setSmartCollectionName(e.target.value)}
+                onBlur={() => !smartCollectionName && setSavingSmartCollection(false)}
+                className="max-w-[220px]"
+              />
+              <Button type="submit" variant="secondary">
+                Save
+              </Button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSavingSmartCollection(true)}
+              className="font-sans text-xs font-medium text-accent hover:underline"
+            >
+              Save this search as a collection
+            </button>
+          )}
+        </div>
+      )}
 
       {allTags.length > 0 && (
         <div className="mb-6 flex flex-wrap items-center gap-1.5">

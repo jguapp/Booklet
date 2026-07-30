@@ -165,8 +165,18 @@ export const localHighlights = {
   clear: () => clear(HIGHLIGHTS_STORE),
 };
 
+/** Same reasoning as normalizeArticle above -- records saved before
+ * filter/parentId existed predate them in IndexedDB. */
+function normalizeCollection(collection: Collection): Collection {
+  return {
+    ...collection,
+    filter: collection.filter ?? null,
+    parentId: collection.parentId ?? null,
+  };
+}
+
 export const localCollections = {
-  getAll: () => getAll<Collection>(COLLECTIONS_STORE),
+  getAll: () => getAll<Collection>(COLLECTIONS_STORE).then((rows) => rows.map(normalizeCollection)),
   put: (collection: Collection) => put(COLLECTIONS_STORE, collection),
   delete: (id: string) => remove(COLLECTIONS_STORE, id),
   clear: () => clear(COLLECTIONS_STORE),

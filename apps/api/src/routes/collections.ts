@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import type { Collection, CreateCollectionRequest, UpdateCollectionRequest } from "@booklet/shared";
+import type { Collection, CollectionFilter, CreateCollectionRequest, UpdateCollectionRequest } from "@booklet/shared";
+import type { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { toSummary as toArticleSummary } from "./articles.js";
@@ -9,6 +10,8 @@ function toCollection(row: {
   userId: string;
   name: string;
   color: string | null;
+  filter: unknown;
+  parentId: string | null;
   createdAt: Date;
   updatedAt: Date;
   _count?: { articles: number };
@@ -18,12 +21,45 @@ function toCollection(row: {
     userId: row.userId,
     name: row.name,
     color: row.color,
+    filter: (row.filter as CollectionFilter | null) ?? null,
+    parentId: row.parentId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     ...(row._count ? { articleCount: row._count.articles } : {}),
   };
 }
 
+/** Builds the Article where-clause a smart collection's filter describes.
+ * AND semantics only -- see CollectionFilter's own doc comment for why. */
+function filterToArticleWhere(userId: string, filter: CollectionFilter): Prisma.ArticleWhereInput {
+  const where: Prisma.ArticleWhereInput = { userId, deletedAt: null };
+  if (filter.status) where.status = filter.status;
+  if (filter.favorited) where.favorited = true;
+  if (filter.tags && filter.tags.length > 0) where.tags = { hasEvery: filter.tags };
+  if (filter.textQuery) {
+    const contains = { contains: filter.textQuery, mode: "insensitive" as const };
+    where.OR = [{ title: contains }, { excerpt: contains }, { extractedText: contains }];
+  }
+  return where;
+}
+
+/** True if `candidateId` is `ancestorId` itself or a descendant of it --
+ * both would create a cycle if `candidateId` were made ancestorId's
+ * parent. Walks up from candidateId rather than down from ancestorId
+ * since a collection tree is expected to be shallow and this only runs on
+ * the rare re-parent action, not a hot path. */
+async function wouldCreateCycle(userId: string, ancestorId: string, candidateId: string): Promise<boolean> {
+  let cursor: string | null = candidateId;
+  while (cursor) {
+    if (cursor === ancestorId) return true;
+    const row: { parentId: string | null } | null = await prisma.collection.findFirst({
+      where: { id: cursor, userId },
+      select: { parentId: true },
+    });
+    cursor = row?.parentId ?? null;
+  }
+  return false;
+}
 
 export async function registerCollectionRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateCollectionRequest }>(
@@ -41,7 +77,13 @@ export async function registerCollectionRoutes(app: FastifyInstance): Promise<vo
       }
 
       const created = await prisma.collection.create({
-        data: { userId: request.userId!, name, color: request.body?.color ?? null },
+        data: {
+          userId: request.userId!,
+          name,
+          color: request.body?.color ?? null,
+          filter: request.body?.filter ? (request.body.filter as Prisma.InputJsonValue) : undefined,
+          parentId: request.body?.parentId ?? null,
+        },
       });
       return reply.code(201).send(toCollection({ ...created, _count: { articles: 0 } }));
     },
@@ -70,11 +112,27 @@ export async function registerCollectionRoutes(app: FastifyInstance): Promise<vo
         return reply.code(400).send({ error: "invalid_name", message: "Name can't be empty." });
       }
 
+      if (request.body?.parentId !== undefined && request.body.parentId !== null) {
+        if (request.body.parentId === existing.id) {
+          return reply.code(400).send({ error: "invalid_parent", message: "A collection can't contain itself." });
+        }
+        const parent = await prisma.collection.findFirst({
+          where: { id: request.body.parentId, userId: request.userId! },
+        });
+        if (!parent) return reply.code(404).send({ error: "not_found", message: "Parent collection not found." });
+        if (await wouldCreateCycle(request.userId!, existing.id, request.body.parentId)) {
+          return reply
+            .code(400)
+            .send({ error: "invalid_parent", message: "That would nest a collection inside its own descendant." });
+        }
+      }
+
       const updated = await prisma.collection.update({
         where: { id: existing.id },
         data: {
           ...(name ? { name } : {}),
           ...(request.body?.color !== undefined ? { color: request.body.color } : {}),
+          ...(request.body?.parentId !== undefined ? { parentId: request.body.parentId } : {}),
         },
         include: { _count: { select: { articles: true } } },
       });
@@ -104,6 +162,14 @@ export async function registerCollectionRoutes(app: FastifyInstance): Promise<vo
       });
       if (!collection) return reply.code(404).send({ error: "not_found", message: "Collection not found." });
 
+      if (collection.filter) {
+        const articles = await prisma.article.findMany({
+          where: filterToArticleWhere(request.userId!, collection.filter as CollectionFilter),
+          orderBy: [{ savedAt: "desc" }, { id: "desc" }],
+        });
+        return reply.send(articles.map(toArticleSummary));
+      }
+
       const links = await prisma.articleCollection.findMany({
         where: { collectionId: collection.id },
         include: { article: true },
@@ -123,6 +189,11 @@ export async function registerCollectionRoutes(app: FastifyInstance): Promise<vo
       ]);
       if (!collection || !article) {
         return reply.code(404).send({ error: "not_found", message: "Collection or article not found." });
+      }
+      if (collection.filter) {
+        return reply
+          .code(400)
+          .send({ error: "smart_collection", message: "This collection's contents are computed from its filter." });
       }
 
       await prisma.articleCollection.upsert({

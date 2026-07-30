@@ -309,6 +309,19 @@ model Collection {
 
   name  String
   color String?
+  // A saved-search filter (CollectionFilter, shared/types/collection.ts) --
+  // when set, this collection's membership is computed live from Article
+  // at read time instead of stored via ArticleCollection rows below. In
+  // practice never combined with parentId (the UI never offers nesting a
+  // smart collection), not hard-enforced here to keep this migration small.
+  filter Json?
+
+  // Self-referential for nested (folder-style) collections. onDelete:
+  // SetNull rather than Cascade -- deleting a parent shouldn't take its
+  // children with it, they just become top-level.
+  parentId String?
+  parent   Collection?  @relation("CollectionChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  children Collection[] @relation("CollectionChildren")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -316,6 +329,7 @@ model Collection {
   articles ArticleCollection[]
 
   @@unique([userId, name])
+  @@index([userId, parentId])
 }
 
 model ArticleCollection {
