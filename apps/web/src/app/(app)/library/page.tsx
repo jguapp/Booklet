@@ -258,6 +258,7 @@ function LibraryPageInner() {
               onDelete={handleDelete}
               collections={collections}
               authenticated={isAuthenticated}
+              onCollectionCreated={(c) => setCollections((prev) => [...prev, c].sort((a, b) => a.name.localeCompare(b.name)))}
             />
           ))}
         </div>
