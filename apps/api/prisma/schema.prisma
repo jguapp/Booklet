@@ -168,6 +168,15 @@ model Article {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   url      String? // null for PDF/EPUB uploads -- there's no source URL for those
+  // Normalized form of `url` (tracking params stripped, host/trailing-slash
+  // normalized -- see url-canonicalize.ts), used to catch a "different URL,
+  // same article" duplicate (an AMP link, a ?utm_source=... share link)
+  // that exact-string matching on `url` above misses. Not shown to the
+  // user; `url` stays whatever they actually saved. Null for PDF/EPUB
+  // uploads, same as `url`, and for any article saved before this field
+  // existed (not backfilled -- an old row just won't be duplicate-checked
+  // against by this mechanism until it's touched again).
+  canonicalUrl String?
   title    String?
   author   String?
   siteName String?
@@ -221,6 +230,7 @@ model Article {
   @@index([userId, savedAt])
   @@index([userId, favorited])
   @@index([userId, deletedAt])
+  @@index([userId, canonicalUrl])
 }
 
 model Highlight {

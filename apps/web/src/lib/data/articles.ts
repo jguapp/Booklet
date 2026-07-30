@@ -10,6 +10,7 @@ import type {
   ArticleStatus,
   ExtractedContent,
 } from "@booklet/shared";
+import { canonicalizeUrl } from "@booklet/shared";
 import { apiFetch, apiFetchBlob, ApiError } from "@/lib/api/client";
 import { localArticles, localFiles } from "@/lib/local/db";
 
@@ -88,7 +89,10 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     return apiFetch<Article>("/api/articles", { method: "POST", body: JSON.stringify({ url }) });
   }
 
-  const existing = (await localArticles.getAll()).find((a) => a.url === url);
+  const canonicalUrl = canonicalizeUrl(url);
+  const existing = (await localArticles.getAll()).find(
+    (a) => a.url === url || (canonicalUrl && a.canonicalUrl === canonicalUrl),
+  );
   if (existing) {
     throw new ApiError(409, "already_saved", "You've already saved this article.");
   }
@@ -106,6 +110,7 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     id: crypto.randomUUID(),
     userId: "local",
     url,
+    canonicalUrl,
     title: extracted?.title ?? null,
     author: extracted?.author ?? null,
     siteName: extracted?.siteName ?? null,
@@ -160,6 +165,7 @@ export async function saveArticleFromFile(file: File, authenticated: boolean): P
     id,
     userId: "local",
     url: null,
+    canonicalUrl: null,
     title: extracted?.title ?? file.name.replace(/\.(pdf|epub)$/i, ""),
     author: null,
     siteName: null,

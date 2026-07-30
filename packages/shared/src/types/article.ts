@@ -9,6 +9,11 @@ export interface Article {
   userId: string;
 
   url: string | null; // null for PDF/EPUB uploads -- there's no source URL for those
+  /** Normalized form of `url` (see url-canonicalize.ts) -- used to catch a
+   * "different URL, same article" duplicate (tracking-param variant, AMP
+   * link) that exact matching on `url` misses. Null for PDF/EPUB uploads
+   * and for articles saved before this field existed. */
+  canonicalUrl: string | null;
   title: string | null;
   author: string | null;
   siteName: string | null;
