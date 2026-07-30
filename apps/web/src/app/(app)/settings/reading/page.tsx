@@ -25,7 +25,7 @@ const TTS_RATES = [0.75, 1, 1.25, 1.5, 2];
 
 export default function ReadingSettingsPage() {
   const { theme, setTheme } = useTheme();
-  const { reader, setReaderSize, setTtsRate, setTtsVoice, setShowProgressBar } = useDevicePrefs();
+  const { reader, setReaderSize, setTtsRate, setTtsVoice, setShowProgressBar, setPdfReadingMode } = useDevicePrefs();
 
   return (
     <div>
@@ -102,6 +102,37 @@ export default function ReadingSettingsPage() {
               )}
             >
               On
+            </button>
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            PDF reading mode
+          </h3>
+          <p className="font-sans text-xs text-ink-faint">
+            Page-turn (one page at a time) or continuous scroll -- this device only, not synced across devices.
+          </p>
+          <div className="flex gap-1 rounded-sm bg-surface-2 p-1" role="group" aria-label="PDF reading mode">
+            <button
+              type="button"
+              onClick={() => setPdfReadingMode("paginate")}
+              className={cn(
+                "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                reader.pdfReadingMode === "paginate" ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
+              )}
+            >
+              Page-turn
+            </button>
+            <button
+              type="button"
+              onClick={() => setPdfReadingMode("scroll")}
+              className={cn(
+                "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
+                reader.pdfReadingMode === "scroll" ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
+              )}
+            >
+              Continuous scroll
             </button>
           </div>
         </section>
