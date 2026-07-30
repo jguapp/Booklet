@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
 import { loadReaderPrefs, saveReaderPrefs, type ReaderPrefs } from "@/lib/reader/device-prefs";
+import { NATIVE_VOICE_ID } from "@/lib/reader/kokoro-tts";
 import { loadHoardingPrefs, saveHoardingPrefs, type HoardingPrefs } from "./hoarding-prefs";
 import { loadShowReadingStats, saveShowReadingStats } from "./stats-prefs";
 import { loadAutoDeletePrefs, saveAutoDeletePrefs, type AutoDeletePrefs } from "./auto-delete-prefs";
@@ -34,6 +35,7 @@ interface DevicePrefsState {
 interface DevicePrefsContextValue extends DevicePrefsState {
   setReaderSize: (size: ReaderSize) => void;
   setTtsRate: (rate: number) => void;
+  setTtsVoice: (voice: string) => void;
   setHoarding: (prefs: HoardingPrefs) => void;
   setShowReadingStats: (enabled: boolean) => void;
   setAutoDelete: (prefs: AutoDeletePrefs) => void;
@@ -48,7 +50,7 @@ const DevicePrefsContext = createContext<DevicePrefsContextValue | null>(null);
 // split (see the effect below). No hydration mismatch: nothing here
 // renders differently server- vs client-side on first paint, only after.
 const SERVER_DEFAULTS: DevicePrefsState = {
-  reader: { size: "md", ttsRate: 1 },
+  reader: { size: "md", ttsRate: 1, ttsVoice: NATIVE_VOICE_ID },
   hoarding: { enabled: false, maxUnread: 25 },
   showReadingStats: false,
   autoDelete: { enabled: false, days: 90 },
@@ -89,6 +91,14 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
     });
   }, []);
 
+  const setTtsVoice = useCallback((voice: string) => {
+    setState((prev) => {
+      const next = { ...prev.reader, ttsVoice: voice };
+      saveReaderPrefs(next);
+      return { ...prev, reader: next };
+    });
+  }, []);
+
   const setHoarding = useCallback((prefs: HoardingPrefs) => {
     saveHoardingPrefs(prefs);
     setState((prev) => ({ ...prev, hoarding: prefs }));
@@ -120,6 +130,7 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
         ...state,
         setReaderSize,
         setTtsRate,
+        setTtsVoice,
         setHoarding,
         setShowReadingStats,
         setAutoDelete,
