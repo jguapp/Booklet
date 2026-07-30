@@ -17,7 +17,7 @@ import { createHighlight, deleteHighlight, deleteNote, loadHighlights, saveNote 
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useToast } from "@/lib/toast/toast-provider";
 import { ApiError } from "@/lib/api/client";
-import { formatReadingTime } from "@/lib/format";
+import { formatMinutesLeft, formatReadingTime } from "@/lib/format";
 import { textToParagraphHtml } from "@/lib/reader/text-to-html";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { ReaderToolbar } from "./reader-toolbar";
@@ -397,7 +397,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
             label
           )}
           {article.readingTimeEstimate ? ` · ${formatReadingTime(article.readingTimeEstimate)}` : ""}
-          {isTextRenderable && remainingMinutes !== null ? ` · ${remainingMinutes} min left` : ""}
+          {isTextRenderable && remainingMinutes !== null ? ` · ${formatMinutesLeft(remainingMinutes)}` : ""}
         </p>
 
         <div className="mb-5 flex items-center justify-between gap-4">
