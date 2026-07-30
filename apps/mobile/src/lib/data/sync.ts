@@ -42,11 +42,13 @@ export async function migrateLocalDataToAccount(): Promise<ImportResponse> {
       extractedText: a.extractedText,
       readingTimeEstimate: a.readingTimeEstimate,
       progressFraction: a.progressFraction,
+      activeReadingSeconds: a.activeReadingSeconds,
       tags: a.tags,
       status: a.status,
       savedAt: a.savedAt,
       readAt: a.readAt,
       archivedAt: a.archivedAt,
+      favorited: a.favorited,
     })),
     highlights: highlights.map((h) => ({
       localArticleId: h.articleId,
