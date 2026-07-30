@@ -11,6 +11,7 @@ import {
   IconPlus,
   IconResurface,
   IconRss,
+  IconSearch,
   IconSettings,
   IconSidebar,
   IconStar,
@@ -25,6 +26,7 @@ import { useOnCollectionsChanged } from "@/lib/data/collection-events";
 import { loadArticles, trashArticleById } from "@/lib/data/articles";
 import { deleteHighlight } from "@/lib/data/highlights";
 import { CollectionTree } from "@/components/library/collection-tree";
+import { CommandPalette } from "@/components/command-palette/command-palette";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { applyNavOrder } from "@/lib/data/nav-order-prefs";
 import { ApiError } from "@/lib/api/client";
@@ -70,6 +72,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const { showReadingStats, autoDelete, navOrder, setNavOrder, sidebarCompact, setSidebarCompact } = useDevicePrefs();
   const [sidebarHovered, setSidebarHovered] = useState(false);
   // In compact mode the rail itself stays narrow (so the layout never
@@ -110,6 +113,21 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     refreshCollections();
   }, [refreshCollections]);
   useOnCollectionsChanged(refreshCollections);
+
+  // Cmd+K (Mac) / Ctrl+K (everywhere else) -- global regardless of which
+  // page is mounted, since the whole point is not needing to already be on
+  // the right page. preventDefault stops the browser's own "focus address
+  // bar" binding for Ctrl/Cmd+K in some browsers from firing alongside it.
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
 
   async function handleReparentCollection(draggedId: string, targetId: string | null) {
     try {
@@ -262,6 +280,26 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           </div>
 
           <nav className="flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-3">
+            <button
+              type="button"
+              title={sidebarExpanded ? undefined : "Search (Ctrl/Cmd+K)"}
+              onClick={() => setPaletteOpen(true)}
+              className={cn(
+                "flex items-center gap-2.5 rounded-sm px-3 py-2 font-sans text-sm font-medium text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+                !sidebarExpanded && "justify-center px-0",
+              )}
+            >
+              <IconSearch className="h-[18px] w-[18px] shrink-0" />
+              {sidebarExpanded && (
+                <>
+                  <span className="flex-1 text-left">Search</span>
+                  <span className="shrink-0 rounded border border-border px-1 py-0.5 font-sans text-[10px] text-ink-faint">
+                    ⌘K
+                  </span>
+                </>
+              )}
+            </button>
+
             {navItems.map(({ href, label, Icon }) => {
               const active = (pathname === href || pathname?.startsWith(`${href}/`)) && !activeCollectionId;
               const isTrash = href === "/trash";
@@ -397,6 +435,10 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             setPendingHighlightDrop(null);
           }}
         />
+      )}
+
+      {paletteOpen && (
+        <CommandPalette navItems={navItems} collections={collections} onClose={() => setPaletteOpen(false)} />
       )}
     </div>
   );

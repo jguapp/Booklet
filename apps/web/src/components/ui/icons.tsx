@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-type IconProps = SVGProps<SVGSVGElement>;
+export type IconProps = SVGProps<SVGSVGElement>;
 
 function base(props: IconProps) {
   return { viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, ...props };
