@@ -33,33 +33,33 @@ test("tag an article, filter the library by tag, and see it persist", async ({ p
   await page.reload();
   await expect(page.locator('button[title^="Remove"]')).toHaveText(["reference×"], { timeout: 10_000 });
 
-  // The library defaults to the "Reading" tab; the tagged article is
-  // UNREAD, so switch to "All" to see it.
+  // The library defaults to the "Unread" tab, and the tagged article is
+  // UNREAD, so it's visible with no tab switch needed.
   await page.goto("/library");
-  await page.getByRole("button", { name: "All", exact: true }).click();
   await expect(page.getByRole("button", { name: "reference" })).toBeVisible();
   await page.getByRole("button", { name: "reference" }).click();
   await expect(page.getByText("Tag (metadata)")).toBeVisible();
 });
 
-test("library defaults to the Reading tab, hiding an unread article until it's marked Reading", async ({ page }) => {
+test("library defaults to the Unread tab, showing a fresh save immediately", async ({ page }) => {
   await page.goto("/library");
   await saveUrl(page, "https://en.wikipedia.org/wiki/Readability");
-  // handleSaved switches to "Unread" so the fresh save doesn't appear to vanish.
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
 
-  // A fresh navigation reverts to the real default -- the just-saved
-  // (UNREAD) article shouldn't be there.
+  // A fresh navigation confirms this isn't just leftover client state --
+  // the default tab itself shows the just-saved (UNREAD) article.
   await page.goto("/library");
-  await expect(page.getByRole("button", { name: "Reading", exact: true })).toHaveClass(/bg-surface\b/);
-  await expect(page.locator("a[href^='/reader/']")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Unread", exact: true })).toHaveClass(/bg-surface\b/);
+  await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
 
-  await page.getByRole("button", { name: "All", exact: true }).click();
+  // Marking it Reading moves it out of the default Unread view.
   await page.locator("a[href^='/reader/']").first().click();
   await page.waitForURL(/\/reader\//);
   await page.getByRole("button", { name: "Reading", exact: true }).click(); // reader-view.tsx's own status tabs
 
   await page.goto("/library");
+  await expect(page.locator("a[href^='/reader/']")).toHaveCount(0);
+  await page.getByRole("button", { name: "All", exact: true }).click();
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
 });
 

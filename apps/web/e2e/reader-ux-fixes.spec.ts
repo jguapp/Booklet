@@ -67,7 +67,7 @@ test("reaching the end of an article automatically archives it", async ({ page }
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await page.waitForTimeout(300);
 
-  // The library defaults to the "Reading" tab -- "Archived" won't show
+  // The library defaults to the "Unread" tab -- "Archived" won't show
   // there by design, so switch to "All" to see the now-archived card.
   await page.goto("/library");
   await page.getByRole("button", { name: "All", exact: true }).click();

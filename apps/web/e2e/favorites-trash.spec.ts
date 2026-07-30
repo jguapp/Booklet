@@ -41,13 +41,11 @@ test("deleting an article moves it to Trash, where it can be restored or deleted
   await page.goto("/trash");
   await expect(page.getByText(title!.trim())).toBeVisible();
 
-  // Restore brings it back to the library and out of Trash. The library
-  // defaults to the "Reading" tab; the restored article is UNREAD, so
-  // switch to "All" to see it.
+  // Restore brings it back to the library and out of Trash. The restored
+  // article is UNREAD, which is the library's default tab.
   await page.getByRole("button", { name: "Restore" }).click();
   await expect(page.getByText("Trash is empty.")).toBeVisible();
   await page.goto("/library");
-  await page.getByRole("button", { name: "All", exact: true }).click();
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
 
   // Delete forever needs a real confirm, and is actually permanent.
@@ -57,7 +55,6 @@ test("deleting an article moves it to Trash, where it can be restored or deleted
   await page.getByRole("alertdialog").getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByText("Trash is empty.")).toBeVisible();
   await page.goto("/library");
-  await page.getByRole("button", { name: "All", exact: true }).click();
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(0);
 });
 

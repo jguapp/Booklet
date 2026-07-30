@@ -23,10 +23,8 @@ test("importing a Pocket CSV export saves each URL for real", async ({ page }) =
 
   await expect(page.getByText(/Imported 1, skipped 0/i)).toBeVisible({ timeout: 15_000 });
 
-  // The library defaults to the "Reading" tab; an imported article is
-  // UNREAD, so switch to "All" to see it.
+  // An imported article is UNREAD, which is the library's default tab.
   await page.goto("/library");
-  await page.getByRole("button", { name: "All", exact: true }).click();
   await expect(page.getByText("Readability", { exact: true }).first()).toBeVisible();
 });
 
