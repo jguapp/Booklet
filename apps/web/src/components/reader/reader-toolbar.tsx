@@ -36,19 +36,25 @@ export function ReaderToolbar({
   return (
     <div className="sticky top-0 z-40 border-b border-border bg-surface/95 backdrop-blur">
       <div className="mx-auto flex max-w-[680px] items-center justify-between gap-4 px-6 py-3">
-        <div className="flex items-center gap-3 font-sans text-xs text-ink-muted">
+        <div className="flex min-w-0 items-center gap-3 font-sans text-ink-muted">
           <Link
             href="/library"
             title="Back to library"
-            className="flex h-6 w-6 items-center justify-center rounded-full transition-colors hover:bg-surface-2 hover:text-ink"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-2 hover:text-ink"
           >
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M10 3 5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </Link>
-          <span className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-            {siteName ?? "Reader"}
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+            {/* A real source label, not incidental chrome -- and for an
+                uploaded PDF/EPUB with no site metadata, this can be a long
+                original filename, so it truncates instead of wrapping/
+                overflowing, with the full name still available on hover. */}
+            <span className="truncate text-sm font-medium text-ink" title={siteName ?? "Reader"}>
+              {siteName ?? "Reader"}
+            </span>
           </span>
         </div>
 
