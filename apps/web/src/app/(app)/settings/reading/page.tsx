@@ -3,6 +3,7 @@
 import { useTheme, type Theme } from "@/lib/theme/theme-provider";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
+import { KOKORO_VOICES, NATIVE_VOICE_ID } from "@/lib/reader/kokoro-tts";
 import { cn } from "@/lib/cn";
 
 const THEMES: { value: Theme; label: string }[] = [
@@ -23,7 +24,7 @@ const TTS_RATES = [0.75, 1, 1.25, 1.5, 2];
 
 export default function ReadingSettingsPage() {
   const { theme, setTheme } = useTheme();
-  const { reader, setReaderSize, setTtsRate } = useDevicePrefs();
+  const { reader, setReaderSize, setTtsRate, setTtsVoice } = useDevicePrefs();
 
   return (
     <div>
@@ -70,6 +71,29 @@ export default function ReadingSettingsPage() {
               </button>
             ))}
           </div>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Read-aloud voice
+          </h3>
+          <p className="font-sans text-xs text-ink-faint">
+            Kokoro voices are open-source and run entirely on this device (no account, no per-use cost) --
+            the first play downloads the voice model once (about 90MB), then it&rsquo;s cached for next time.
+          </p>
+          <select
+            aria-label="Read-aloud voice"
+            value={reader.ttsVoice}
+            onChange={(e) => setTtsVoice(e.target.value)}
+            className="w-full max-w-xs rounded-sm border border-border bg-surface px-3 py-2 font-sans text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <option value={NATIVE_VOICE_ID}>System voice (this device&rsquo;s own, instant)</option>
+            {KOKORO_VOICES.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
         </section>
 
         <section className="flex flex-col gap-2">
