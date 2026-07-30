@@ -10,6 +10,7 @@ import type {
 } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
+import { fireWebhookEvent } from "../services/webhook-service.js";
 
 const COLORS: HighlightColor[] = ["YELLOW", "GREEN", "BLUE", "PINK", "ORANGE"];
 const FEEDBACKS: ResurfaceFeedback[] = ["REMEMBERED", "FORGOT"];
@@ -97,7 +98,13 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
         include: { annotation: true },
       });
 
-      return reply.code(201).send(toHighlight(created));
+      const body = toHighlight(created);
+      fireWebhookEvent(request.userId!, "highlight.created", {
+        id: body.id,
+        articleId: body.articleId,
+        selectedText: body.selectedText,
+      }).catch(() => undefined);
+      return reply.code(201).send(body);
     },
   );
 

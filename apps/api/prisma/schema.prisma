@@ -78,9 +78,72 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   oauthAccounts           OAuthAccount[]
   feeds                   Feed[]
+  apiTokens               ApiToken[]
+  webhooks                Webhook[]
 
   resurfaceFrequency  ResurfaceFrequency @default(DAILY)
   highlightsPerDigest Int                @default(5)
+}
+
+// Personal access token for /api/v1 -- long-lived and revocable, unlike
+// the short-lived JWT access tokens the web/extension clients use (see
+// lib/auth/tokens.ts). Only tokenHash is ever stored (same
+// generateOpaqueToken/hashOpaqueToken pattern as refresh tokens and
+// password-reset links) -- the raw token is shown exactly once, at
+// creation, and can never be displayed again.
+model ApiToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String // user-chosen label, e.g. "Zapier"
+  tokenHash String   @unique
+  scopes    String[] @default(["read", "write"])
+
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+
+  @@index([userId])
+}
+
+// A registered endpoint to notify on article/highlight events (see
+// services/webhook-service.ts for delivery). `secret` signs each
+// delivery's payload (HMAC-SHA256) so the receiver can verify it actually
+// came from Booklet, same principle as GitHub/Stripe webhooks.
+model Webhook {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  url    String
+  events String[]
+  secret String
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  deliveries WebhookDelivery[]
+
+  @@index([userId])
+}
+
+// Delivery log -- lets a user see whether their webhook is actually
+// working (last 20 or so) rather than it silently failing forever with no
+// visibility, which is worse than not having the feature at all.
+model WebhookDelivery {
+  id        String  @id @default(cuid())
+  webhookId String
+  webhook   Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  event      String
+  statusCode Int?
+  success    Boolean
+  error      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([webhookId, createdAt])
 }
 
 // One row per (provider, external account) a user has signed in with.

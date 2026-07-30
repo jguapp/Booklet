@@ -8,6 +8,7 @@ export * from "./types/auth";
 export * from "./types/sync";
 export * from "./types/collection";
 export * from "./types/feed";
+export * from "./types/developer";
 export * from "./highlight-anchor";
 export * from "./resurface";
 export * from "./digest-email";
