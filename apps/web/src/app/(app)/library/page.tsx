@@ -263,6 +263,13 @@ function LibraryPageInner() {
         </div>
       )}
 
+      <div
+        className="pointer-events-none fixed bottom-4 right-4 z-30 rounded-full border border-border bg-surface/95 px-3 py-1 font-sans text-xs text-ink-faint shadow-sm backdrop-blur"
+        aria-live="polite"
+      >
+        {visible.length} article{visible.length === 1 ? "" : "s"}
+      </div>
+
       {isSearching && searchResults && searchResults.highlights.length > 0 && (
         <div className="mt-10">
           <h2 className="mb-3 font-serif text-lg font-semibold text-ink">Highlights</h2>
