@@ -24,7 +24,7 @@ async function renderLoginForm() {
   const emailInput = el("input", { type: "email", placeholder: "you@example.com" });
   const passwordInput = el("input", { type: "password", placeholder: "••••••••" });
   const status = el("p", { class: "status" });
-  const submitButton = el("button", { type: "button" }, ["Log in"]);
+  const submitButton = el("button", { type: "button", class: "submit" }, ["Log in"]);
 
   submitButton.addEventListener("click", async () => {
     submitButton.setAttribute("disabled", "true");
@@ -47,7 +47,7 @@ async function renderLoginForm() {
     passwordInput,
     submitButton,
     status,
-    el("p", { class: "status" }, [
+    el("p", { class: "status footnote" }, [
       "Booklet accounts are only for syncing across devices -- log in here to save pages straight to your library.",
     ]),
   );
@@ -68,12 +68,15 @@ async function renderSaveView() {
     await renderLoginForm();
   });
 
-  const accountRow = el("div", { class: "account-row" }, [session.email, logoutButton]);
+  const accountLabel = el("span", { class: "account-label" }, ["Signed in as"]);
+  const accountEmail = el("span", { class: "account-email" }, [session.email]);
+  const accountInfo = el("div", { class: "account-info" }, [accountLabel, accountEmail]);
+  const accountRow = el("div", { class: "account-row" }, [accountInfo, logoutButton]);
   // Stack account info above the logout button rather than side-by-side --
-  // simpler than fighting flexbox in a 280px popup.
+  // simpler than fighting flexbox in a 300px popup.
   accountRow.style.flexDirection = "column";
   accountRow.style.alignItems = "stretch";
-  accountRow.style.gap = "6px";
+  accountRow.style.gap = "8px";
 
   const tab = await getActiveTab();
   const status = el("p", { class: "status" });
