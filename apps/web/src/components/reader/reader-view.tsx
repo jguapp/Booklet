@@ -21,6 +21,7 @@ import { formatMinutesLeft, formatReadingTime } from "@/lib/format";
 import { textToParagraphHtml } from "@/lib/reader/text-to-html";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { ReaderToolbar } from "./reader-toolbar";
+import { ReaderProgressBar } from "./reader-progress-bar";
 import { ArticleContent } from "./article-content";
 import { PdfReader } from "./pdf-reader";
 import { EpubReader } from "./epub-reader";
@@ -373,7 +374,13 @@ export function ReaderView({ articleId }: { articleId: string }) {
         onSizeChange={setReaderSize}
         progress={progress}
       />
-      <main className={cn("mx-auto px-6 py-12", usesPdfReader || usesEpubReader ? "max-w-[840px]" : "max-w-[680px]")}>
+      <main
+        className={cn(
+          "mx-auto px-6 py-12",
+          usesPdfReader || usesEpubReader ? "max-w-[840px]" : "max-w-[680px]",
+          reader.showProgressBar && "pb-20",
+        )}
+      >
         <div className="mb-4 flex items-center gap-2 text-ink-faint">
           <SourceIcon sourceType={article.sourceType} className="h-4 w-4" />
           <span className="font-sans text-xs uppercase tracking-wide">{article.sourceType}</span>
@@ -567,6 +574,8 @@ export function ReaderView({ articleId }: { articleId: string }) {
           </div>
         )}
       </main>
+
+      {reader.showProgressBar && <ReaderProgressBar progress={progress} remainingMinutes={remainingMinutes} />}
     </div>
   );
 }

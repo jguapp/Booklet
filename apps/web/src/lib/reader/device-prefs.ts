@@ -22,6 +22,10 @@ export interface ReaderPrefs {
   /** Which colors show up in the highlight picker, and in what order --
    * see packages/shared highlight-colors.ts. */
   highlightBarColors: string[];
+  /** A persistent, Kindle-style bottom bar showing % complete and time
+   * left, visible regardless of scroll/page position -- optional since
+   * not everyone wants a constant reminder of how much is left. */
+  showProgressBar: boolean;
 }
 
 const DEFAULT_PREFS: ReaderPrefs = {
@@ -29,6 +33,7 @@ const DEFAULT_PREFS: ReaderPrefs = {
   ttsRate: 1,
   ttsVoice: NATIVE_VOICE_ID,
   highlightBarColors: DEFAULT_HIGHLIGHT_BAR_COLORS,
+  showProgressBar: true,
 };
 
 export function loadReaderPrefs(): ReaderPrefs {
@@ -47,6 +52,7 @@ export function loadReaderPrefs(): ReaderPrefs {
         ? parsed.ttsVoice
         : DEFAULT_PREFS.ttsVoice,
       highlightBarColors: sanitizeHighlightBarColors(parsed.highlightBarColors),
+      showProgressBar: typeof parsed.showProgressBar === "boolean" ? parsed.showProgressBar : DEFAULT_PREFS.showProgressBar,
     };
   } catch {
     return DEFAULT_PREFS;

@@ -38,6 +38,7 @@ interface DevicePrefsContextValue extends DevicePrefsState {
   setTtsRate: (rate: number) => void;
   setTtsVoice: (voice: string) => void;
   setHighlightBarColors: (colors: string[]) => void;
+  setShowProgressBar: (enabled: boolean) => void;
   setHoarding: (prefs: HoardingPrefs) => void;
   setShowReadingStats: (enabled: boolean) => void;
   setAutoDelete: (prefs: AutoDeletePrefs) => void;
@@ -52,7 +53,13 @@ const DevicePrefsContext = createContext<DevicePrefsContextValue | null>(null);
 // split (see the effect below). No hydration mismatch: nothing here
 // renders differently server- vs client-side on first paint, only after.
 const SERVER_DEFAULTS: DevicePrefsState = {
-  reader: { size: "md", ttsRate: 1, ttsVoice: NATIVE_VOICE_ID, highlightBarColors: DEFAULT_HIGHLIGHT_BAR_COLORS },
+  reader: {
+    size: "md",
+    ttsRate: 1,
+    ttsVoice: NATIVE_VOICE_ID,
+    highlightBarColors: DEFAULT_HIGHLIGHT_BAR_COLORS,
+    showProgressBar: true,
+  },
   hoarding: { enabled: false, maxUnread: 25 },
   showReadingStats: false,
   autoDelete: { enabled: false, days: 90 },
@@ -109,6 +116,14 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
     });
   }, []);
 
+  const setShowProgressBar = useCallback((enabled: boolean) => {
+    setState((prev) => {
+      const next = { ...prev.reader, showProgressBar: enabled };
+      saveReaderPrefs(next);
+      return { ...prev, reader: next };
+    });
+  }, []);
+
   const setHoarding = useCallback((prefs: HoardingPrefs) => {
     saveHoardingPrefs(prefs);
     setState((prev) => ({ ...prev, hoarding: prefs }));
@@ -142,6 +157,7 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
         setTtsRate,
         setTtsVoice,
         setHighlightBarColors,
+        setShowProgressBar,
         setHoarding,
         setShowReadingStats,
         setAutoDelete,
