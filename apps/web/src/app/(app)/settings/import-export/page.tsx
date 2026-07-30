@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth/auth-provider";
 import {
   exportAsAnkiText,
   exportAsMarkdownZip,
+  importKindleClippings,
   importUrls,
   parseBookmarksHtml,
   parseImportCsv,
@@ -21,13 +22,13 @@ import { IconGlobe } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 
 /**
- * Its own page (not a Settings subsection) so it can actually show what
- * each integration is/does -- a flat list of buttons in Settings had no
- * room for that. Pocket and Instapaper (and any browser's bookmark
- * export) all import through the same generic URL-list pipeline (see
- * lib/data/export-import.ts) since what they actually contain is always
- * "a URL, maybe a title" -- only the file format parsing differs. The
- * Markdown export is the one deliverable that already covers Obsidian,
+ * Lives under Settings rather than as its own top-level nav item -- it's a
+ * one-time/occasional action, not something reached often enough to earn a
+ * permanent slot in the main sidebar. Pocket and Instapaper (and any
+ * browser's bookmark export) all import through the same generic URL-list
+ * pipeline (see lib/data/export-import.ts) since what they actually contain
+ * is always "a URL, maybe a title" -- only the file format parsing differs.
+ * The Markdown export is the one deliverable that already covers Obsidian,
  * Notion, and Logseq (all three accept a folder/zip of plain Markdown
  * files), so there's one working export action presented against three
  * destinations.
@@ -47,6 +48,7 @@ const BADGE_CLASS: Record<string, string> = {
   logseq: "bg-[#85C8C8]/20 text-[#4A9999]",
   roam: "bg-ink/10 text-ink",
   anki: "bg-[#2496DE]/12 text-[#2496DE]",
+  kindle: "bg-[#FF9900]/12 text-[#FF9900]",
 };
 
 function ServiceBadge({ id, children }: { id: string; children: React.ReactNode }) {
@@ -100,6 +102,7 @@ export default function ImportExportPage() {
   const { status } = useAuth();
   const csvInputRef = useRef<HTMLInputElement>(null);
   const bookmarksInputRef = useRef<HTMLInputElement>(null);
+  const kindleInputRef = useRef<HTMLInputElement>(null);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -133,6 +136,27 @@ export default function ImportExportPage() {
     await runImport(parseBookmarksHtml(await file.text()));
   }
 
+  async function handleKindleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const text = await file.text();
+    setImporting(true);
+    setImportStatus("Importing…");
+    try {
+      const result = await importKindleClippings(text, status === "authenticated", (done, total) =>
+        setImportStatus(`Importing highlight ${done} / ${total}…`),
+      );
+      setImportStatus(
+        `Imported ${result.highlightsImported} highlight${result.highlightsImported === 1 ? "" : "s"} from ${result.booksImported} book${result.booksImported === 1 ? "" : "s"}.`,
+      );
+    } catch {
+      setImportStatus("Couldn't read that file -- is it a real My Clippings.txt export?");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function handleExport() {
     setExporting(true);
     try {
@@ -152,9 +176,9 @@ export default function ImportExportPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-8 py-10">
-      <h1 className="mb-1 font-serif text-2xl font-semibold text-ink">Import &amp; Export</h1>
-      <p className="mb-10 font-sans text-sm text-ink-muted">
+    <div>
+      <h2 className="mb-1 font-serif text-lg font-semibold text-ink">Import &amp; Export</h2>
+      <p className="mb-8 font-sans text-sm text-ink-muted">
         Bring your existing library in, or take everything you&apos;ve saved and highlighted back out.
       </p>
 
@@ -166,9 +190,10 @@ export default function ImportExportPage() {
         className="hidden"
         onChange={handleBookmarksFile}
       />
+      <input ref={kindleInputRef} type="file" accept=".txt,text/plain" className="hidden" onChange={handleKindleFile} />
 
       <section className="mb-10">
-        <h2 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Import</h2>
+        <h3 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Import</h3>
         <div className="flex flex-col gap-3">
           <ImportRowCard
             id="pocket"
@@ -200,6 +225,16 @@ export default function ImportExportPage() {
             onClick={() => bookmarksInputRef.current?.click()}
           />
 
+          <ImportRowCard
+            id="kindle"
+            icon={<span className="font-serif text-base font-semibold">K</span>}
+            name="Kindle highlights"
+            description="Connect your Kindle over USB and copy documents/My Clippings.txt off it, then choose that file here. One article per book, with every highlight and note attached."
+            buttonLabel="Choose file"
+            disabled={importing}
+            onClick={() => kindleInputRef.current?.click()}
+          />
+
           <div className="flex items-center gap-4 rounded-md border border-dashed border-border px-4 py-3.5 opacity-70">
             <ServiceBadge id="readwise">
               <span className="font-serif text-base font-semibold">R</span>
@@ -227,7 +262,7 @@ export default function ImportExportPage() {
       </section>
 
       <section>
-        <h2 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Export</h2>
+        <h3 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Export</h3>
         <div className="flex flex-col gap-3">
           <ImportRowCard
             id="obsidian"

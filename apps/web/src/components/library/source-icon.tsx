@@ -6,6 +6,10 @@ const ICON_BY_SOURCE: Record<SourceType, typeof IconGlobe> = {
   HTML: IconGlobe,
   PDF: IconFileText,
   EPUB: IconBook,
+  // Kindle-imported book (no URL, no uploaded file) -- reuses the book
+  // icon already used for EPUB, since both represent "a book," just
+  // sourced differently.
+  BOOK: IconBook,
 };
 
 export function SourceIcon({ sourceType, className }: { sourceType: SourceType; className?: string }) {

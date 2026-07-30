@@ -1,7 +1,7 @@
 import type { Highlight } from "./highlight";
 
 export type ArticleStatus = "UNREAD" | "READING" | "ARCHIVED";
-export type SourceType = "HTML" | "PDF" | "EPUB";
+export type SourceType = "HTML" | "PDF" | "EPUB" | "BOOK";
 export type ExtractionStatus = "PENDING" | "SUCCESS" | "FAILED";
 
 export interface Article {

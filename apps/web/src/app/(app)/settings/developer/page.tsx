@@ -62,7 +62,7 @@ function TokenSection() {
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h2 className="font-serif text-lg font-semibold text-ink">Personal access tokens</h2>
+        <h3 className="font-serif text-base font-semibold text-ink">Personal access tokens</h3>
         <p className="mt-1 font-sans text-sm text-ink-muted">
           For scripts and automations (Zapier, a cron job, your own tooling) that need to reach{" "}
           <code className="rounded bg-surface-2 px-1 py-0.5 text-xs">/api/v1</code> from outside the browser.
@@ -207,7 +207,7 @@ function WebhookSection() {
   return (
     <section className="flex flex-col gap-4 border-t border-border pt-8">
       <div>
-        <h2 className="font-serif text-lg font-semibold text-ink">Webhooks</h2>
+        <h3 className="font-serif text-base font-semibold text-ink">Webhooks</h3>
         <p className="mt-1 font-sans text-sm text-ink-muted">
           Get notified the moment something happens -- each delivery is signed (
           <code className="rounded bg-surface-2 px-1 py-0.5 text-xs">X-Booklet-Signature</code>, HMAC-SHA256) so you
@@ -285,8 +285,8 @@ export default function DeveloperPage() {
 
   if (status !== "authenticated") {
     return (
-      <div className="mx-auto max-w-2xl px-8 py-10">
-        <h1 className="mb-3 font-serif text-2xl font-semibold text-ink">Developer</h1>
+      <div>
+        <h2 className="mb-3 font-serif text-lg font-semibold text-ink">Developer</h2>
         <p className="mb-4 font-sans text-sm text-ink-muted">
           Personal access tokens and webhooks sync your account across systems, so they need an account to attach
           to -- sign in or create one to use them.
@@ -299,8 +299,8 @@ export default function DeveloperPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-8 py-10">
-      <h1 className="mb-8 font-serif text-2xl font-semibold text-ink">Developer</h1>
+    <div>
+      <h2 className="mb-6 font-serif text-lg font-semibold text-ink">Developer</h2>
       <div className="flex flex-col gap-10">
         <TokenSection />
         <WebhookSection />

@@ -6,11 +6,18 @@
  * without a real provider account. Swapping providers means replacing the
  * body of `send`, not touching any of its callers.
  */
+export interface EmailAttachment {
+  filename: string;
+  /** Base64-encoded file content -- Resend's attachment format. */
+  content: string;
+}
+
 export interface EmailMessage {
   to: string;
   subject: string;
   text: string;
   html?: string;
+  attachments?: EmailAttachment[];
 }
 
 const RESEND_API_URL = "https://api.resend.com/emails";
@@ -29,6 +36,7 @@ async function sendViaResend(message: EmailMessage, apiKey: string): Promise<voi
       subject: message.subject,
       text: message.text,
       ...(message.html ? { html: message.html } : {}),
+      ...(message.attachments?.length ? { attachments: message.attachments } : {}),
     }),
   });
 
@@ -39,9 +47,12 @@ async function sendViaResend(message: EmailMessage, apiKey: string): Promise<voi
 }
 
 function sendViaConsole(message: EmailMessage): void {
+  const attachmentNote = message.attachments?.length
+    ? `\n  attachments: ${message.attachments.map((a) => a.filename).join(", ")}`
+    : "";
   // eslint-disable-next-line no-console
   console.log(
-    `[email stub] No RESEND_API_KEY set -- logging instead of sending.\n  to: ${message.to}\n  subject: ${message.subject}\n  body: ${message.text}`,
+    `[email stub] No RESEND_API_KEY set -- logging instead of sending.\n  to: ${message.to}\n  subject: ${message.subject}\n  body: ${message.text}${attachmentNote}`,
   );
 }
 

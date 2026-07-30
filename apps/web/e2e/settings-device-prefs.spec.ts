@@ -9,7 +9,7 @@ import { waitForSaveModalToClose } from "./helpers";
  */
 
 test("changing the default text size in Settings applies it to a newly-opened article", async ({ page }) => {
-  await page.goto("/settings");
+  await page.goto("/settings/reading");
   await page.getByRole("group", { name: "Default text size" }).getByRole("button", { name: "Large", exact: true }).click();
 
   await page.goto("/library");
@@ -26,7 +26,7 @@ test("changing the default text size in Settings applies it to a newly-opened ar
   await expect(content).toHaveCSS("font-size", "21px"); // SIZE_STYLE.lg, see article-content.tsx
 
   // Persists across a reload of Settings itself, not just applied once.
-  await page.goto("/settings");
+  await page.goto("/settings/reading");
   await expect(
     page.getByRole("group", { name: "Default text size" }).getByRole("button", { name: "Large", exact: true }),
   ).toHaveClass(/bg-surface\b/);

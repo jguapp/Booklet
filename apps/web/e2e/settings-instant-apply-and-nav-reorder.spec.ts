@@ -37,19 +37,21 @@ test("toggling Reading stats in Settings shows/hides the Stats nav item instantl
   await page.goto("/library");
   await expect(page.getByRole("link", { name: "Stats" })).toHaveCount(0);
 
-  await page.locator("nav a[href='/settings']").click();
+  await page.locator("nav[aria-label='Main'] a[href='/settings']").click();
   await expect(page).toHaveURL(/\/settings/);
+  await page.locator('nav[aria-label="Settings"] a[href="/settings/library"]').click();
   await page.getByRole("group", { name: "Reading stats" }).getByRole("button", { name: "On", exact: true }).click();
 
   // Client-side nav back to Library -- the app shell (and its sidebar) was
   // never unmounted, so this only passes if the toggle propagated live.
-  await page.locator("nav a[href='/library']").click();
+  await page.locator("nav[aria-label='Main'] a[href='/library']").click();
   await expect(page).toHaveURL(/\/library/);
   await expect(page.getByRole("link", { name: "Stats" })).toBeVisible();
 
-  await page.locator("nav a[href='/settings']").click();
+  await page.locator("nav[aria-label='Main'] a[href='/settings']").click();
+  await page.locator('nav[aria-label="Settings"] a[href="/settings/library"]').click();
   await page.getByRole("group", { name: "Reading stats" }).getByRole("button", { name: "Off", exact: true }).click();
-  await page.locator("nav a[href='/library']").click();
+  await page.locator("nav[aria-label='Main'] a[href='/library']").click();
   await expect(page.getByRole("link", { name: "Stats" })).toHaveCount(0);
 });
 
@@ -61,7 +63,7 @@ test("dragging a nav item reorders the sidebar, and the order persists across re
     .evaluateAll((els) => els.map((el) => el.getAttribute("href")).filter((href) => href && !href.includes("?")));
   expect(initialOrder.slice(0, 2)).toEqual(["/library", "/highlights"]);
 
-  await simulateDrag(page, "nav a[href='/favorites']", "nav a[href='/library']");
+  await simulateDrag(page, "nav[aria-label='Main'] a[href='/favorites']", "nav[aria-label='Main'] a[href='/library']");
 
   const reordered = await page
     .locator("nav a")
@@ -117,8 +119,9 @@ test("auto-delete moves unread articles older than the selected period to Trash"
     });
   });
 
-  await page.locator("nav a[href='/settings']").click();
+  await page.locator("nav[aria-label='Main'] a[href='/settings']").click();
   await expect(page).toHaveURL(/\/settings/);
+  await page.locator('nav[aria-label="Settings"] a[href="/settings/library"]').click();
   await page
     .getByRole("group", { name: "Auto-delete old unread articles" })
     .getByRole("button", { name: "On", exact: true })
@@ -130,10 +133,10 @@ test("auto-delete moves unread articles older than the selected period to Trash"
   // navigation needed. Poll Library (client-side nav, shell stays mounted)
   // until the stale article is gone.
   await expect(async () => {
-    await page.locator("nav a[href='/library']").click();
+    await page.locator("nav[aria-label='Main'] a[href='/library']").click();
     await expect(page.locator("a[href^='/reader/']")).toHaveCount(0);
   }).toPass({ timeout: 10_000 });
 
-  await page.locator("nav a[href='/trash']").click();
+  await page.locator("nav[aria-label='Main'] a[href='/trash']").click();
   await expect(page.getByText("Readability", { exact: true }).first()).toBeVisible();
 });

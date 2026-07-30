@@ -5,9 +5,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Article, ArticleStatus, Highlight, HighlightColor, HighlightPosition } from "@booklet/shared";
 import { computeRelatedArticles } from "@booklet/shared";
 import { useTheme } from "@/lib/theme/theme-provider";
-import { loadArticle, loadArticleFile, loadArticles, updateArticleProgress, updateArticleStatus } from "@/lib/data/articles";
+import {
+  loadArticle,
+  loadArticleFile,
+  loadArticles,
+  sendArticleToKindle,
+  updateArticleProgress,
+  updateArticleStatus,
+} from "@/lib/data/articles";
 import { createHighlight, deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { useToast } from "@/lib/toast/toast-provider";
+import { ApiError } from "@/lib/api/client";
 import { formatReadingTime } from "@/lib/format";
 import { textToParagraphHtml } from "@/lib/reader/text-to-html";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
@@ -19,6 +28,8 @@ import { TtsControls } from "./tts-controls";
 import { useTextToSpeech } from "@/lib/reader/use-text-to-speech";
 import { TagEditor } from "@/components/library/tag-editor";
 import { SourceIcon } from "@/components/library/source-icon";
+import { HighlightListItem } from "@/components/highlights/highlight-list-item";
+import { IconBook } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 
 const STATUS_TABS: { value: ArticleStatus; label: string }[] = [
@@ -36,6 +47,8 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const { status: authStatus, isAuthenticated } = useAuth();
   const { reader, setReaderSize } = useDevicePrefs();
   const size = reader.size;
+  const { toast } = useToast();
+  const [sendingToKindle, setSendingToKindle] = useState(false);
   const [article, setArticle] = useState<Article | null>(null);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [progress, setProgress] = useState(0);
@@ -289,6 +302,23 @@ export function ReaderView({ articleId }: { articleId: string }) {
     setArticle(updated);
   }
 
+  async function handleSendToKindle() {
+    if (!article) return;
+    setSendingToKindle(true);
+    try {
+      await sendArticleToKindle(article.id);
+      toast("Sent to your Kindle -- it should show up in your library shortly.");
+    } catch (err) {
+      toast(
+        err instanceof ApiError && err.code === "no_kindle_email"
+          ? "Add your Kindle email in Settings first."
+          : "Couldn't send that to your Kindle.",
+      );
+    } finally {
+      setSendingToKindle(false);
+    }
+  }
+
   if (!loaded) return null;
 
   if (!article) {
@@ -382,6 +412,18 @@ export function ReaderView({ articleId }: { articleId: string }) {
           />
         </div>
 
+        {isAuthenticated && (
+          <button
+            type="button"
+            onClick={handleSendToKindle}
+            disabled={sendingToKindle}
+            className="mb-5 inline-flex items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 font-sans text-xs font-medium text-ink-muted transition-colors hover:border-ink-faint hover:text-ink disabled:opacity-50"
+          >
+            <IconBook className="h-3.5 w-3.5" />
+            {sendingToKindle ? "Sending…" : "Send to Kindle"}
+          </button>
+        )}
+
         <div className="mb-9">
           <TagEditor article={article} authenticated={isAuthenticated} onChange={setArticle} />
         </div>
@@ -446,6 +488,30 @@ export function ReaderView({ articleId }: { articleId: string }) {
             onSaveNote={handleSaveNote}
             onDeleteNote={handleDeleteNote}
           />
+        ) : article.sourceType === "BOOK" ? (
+          // No url, no uploaded file -- a Kindle-imported book has nothing
+          // to render as "article content," just the highlights recovered
+          // from My Clippings.txt, so list those directly instead of
+          // showing the generic "couldn't extract" message below (which
+          // would be actively misleading here -- there was never anything
+          // to extract in the first place).
+          <div className="flex flex-col gap-3">
+            {highlights.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border px-5 py-8 text-center">
+                <p className="font-sans text-sm text-ink-muted">No highlights for this book yet.</p>
+              </div>
+            ) : (
+              highlights.map((h) => (
+                <HighlightListItem
+                  key={h.id}
+                  highlight={h}
+                  onDelete={handleDeleteHighlight}
+                  onSaveNote={handleSaveNote}
+                  onDeleteNote={handleDeleteNote}
+                />
+              ))
+            )}
+          </div>
         ) : (
           <div className="rounded-md border border-dashed border-border px-5 py-8 text-center">
             <SourceIcon sourceType={article.sourceType} className="mx-auto mb-3 h-6 w-6 text-ink-faint" />

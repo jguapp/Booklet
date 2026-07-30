@@ -22,7 +22,7 @@ async function signUp(page: import("@playwright/test").Page) {
 
 test("a generated token can create an article through /api/v1, and revoking it stops working", async ({ page }) => {
   await signUp(page);
-  await page.goto("/developer");
+  await page.goto("/settings/developer");
 
   await page.getByPlaceholder(/token name/i).fill("E2E Test Token");
   await page.getByRole("button", { name: "Generate token" }).click();
@@ -61,7 +61,7 @@ test("a generated token can create an article through /api/v1, and revoking it s
 
 test("a read-only token can read but not write", async ({ page }) => {
   await signUp(page);
-  await page.goto("/developer");
+  await page.goto("/settings/developer");
 
   await page.getByPlaceholder(/token name/i).fill("Read Only");
   await page.getByLabel("Allow write access").uncheck();
@@ -100,7 +100,7 @@ test("a registered webhook receives a signed delivery when an article is created
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
 
-  await page.goto("/developer");
+  await page.goto("/settings/developer");
   await page.getByPlaceholder(/your-endpoint/i).fill(`http://127.0.0.1:${port}/hook`);
   await page.getByLabel("Article saved").check();
   await page.getByRole("button", { name: "Add webhook" }).click();

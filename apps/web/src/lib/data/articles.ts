@@ -197,6 +197,59 @@ export async function saveArticleFromFile(file: File, authenticated: boolean): P
   return article;
 }
 
+/** Get-or-create a title/author-only "book" article -- no url, no file.
+ * Only real producer today is the Kindle My Clippings.txt importer
+ * (export-import.ts), where all that exists for a given book is its
+ * highlights, not the book's own content. */
+export async function getOrCreateBookArticle(
+  title: string,
+  author: string | null,
+  authenticated: boolean,
+): Promise<Article> {
+  if (authenticated) {
+    return apiFetch<Article>("/api/articles/book", { method: "POST", body: JSON.stringify({ title, author }) });
+  }
+
+  const existing = (await localArticles.getAll()).find(
+    (a) => a.sourceType === "BOOK" && a.title === title && a.author === author,
+  );
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const article: Article = {
+    id: crypto.randomUUID(),
+    userId: "local",
+    url: null,
+    canonicalUrl: null,
+    title,
+    author,
+    siteName: null,
+    excerpt: null,
+    sourceType: "BOOK",
+    extractionStatus: "SUCCESS",
+    extractionError: null,
+    extractedHtml: null,
+    extractedText: null,
+    textSource: null,
+    fileStorageKey: null,
+    originalFilename: null,
+    readingTimeEstimate: null,
+    progressFraction: 0,
+    activeReadingSeconds: 0,
+    tags: [],
+    status: "UNREAD",
+    savedAt: now,
+    readAt: null,
+    archivedAt: null,
+    favorited: false,
+    deletedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await localArticles.put(article);
+  return article;
+}
+
 export async function updateArticleStatus(
   article: Article,
   status: ArticleStatus,
@@ -333,4 +386,11 @@ export async function emptyTrash(authenticated: boolean): Promise<void> {
   }
   const trashed = await localArticles.getTrash();
   await Promise.all(trashed.map((a) => Promise.all([localArticles.delete(a.id), localFiles.delete(a.id)])));
+}
+
+/** Authenticated-account-only, like the Developer settings (tokens/
+ * webhooks) -- this needs a real server to send the email from, so
+ * there's no local/anonymous-mode equivalent to branch to. */
+export async function sendArticleToKindle(articleId: string): Promise<void> {
+  await apiFetch(`/api/articles/${articleId}/send-to-kindle`, { method: "POST" });
 }

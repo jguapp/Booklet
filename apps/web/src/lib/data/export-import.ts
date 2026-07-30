@@ -11,8 +11,9 @@
  */
 import JSZip from "jszip";
 import type { Article, Highlight } from "@booklet/shared";
-import { loadArticles, saveArticleFromUrl } from "./articles";
-import { loadHighlights } from "./highlights";
+import { KINDLE_HIGHLIGHT_COLOR, parseKindleClippings } from "@booklet/shared";
+import { getOrCreateBookArticle, loadArticles, saveArticleFromUrl } from "./articles";
+import { createHighlight, loadHighlights } from "./highlights";
 import { ApiError } from "@/lib/api/client";
 
 function frontmatterEscape(value: string): string {
@@ -225,4 +226,50 @@ export async function importUrls(
     onProgress?.(i + 1, rows.length);
   }
   return result;
+}
+
+export interface KindleImportResult {
+  booksImported: number;
+  highlightsImported: number;
+}
+
+/**
+ * Imports a Kindle "My Clippings.txt" export -- one Article per book
+ * (get-or-create, so re-importing the same file is safe: existing books
+ * aren't duplicated, and this doesn't attempt to detect/skip individual
+ * already-imported highlights within a book, so re-importing does create
+ * duplicate highlights for a book you'd previously imported). Each book
+ * has no url and no extractable content of its own (there's nothing to
+ * extract -- it's a physical/Kindle-native book, not a saved web page or
+ * uploaded file), just the highlights/notes recovered from the file.
+ */
+export async function importKindleClippings(
+  text: string,
+  authenticated: boolean,
+  onProgress?: (done: number, total: number) => void,
+): Promise<KindleImportResult> {
+  const books = parseKindleClippings(text);
+  const totalEntries = books.reduce((sum, b) => sum + b.entries.length, 0);
+  let done = 0;
+
+  let highlightsImported = 0;
+  for (const book of books) {
+    const article = await getOrCreateBookArticle(book.title, book.author, authenticated);
+    for (const entry of book.entries) {
+      await createHighlight(
+        {
+          articleId: article.id,
+          selectedText: entry.text,
+          position: { type: "text", exact: entry.text, prefix: "", suffix: "", start: 0, end: entry.text.length },
+          color: KINDLE_HIGHLIGHT_COLOR,
+        },
+        authenticated,
+      );
+      highlightsImported++;
+      done++;
+      onProgress?.(done, totalEntries);
+    }
+  }
+
+  return { booksImported: books.length, highlightsImported };
 }
