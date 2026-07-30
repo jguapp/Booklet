@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { Article, Highlight } from "@booklet/shared";
 import { highlightColorHex } from "@booklet/shared";
 import { formatRelativeDate } from "@/lib/format";
+import { highlightCitation } from "@/lib/highlights/citation";
 import { IconPencil, IconTrash } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -32,6 +33,7 @@ export function HighlightListItem({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(highlight.annotation?.noteText ?? "");
   const [confirming, setConfirming] = useState<"highlight" | "note" | null>(null);
+  const citation = highlightCitation(highlight);
 
   function startEditing() {
     setDraft(highlight.annotation?.noteText ?? "");
@@ -131,6 +133,12 @@ export function HighlightListItem({
               </Link>
             )}
             {article && <span>·</span>}
+            {citation && (
+              <>
+                <span>{citation}</span>
+                <span>·</span>
+              </>
+            )}
             <span>{formatRelativeDate(highlight.createdAt)}</span>
           </div>
         </div>
