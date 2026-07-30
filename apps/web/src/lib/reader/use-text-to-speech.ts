@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pickBestVoice } from "./tts-voice";
-import { isKokoroVoice, loadKokoro, type KokoroVoiceId } from "./kokoro-tts";
+import { isKokoroVoice, loadKokoro, toSafeTextStream, type KokoroVoiceId } from "./kokoro-tts";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 
 export type TtsStatus = "idle" | "loading" | "playing" | "paused";
@@ -127,7 +127,7 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
       // already ruled out NATIVE_VOICE_ID -- kokoro-js just doesn't export
       // that exact literal union for callers to type against directly.
       const voice = reader.ttsVoice as KokoroVoiceId;
-      for await (const { audio } of tts.stream(text, { voice, speed: reader.ttsRate })) {
+      for await (const { audio } of tts.stream(toSafeTextStream(text), { voice, speed: reader.ttsRate })) {
         if (generationRef.current !== myGeneration) return; // stopped mid-stream
 
         const url = URL.createObjectURL(audio.toBlob());

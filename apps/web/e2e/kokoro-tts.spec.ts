@@ -70,3 +70,40 @@ test("the system voice is the default, and switching back to it needs no downloa
   await page.goto("/settings/reading");
   await expect(page.getByRole("combobox", { name: "Read-aloud voice" })).toHaveValue("system");
 });
+
+test("a real, full-length article with an external-links/citations tail doesn't hang forever", async ({ page }) => {
+  test.setTimeout(180_000);
+
+  // Regression test for a real bug found by hand: kokoro-js's own
+  // TextSplitterStream.push(), handed a whole article's text (tens of
+  // thousands of characters) in one call instead of one sentence at a
+  // time, could loop forever and never return -- confirmed in complete
+  // isolation (a plain Node script, no browser/WASM/GPU involved at all)
+  // using this exact Wikipedia article's extracted text, which triggered
+  // it specifically in its "External links" tail (bare URLs, list items,
+  // no terminal punctuation). That hang blocked the main thread hard
+  // enough to eventually crash the tab. Fixed by pre-chunking text
+  // ourselves (kokoro-tts.ts's toSafeTextStream) instead of handing
+  // kokoro-js one giant blob. The "Dog" article used in the test above
+  // never happened to trigger this, so it alone wouldn't have caught this.
+  await page.goto("/settings/reading");
+  await page.getByRole("combobox", { name: "Read-aloud voice" }).selectOption({ label: "Heart (American, female)" });
+
+  await page.goto("/library");
+  await page.getByRole("button", { name: /save article/i }).click();
+  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await waitForSaveModalToClose(page);
+
+  await page.locator("a[href^='/reader/']").first().click();
+  await expect(page).toHaveURL(/\/reader\//);
+
+  await page.getByTitle("Read aloud").click();
+  // The model's already cached from the earlier test in this file, so this
+  // is bounded by real generation time, not a fresh ~90MB download --
+  // before the fix, this never resolved at all (confirmed hanging past
+  // 170s in manual testing) rather than just being slow.
+  await expect(page.getByTitle("Pause reading aloud")).toBeVisible({ timeout: 120_000 });
+
+  await page.getByTitle("Stop reading aloud").click();
+});
