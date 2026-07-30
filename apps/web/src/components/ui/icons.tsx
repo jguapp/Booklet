@@ -106,14 +106,6 @@ export function IconLogout(props: IconProps) {
   );
 }
 
-export function IconCode(props: IconProps) {
-  return (
-    <svg {...base(props)}>
-      <path d="M7 6 3 10l4 4M13 6l4 4-4 4M11 4 9 16" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 export function IconSearch(props: IconProps) {
   return (
     <svg {...base(props)}>
@@ -140,14 +132,6 @@ export function IconLink(props: IconProps) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  );
-}
-
-export function IconChevronLeft(props: IconProps) {
-  return (
-    <svg {...base(props)}>
-      <path d="m12.5 4.5-5 5.5 5 5.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

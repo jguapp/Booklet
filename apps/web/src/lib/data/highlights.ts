@@ -13,11 +13,10 @@ import type {
   UpdateHighlightRequest,
 } from "@booklet/shared";
 import { DEFAULT_SM2_STATE } from "@booklet/shared";
-import { apiFetch, ApiError } from "@/lib/api/client";
+import { apiFetch } from "@/lib/api/client";
 import { localHighlights } from "@/lib/local/db";
 
-export { ApiError };
-export const LOCAL_USER_ID = "local";
+const LOCAL_USER_ID = "local";
 
 export async function loadHighlights(authenticated: boolean, articleId?: string): Promise<Highlight[]> {
   if (authenticated) {

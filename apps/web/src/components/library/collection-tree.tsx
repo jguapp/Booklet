@@ -9,8 +9,9 @@ import { cn } from "@/lib/cn";
 /** Drag MIME for re-parenting a collection onto another -- distinct from
  * NAV_DRAG_MIME (sidebar nav reorder) and ARTICLE/HIGHLIGHT_DRAG_MIME
  * (drop-to-trash), same "different types, dispatch on e.dataTransfer.types"
- * posture as those already established in the app shell. */
-export const COLLECTION_DRAG_MIME = "application/x-booklet-collection-id";
+ * posture as those already established in the app shell. Only used within
+ * this file (both drag source and drop target live here). */
+const COLLECTION_DRAG_MIME = "application/x-booklet-collection-id";
 
 interface CollectionTreeProps {
   collections: Collection[];
