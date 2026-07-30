@@ -7,6 +7,7 @@
  * the same way whether signed in or not.
  */
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
+import { DEFAULT_HIGHLIGHT_BAR_COLORS, sanitizeHighlightBarColors } from "@booklet/shared";
 import { KOKORO_VOICES, NATIVE_VOICE_ID } from "./kokoro-tts";
 
 const KEY = "booklet-reader-prefs";
@@ -18,9 +19,17 @@ export interface ReaderPrefs {
   ttsRate: number;
   /** NATIVE_VOICE_ID (the device's own SpeechSynthesis) or a Kokoro voice id. */
   ttsVoice: string;
+  /** Which colors show up in the highlight picker, and in what order --
+   * see packages/shared highlight-colors.ts. */
+  highlightBarColors: string[];
 }
 
-const DEFAULT_PREFS: ReaderPrefs = { size: "md", ttsRate: 1, ttsVoice: NATIVE_VOICE_ID };
+const DEFAULT_PREFS: ReaderPrefs = {
+  size: "md",
+  ttsRate: 1,
+  ttsVoice: NATIVE_VOICE_ID,
+  highlightBarColors: DEFAULT_HIGHLIGHT_BAR_COLORS,
+};
 
 export function loadReaderPrefs(): ReaderPrefs {
   if (typeof localStorage === "undefined") return DEFAULT_PREFS;
@@ -37,6 +46,7 @@ export function loadReaderPrefs(): ReaderPrefs {
       ttsVoice: typeof parsed.ttsVoice === "string" && VALID_VOICES.has(parsed.ttsVoice)
         ? parsed.ttsVoice
         : DEFAULT_PREFS.ttsVoice,
+      highlightBarColors: sanitizeHighlightBarColors(parsed.highlightBarColors),
     };
   } catch {
     return DEFAULT_PREFS;

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions, TextLayer } from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy, PageViewport, RenderTask } from "pdfjs-dist";
 import type { Highlight, HighlightColor, PdfPosition, PdfRect } from "@booklet/shared";
+import { highlightColorRgba } from "@booklet/shared";
 import { HighlightPopover } from "./highlight-popover";
 import { HighlightManagePopover } from "./highlight-manage-popover";
 import styles from "./pdf-reader.module.css";
@@ -11,13 +12,10 @@ import styles from "./pdf-reader.module.css";
 GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
 const CONTEXT_LENGTH = 32;
-const HIGHLIGHT_FILL: Record<HighlightColor, string> = {
-  YELLOW: "rgba(243, 222, 156, 0.55)",
-  GREEN: "rgba(188, 223, 196, 0.55)",
-  BLUE: "rgba(187, 214, 232, 0.55)",
-  PINK: "rgba(239, 204, 218, 0.55)",
-  ORANGE: "rgba(241, 203, 158, 0.55)",
-};
+// Canvas fills, unlike CSS classes, can't reference the theme-aware
+// --color-highlight-* custom properties -- these were always a fixed
+// (light-theme-matching) rgba regardless of reading theme, same as now.
+const HIGHLIGHT_FILL_ALPHA = 0.55;
 
 interface PdfReaderProps {
   fileBlob: Blob;
@@ -305,7 +303,7 @@ export function PdfReader({
                       top,
                       width: Math.abs(vx2 - vx1),
                       height: Math.abs(vy2 - vy1),
-                      backgroundColor: HIGHLIGHT_FILL[h.color],
+                      backgroundColor: highlightColorRgba(h.color, HIGHLIGHT_FILL_ALPHA),
                       cursor: "pointer",
                       pointerEvents: "auto",
                     }}

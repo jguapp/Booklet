@@ -4,6 +4,7 @@ import { useTheme, type Theme } from "@/lib/theme/theme-provider";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
 import { KOKORO_VOICES, NATIVE_VOICE_ID } from "@/lib/reader/kokoro-tts";
+import { HighlightColorPicker } from "@/components/settings/highlight-color-picker";
 import { cn } from "@/lib/cn";
 
 const THEMES: { value: Theme; label: string }[] = [
@@ -71,6 +72,17 @@ export default function ReadingSettingsPage() {
               </button>
             ))}
           </div>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
+            Highlight colors
+          </h3>
+          <p className="font-sans text-xs text-ink-faint">
+            Choose which colors show up in the picker when you highlight text, and add your own -- this
+            device only, not synced across devices.
+          </p>
+          <HighlightColorPicker />
         </section>
 
         <section className="flex flex-col gap-2">

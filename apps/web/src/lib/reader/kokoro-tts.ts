@@ -10,6 +10,15 @@
  * to load (unsupported browser, network hiccup on first download).
  */
 import { KokoroTTS } from "kokoro-js";
+import { env as transformersEnv } from "@huggingface/transformers";
+
+// ONNX Runtime Web logs harmless perf-advisory notices ("some nodes were
+// not assigned to the preferred execution provider") at "warning" severity
+// by default, which browsers surface as console errors -- alarming for
+// something that isn't actually a failure (audio still generates and
+// plays correctly regardless). Raising the threshold to "error" keeps
+// genuine failures visible while dropping this noise.
+transformersEnv.backends.onnx.logLevel = "error";
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 

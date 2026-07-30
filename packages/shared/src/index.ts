@@ -18,3 +18,4 @@ export * from "./url-canonicalize";
 export * from "./collection-filter";
 export * from "./recap";
 export * from "./kindle-clippings";
+export * from "./highlight-colors";

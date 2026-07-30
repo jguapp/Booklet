@@ -2,20 +2,13 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import type { Article, Highlight, HighlightColor } from "@booklet/shared";
+import type { Article, Highlight } from "@booklet/shared";
+import { highlightColorHex } from "@booklet/shared";
 import { formatRelativeDate } from "@/lib/format";
 import { IconPencil, IconTrash } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { HIGHLIGHT_DRAG_MIME } from "@/lib/dnd/trash-drop";
-
-const DOT_CLASS: Record<HighlightColor, string> = {
-  YELLOW: "bg-highlight-yellow",
-  GREEN: "bg-highlight-green",
-  BLUE: "bg-highlight-blue",
-  PINK: "bg-highlight-pink",
-  ORANGE: "bg-highlight-orange",
-};
 
 interface HighlightListItemProps {
   highlight: Highlight;
@@ -65,7 +58,10 @@ export function HighlightListItem({
       className="rounded-md border border-border bg-surface px-5 py-4"
     >
       <div className="flex items-start gap-3">
-        <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${DOT_CLASS[highlight.color]}`} />
+        <span
+          className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ backgroundColor: highlightColorHex(highlight.color) }}
+        />
         <div className="min-w-0 flex-1">
           <p className="font-serif text-base leading-snug text-ink">&ldquo;{highlight.selectedText}&rdquo;</p>
 

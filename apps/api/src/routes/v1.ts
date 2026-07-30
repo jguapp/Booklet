@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import type { CreateArticleRequest, CreateHighlightRequest, HighlightColor, HighlightPosition } from "@booklet/shared";
-import { canonicalizeUrl } from "@booklet/shared";
+import type { CreateArticleRequest, CreateHighlightRequest, HighlightPosition } from "@booklet/shared";
+import { canonicalizeUrl, isValidHighlightColor } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireWriteScope } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
@@ -14,7 +14,6 @@ const LIST_PAGE_SIZE = 30;
 // Zapier connection shouldn't be able to run up against (or exhaust) the
 // same limit the web app's own UI relies on.
 const V1_RATE_LIMIT = { max: 100, timeWindow: "1 minute" };
-const COLORS: HighlightColor[] = ["YELLOW", "GREEN", "BLUE", "PINK", "ORANGE"];
 
 function isValidPosition(value: unknown): value is HighlightPosition {
   if (typeof value !== "object" || value === null) return false;
@@ -123,7 +122,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     if (!isValidPosition(position)) {
       return reply.code(400).send({ error: "invalid_position", message: "Invalid highlight position." });
     }
-    if (!COLORS.includes(color)) {
+    if (typeof color !== "string" || !isValidHighlightColor(color)) {
       return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
     }
 

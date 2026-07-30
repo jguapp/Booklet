@@ -2,17 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { HighlightColor } from "@booklet/shared";
+import { CURATED_HIGHLIGHT_PALETTE, highlightColorHex } from "@booklet/shared";
 import { cn } from "@/lib/cn";
 import { isLookupableWord, lookupWord, type DictionaryEntry } from "@/lib/dictionary";
 import { IconBook } from "@/components/ui/icons";
+import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 
-const COLORS: { value: HighlightColor; className: string; label: string }[] = [
-  { value: "YELLOW", className: "bg-highlight-yellow", label: "Yellow" },
-  { value: "GREEN", className: "bg-highlight-green", label: "Green" },
-  { value: "BLUE", className: "bg-highlight-blue", label: "Blue" },
-  { value: "PINK", className: "bg-highlight-pink", label: "Pink" },
-  { value: "ORANGE", className: "bg-highlight-orange", label: "Orange" },
-];
+const PALETTE_LABELS = new Map(CURATED_HIGHLIGHT_PALETTE.map((c) => [c.id, c.label]));
+
+function labelFor(color: string): string {
+  return PALETTE_LABELS.get(color) ?? color;
+}
 
 type Panel = "none" | "note" | "define";
 type DictStatus = "idle" | "loading" | "error" | "not-found" | "found";
@@ -27,7 +27,9 @@ interface HighlightPopoverProps {
 }
 
 export function HighlightPopover({ anchorRect, selectedText, onConfirm, onDismiss }: HighlightPopoverProps) {
-  const [color, setColor] = useState<HighlightColor>("YELLOW");
+  const { reader } = useDevicePrefs();
+  const barColors = reader.highlightBarColors;
+  const [color, setColor] = useState<HighlightColor>(() => barColors[0] ?? "YELLOW");
   const [panel, setPanel] = useState<Panel>("none");
   const [note, setNote] = useState("");
   const [dictStatus, setDictStatus] = useState<DictStatus>("idle");
@@ -89,19 +91,19 @@ export function HighlightPopover({ anchorRect, selectedText, onConfirm, onDismis
       style={{ top, left }}
     >
       <div className="flex items-center gap-1.5">
-        {COLORS.map((c) => (
+        {barColors.map((c) => (
           <button
-            key={c.value}
+            key={c}
             type="button"
-            title={c.label}
+            title={labelFor(c)}
             onClick={() => {
-              setColor(c.value);
-              if (panel === "none") onConfirm(c.value, "");
+              setColor(c);
+              if (panel === "none") onConfirm(c, "");
             }}
+            style={{ backgroundColor: highlightColorHex(c) }}
             className={cn(
               "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
-              c.className,
-              color === c.value ? "border-ink" : "border-transparent",
+              color === c ? "border-ink" : "border-transparent",
             )}
           />
         ))}
