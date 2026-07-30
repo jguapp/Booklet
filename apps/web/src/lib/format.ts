@@ -16,6 +16,16 @@ export function formatDaysRemaining(sinceIso: string, retentionDays: number, now
   return `Deletes in ${daysLeft} days`;
 }
 
+/** "2h 14m" / "14m" / "45s" -- shared by Stats and Recap, both of which
+ * show accumulated activeReadingSeconds. */
+export function formatDuration(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m`;
+  return `${totalSeconds}s`;
+}
+
 export function formatReadingTime(minutes: number | null): string {
   if (minutes === null) return "";
   if (minutes < 1) return "< 1 min read";

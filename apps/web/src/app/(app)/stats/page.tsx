@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, SourceType } from "@booklet/shared";
 import { computeReadingStats } from "@booklet/shared";
@@ -7,15 +8,8 @@ import { loadArticles } from "@/lib/data/articles";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
 import { SourceIcon } from "@/components/library/source-icon";
+import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/cn";
-
-function formatDuration(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return `${totalSeconds}s`;
-}
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
@@ -176,8 +170,11 @@ export default function StatsPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-8 py-10">
-      <div className="mb-8">
+      <div className="mb-8 flex items-center justify-between">
         <h1 className="font-serif text-2xl font-semibold text-ink">Stats</h1>
+        <Link href="/recap" className="font-sans text-xs font-medium text-accent hover:underline">
+          View your Recap →
+        </Link>
       </div>
 
       {stats.totalArticles === 0 ? (
