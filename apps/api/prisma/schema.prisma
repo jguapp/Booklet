@@ -259,6 +259,10 @@ model Article {
   textSource       String? // "NATIVE" | "OCR", see PdfExtractionResult
   fileStorageKey   String? // key into StorageService (filesystem now, S3 later) -- raw fetched HTML snapshot (HTML) or the uploaded file itself (PDF/EPUB), not read on hot paths
   originalFilename String? // PDF/EPUB upload's original filename -- fallback title source when metadata extraction comes up empty
+  // data: URI thumbnail for the library card -- og:image (HTML), rendered
+  // page 1 (PDF), or the declared/first-spine-image cover (EPUB). @db.Text
+  // since a base64-encoded image is well beyond a bare VARCHAR's default.
+  coverImageUrl    String?          @db.Text
 
   readingTimeEstimate Int? // minutes, computed from extractedText at save time
   // How many images in the original page were too large/numerous to inline

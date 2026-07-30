@@ -91,6 +91,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
         extractedText: extracted?.text ?? null,
         readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
         skippedImageCount: extracted?.skippedImageCount ?? 0,
+        coverImageUrl: extracted?.coverImageUrl ?? null,
       },
     });
 

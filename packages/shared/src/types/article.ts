@@ -31,6 +31,11 @@ export interface Article {
   textSource: "NATIVE" | "OCR" | null;
   fileStorageKey: string | null; // raw HTML snapshot (HTML) or the uploaded file itself (PDF/EPUB)
   originalFilename: string | null; // PDF/EPUB upload's original filename
+  /** data: URI thumbnail for the library card -- HTML's <meta property="og:image">
+   * (falling back to twitter:image), a PDF's rasterized first page, or an
+   * EPUB's declared cover (falling back to its first spine image). Null
+   * when nothing was found/fetchable; the card just omits the thumbnail. */
+  coverImageUrl: string | null;
 
   readingTimeEstimate: number | null;
   /** How many images in the original page were too large/numerous to
@@ -84,6 +89,9 @@ export interface ExtractedContent {
    * path (fetchAndExtract) -- absent (not 0) for PDF/EPUB extraction,
    * which doesn't inline images at all. */
   skippedImageCount?: number;
+  /** See Article.coverImageUrl. Absent (not null) when extraction didn't
+   * even attempt to find one; null when it looked and found nothing. */
+  coverImageUrl?: string | null;
 }
 
 export interface UpdateArticleRequest {
