@@ -124,6 +124,7 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     fileStorageKey: null,
     originalFilename: null,
     readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
+    skippedImageCount: extracted?.skippedImageCount ?? 0,
     progressFraction: 0,
     activeReadingSeconds: 0,
     tags: [],
@@ -180,6 +181,7 @@ export async function saveArticleFromFile(file: File, authenticated: boolean): P
     fileStorageKey: id, // local files are keyed by article id, see lib/local/db localFiles
     originalFilename: file.name,
     readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
+    skippedImageCount: 0, // PDF/EPUB extraction doesn't inline images at all
     progressFraction: 0,
     activeReadingSeconds: 0,
     tags: [],
@@ -234,6 +236,7 @@ export async function getOrCreateBookArticle(
     fileStorageKey: null,
     originalFilename: null,
     readingTimeEstimate: null,
+    skippedImageCount: 0,
     progressFraction: 0,
     activeReadingSeconds: 0,
     tags: [],

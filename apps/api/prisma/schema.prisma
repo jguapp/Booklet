@@ -261,6 +261,11 @@ model Article {
   originalFilename String? // PDF/EPUB upload's original filename -- fallback title source when metadata extraction comes up empty
 
   readingTimeEstimate Int? // minutes, computed from extractedText at save time
+  // How many images in the original page were too large/numerous to inline
+  // (see extraction-service.ts's MAX_IMAGE_BYTES/MAX_TOTAL_IMAGE_BYTES/
+  // MAX_IMAGES) and were left pointing at the original site instead. 0 for
+  // anything that isn't an HTML save, or where nothing was skipped.
+  skippedImageCount   Int   @default(0)
   progressFraction    Float @default(0) // 0.0-1.0, normalized regardless of sourceType (page/total, CFI/total, or scroll position)
   // Actual active reading time, seconds -- only accrues while the reader tab
   // is visible (reader-view.tsx). Written as an atomic increment (a delta
