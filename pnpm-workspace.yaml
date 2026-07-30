@@ -26,7 +26,17 @@ allowBuilds:
   core-js: true
   es5-ext: true
   esbuild: true
+  # Both pulled in transitively by kokoro-js (open-source client-side TTS,
+  # see lib/reader/kokoro-tts.ts). onnxruntime-node's install script only
+  # conditionally downloads CUDA binaries for Linux/x64 (irrelevant here --
+  # inference runs via the browser/WASM backend, not this Node one) --
+  # confirmed by reading node_modules/onnxruntime-node/script/install.js
+  # directly. protobufjs's postinstall is just a version-scheme compat
+  # warning check, no network access -- confirmed by reading
+  # node_modules/protobufjs/scripts/postinstall.js directly.
+  onnxruntime-node: true
   prisma: true
+  protobufjs: true
   sharp: true
   # opencollective-postinstall -- a donation-nag message printed to the
   # terminal, nothing else (confirmed by reading node_modules/tesseract.js/
