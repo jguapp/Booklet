@@ -15,6 +15,7 @@ import { EpubExtractionError, extractEpubText } from "../services/epub-extractio
 import { PdfExtractionError, extractPdfText } from "../services/pdf-extraction.js";
 import { deleteStoredFile, readStoredFile, saveFile } from "../services/storage-service.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
+import { sendEmail } from "../services/email-service.js";
 
 export type ArticleRow = Awaited<ReturnType<typeof prisma.article.findFirstOrThrow>>;
 
@@ -137,6 +138,37 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         () => undefined,
       );
       return reply.code(201).send(body);
+    },
+  );
+
+  // A "book" article -- title/author only, no url, no uploaded file. Only
+  // real producer today is the Kindle My Clippings.txt importer
+  // (export-import.ts): there's no content to extract for a book that
+  // exists only as a list of highlights someone made on a physical/Kindle
+  // device, so this is trivially "successful" (nothing to fail at).
+  app.post<{ Body: { title: string; author?: string | null } }>(
+    "/api/articles/book",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const title = request.body?.title?.trim();
+      if (!title) return reply.code(400).send({ error: "invalid_title", message: "A title is required." });
+
+      const existing = await prisma.article.findFirst({
+        where: { userId: request.userId!, sourceType: "BOOK", title, author: request.body?.author ?? null },
+      });
+      if (existing) return reply.send(toArticle(existing));
+
+      const article = await prisma.article.create({
+        data: {
+          userId: request.userId!,
+          url: null,
+          title,
+          author: request.body?.author ?? null,
+          sourceType: "BOOK",
+          extractionStatus: "SUCCESS",
+        },
+      });
+      return reply.code(201).send(toArticle(article));
     },
   );
 
@@ -381,4 +413,56 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
     }
     return reply.code(204).send();
   });
+
+  // "Send to Kindle" -- Amazon's own service reads the file attached to an
+  // email sent to a user's private @kindle.com/@free.kindle.com address
+  // (set once in Settings) and adds it to their library, auto-converting
+  // supported formats (HTML included) on the way in. One-directional
+  // (Booklet -> Kindle) -- there's no API for the reverse, see the issue
+  // this shipped from for why real two-way sync isn't attempted.
+  app.post<{ Params: { id: string } }>(
+    "/api/articles/:id/send-to-kindle",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const user = await prisma.user.findUniqueOrThrow({ where: { id: request.userId! } });
+      if (!user.kindleEmail) {
+        return reply
+          .code(400)
+          .send({ error: "no_kindle_email", message: "Add your Kindle email in Settings first." });
+      }
+
+      const article = await prisma.article.findFirst({
+        where: { id: request.params.id, userId: request.userId!, deletedAt: null },
+      });
+      if (!article) return reply.code(404).send({ error: "not_found", message: "Article not found." });
+      if (!article.extractedText && !article.extractedHtml) {
+        return reply
+          .code(400)
+          .send({ error: "no_content", message: "This article has no extracted content to send." });
+      }
+
+      const title = article.title ?? "Untitled";
+      const bodyHtml =
+        article.extractedHtml ??
+        article.extractedText!
+          .split(/\n{2,}/)
+          .map((p) => `<p>${p.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`)
+          .join("\n");
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1>${bodyHtml}</body></html>`;
+
+      await sendEmail({
+        to: user.kindleEmail,
+        subject: title,
+        text: `Sent from Booklet: ${title}`,
+        attachments: [
+          {
+            filename: `${title.replace(/[\\/:*?"<>|]/g, "-").slice(0, 80) || "article"}.html`,
+            content: Buffer.from(html, "utf-8").toString("base64"),
+          },
+        ],
+      });
+
+      return reply.code(204).send();
+    },
+  );
 }

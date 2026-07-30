@@ -15,7 +15,7 @@ test("saving is unaffected while the toggle is off, even over a would-be limit",
 });
 
 test("enabling the toggle with a low limit asks before saving once at/over it", async ({ page }) => {
-  await page.goto("/settings");
+  await page.goto("/settings/library");
   await page
     .getByRole("group", { name: "Prevent knowledge hoarding" })
     .getByRole("button", { name: "On", exact: true })

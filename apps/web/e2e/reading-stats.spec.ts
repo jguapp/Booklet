@@ -12,7 +12,7 @@ test("the Stats nav item only shows up once the toggle is turned on", async ({ p
   await page.goto("/library");
   await expect(page.getByRole("link", { name: "Stats" })).toHaveCount(0);
 
-  await page.goto("/settings");
+  await page.goto("/settings/library");
   await page.getByRole("group", { name: "Reading stats" }).getByRole("button", { name: "On", exact: true }).click();
 
   await page.goto("/library");
@@ -20,7 +20,7 @@ test("the Stats nav item only shows up once the toggle is turned on", async ({ p
 });
 
 test("finishing an article updates streak, completion rate, and time spent", async ({ page }) => {
-  await page.goto("/settings");
+  await page.goto("/settings/library");
   await page.getByRole("group", { name: "Reading stats" }).getByRole("button", { name: "On", exact: true }).click();
 
   await page.goto("/library");

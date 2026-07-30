@@ -28,6 +28,11 @@ enum SourceType {
   HTML
   PDF
   EPUB
+  // A book with no web URL and no uploaded file -- specifically for
+  // highlights imported from a Kindle My Clippings.txt export (see
+  // kindle-clippings.ts), where all that exists is the book's title/author
+  // and its highlights, not the book's actual content.
+  BOOK
 }
 
 enum ExtractionStatus {
@@ -65,6 +70,10 @@ model User {
   passwordHash    String?
   name            String?
   emailVerifiedAt DateTime?
+  // Amazon's own per-account "Send to Kindle" address (…@kindle.com or
+  // …@free.kindle.com) -- entered once in Settings, then reused by the
+  // "Send to Kindle" action (articles.ts) instead of asking every time.
+  kindleEmail     String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

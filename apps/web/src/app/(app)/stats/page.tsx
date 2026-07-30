@@ -123,13 +123,13 @@ function TopTags({ articles }: { articles: Article[] }) {
 
 function SourceBreakdown({ articles }: { articles: Article[] }) {
   const counts = useMemo(() => {
-    const c: Record<SourceType, number> = { HTML: 0, PDF: 0, EPUB: 0 };
+    const c: Record<SourceType, number> = { HTML: 0, PDF: 0, EPUB: 0, BOOK: 0 };
     for (const a of articles) c[a.sourceType]++;
     return c;
   }, [articles]);
 
   const total = articles.length || 1;
-  const entries = (["HTML", "PDF", "EPUB"] as SourceType[]).filter((t) => counts[t] > 0);
+  const entries = (["HTML", "PDF", "EPUB", "BOOK"] as SourceType[]).filter((t) => counts[t] > 0);
 
   if (entries.length === 0) return null;
 

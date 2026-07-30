@@ -13,6 +13,8 @@ export interface UserProfile {
   emailVerified: boolean;
   resurfaceFrequency: ResurfaceFrequency;
   highlightsPerDigest: number;
+  /** Amazon's per-account "Send to Kindle" address -- null until set in Settings. */
+  kindleEmail: string | null;
   createdAt: string;
 }
 
@@ -42,6 +44,8 @@ export interface UpdateSettingsRequest {
   name?: string;
   resurfaceFrequency?: ResurfaceFrequency;
   highlightsPerDigest?: number;
+  /** Pass "" to clear it. */
+  kindleEmail?: string;
 }
 
 export interface ApiErrorResponse {

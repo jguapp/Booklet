@@ -43,6 +43,7 @@ function toUserProfile(user: UserRow): UserProfile {
     emailVerified: user.emailVerifiedAt !== null,
     resurfaceFrequency: user.resurfaceFrequency,
     highlightsPerDigest: user.highlightsPerDigest,
+    kindleEmail: user.kindleEmail,
     createdAt: user.createdAt.toISOString(),
   };
 }
@@ -342,7 +343,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     "/api/auth/me",
     { preHandler: requireAuth },
     async (request, reply) => {
-      const { name, resurfaceFrequency, highlightsPerDigest } = request.body ?? {};
+      const { name, resurfaceFrequency, highlightsPerDigest, kindleEmail } = request.body ?? {};
 
       if (resurfaceFrequency !== undefined && resurfaceFrequency !== "DAILY" && resurfaceFrequency !== "WEEKLY") {
         return reply.code(400).send({ error: "invalid_frequency", message: "Invalid resurface frequency." });
@@ -355,6 +356,9 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           .code(400)
           .send({ error: "invalid_highlights_per_digest", message: "Must be an integer between 1 and 50." });
       }
+      if (kindleEmail !== undefined && kindleEmail.trim() !== "" && !EMAIL_RE.test(kindleEmail.trim())) {
+        return reply.code(400).send({ error: "invalid_kindle_email", message: "Enter a valid email address." });
+      }
 
       const user = await prisma.user.update({
         where: { id: request.userId! },
@@ -362,6 +366,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           ...(name !== undefined ? { name: name.trim() || null } : {}),
           ...(resurfaceFrequency !== undefined ? { resurfaceFrequency } : {}),
           ...(highlightsPerDigest !== undefined ? { highlightsPerDigest } : {}),
+          ...(kindleEmail !== undefined ? { kindleEmail: kindleEmail.trim() || null } : {}),
         },
       });
 
