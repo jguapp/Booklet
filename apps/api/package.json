@@ -20,6 +20,7 @@
     "@fastify/multipart": "^10.1.0",
     "@fastify/rate-limit": "^11.1.0",
     "@mozilla/readability": "^0.6.0",
+    "@napi-rs/canvas": "^1.0.3",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
     "@sentry/node": "^10.68.0",
@@ -27,7 +28,8 @@
     "jsdom": "^29.1.1",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
-    "pdfjs-dist": "^6.1.200"
+    "pdfjs-dist": "^6.1.200",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",

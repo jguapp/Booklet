@@ -36,6 +36,7 @@ export function toArticle(row: ArticleRow): Article {
     extractionError: row.extractionError,
     extractedHtml: row.extractedHtml,
     extractedText: row.extractedText,
+    textSource: row.textSource as "NATIVE" | "OCR" | null,
     fileStorageKey: row.fileStorageKey,
     originalFilename: row.originalFilename,
     readingTimeEstimate: row.readingTimeEstimate,
@@ -155,7 +156,12 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       const buffer = await file.toBuffer();
       const sourceType = ext === "pdf" ? "PDF" : "EPUB";
 
-      let extracted: { title: string | null; text: string; readingTimeEstimate: number } | null = null;
+      let extracted: {
+        title: string | null;
+        text: string;
+        readingTimeEstimate: number;
+        textSource?: "NATIVE" | "OCR";
+      } | null = null;
       let extractionError: string | null = null;
       try {
         extracted =
@@ -178,6 +184,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           extractionStatus: extracted ? "SUCCESS" : "FAILED",
           extractionError,
           extractedText: extracted?.text ?? null,
+          textSource: extracted?.textSource === "OCR" ? "OCR" : null,
           readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
           fileStorageKey,
           originalFilename,

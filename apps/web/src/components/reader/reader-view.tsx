@@ -386,6 +386,12 @@ export function ReaderView({ articleId }: { articleId: string }) {
           <TagEditor article={article} authenticated={isAuthenticated} onChange={setArticle} />
         </div>
 
+        {article.textSource === "OCR" && (
+          <p className="mb-4 rounded-sm bg-highlight-yellow/40 px-3 py-2 font-sans text-xs text-ink">
+            This PDF had no text layer -- the text below came from OCR and may contain recognition errors.
+          </p>
+        )}
+
         {article.sourceType !== "HTML" && (
           <p className="mb-6 font-sans text-xs text-ink-faint">
             {article.sourceType === "PDF" ? "PDF" : "EPUB"}
