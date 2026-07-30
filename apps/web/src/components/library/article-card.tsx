@@ -47,6 +47,20 @@ export function ArticleCard({
       }}
       className="group relative flex flex-col gap-3 rounded-md border border-border bg-surface px-5 py-4 transition-colors hover:border-accent/40"
     >
+      {article.coverImageUrl && (
+        // Bleeds to the card's edges (negative margins cancel the
+        // container's own padding) so the thumbnail reads as a cover, not
+        // an inset image -- src is always a same-origin data: URI (see
+        // extraction-service.ts's fetchImageAsDataUri), never a remote
+        // URL, so there's no hotlinking/referrer leak to worry about here.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={article.coverImageUrl}
+          alt=""
+          className="-mx-5 -mt-4 mb-1 aspect-[16/9] w-[calc(100%+2.5rem)] max-w-none rounded-t-md object-cover"
+        />
+      )}
+
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-ink-faint">
           <SourceIcon sourceType={article.sourceType} className="h-4 w-4" />
