@@ -12,7 +12,15 @@ import { PdfExtractionError, extractPdfText, type PdfExtractionResult } from "..
  */
 // No auth gate means no per-user cost to being an open URL-fetcher --
 // tighter than the API-wide default so it can't be used as a free proxy.
-const EXTRACT_LIMIT = { max: 20, timeWindow: "10 minutes" };
+// Relaxed outside production: this route backs nearly every real e2e test
+// in apps/web/e2e (every anonymous-mode "save a URL" goes through it), and
+// 20/10min is exhausted almost immediately by the full suite -- CI's own
+// test-web-e2e job has been failing on exactly this for a while, since it
+// runs the real dev server (see ci.yml), not a mock.
+const EXTRACT_LIMIT = {
+  max: process.env.NODE_ENV === "production" ? 20 : 2000,
+  timeWindow: "10 minutes",
+};
 
 export async function registerExtractRoute(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateArticleRequest }>(
