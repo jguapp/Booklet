@@ -93,7 +93,7 @@ export default function RecapPage() {
               onClick={() => setPeriod(p.value)}
               className={cn(
                 "rounded-sm px-3 py-1.5 font-sans text-sm font-medium transition-colors",
-                period === p.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                period === p.value ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               {p.label}

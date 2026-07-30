@@ -49,7 +49,7 @@ test("library defaults to the Unread tab, showing a fresh save immediately", asy
   // A fresh navigation confirms this isn't just leftover client state --
   // the default tab itself shows the just-saved (UNREAD) article.
   await page.goto("/library");
-  await expect(page.getByRole("button", { name: "Unread", exact: true })).toHaveClass(/bg-surface\b/);
+  await expect(page.getByRole("button", { name: "Unread", exact: true })).toHaveClass(/bg-accent\b/);
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
 
   // Marking it Reading moves it out of the default Unread view.

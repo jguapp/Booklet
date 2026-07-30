@@ -51,7 +51,7 @@ export default function LibrarySettingsPage() {
               onClick={() => handleHoardingEnabledChange(false)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                !hoarding.enabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                !hoarding.enabled ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               Off
@@ -61,7 +61,7 @@ export default function LibrarySettingsPage() {
               onClick={() => handleHoardingEnabledChange(true)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                hoarding.enabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                hoarding.enabled ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               On
@@ -101,7 +101,7 @@ export default function LibrarySettingsPage() {
               onClick={() => handleAutoDeleteEnabledChange(false)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                !autoDelete.enabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                !autoDelete.enabled ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               Off
@@ -111,7 +111,7 @@ export default function LibrarySettingsPage() {
               onClick={() => handleAutoDeleteEnabledChange(true)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                autoDelete.enabled ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                autoDelete.enabled ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               On
@@ -126,7 +126,7 @@ export default function LibrarySettingsPage() {
                   onClick={() => handleAutoDeleteDaysChange(p.value)}
                   className={cn(
                     "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                    autoDelete.days === p.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                    autoDelete.days === p.value ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
                   )}
                 >
                   {p.label}
@@ -147,7 +147,7 @@ export default function LibrarySettingsPage() {
               onClick={() => setShowReadingStats(false)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                !showReadingStats ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                !showReadingStats ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               Off
@@ -157,7 +157,7 @@ export default function LibrarySettingsPage() {
               onClick={() => setShowReadingStats(true)}
               className={cn(
                 "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                showReadingStats ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                showReadingStats ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
               )}
             >
               On

@@ -40,7 +40,7 @@ export default function ReadingSettingsPage() {
                 onClick={() => setTheme(t.value)}
                 className={cn(
                   "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                  theme === t.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                  theme === t.value ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
                 )}
               >
                 {t.label}
@@ -64,7 +64,7 @@ export default function ReadingSettingsPage() {
                 onClick={() => setReaderSize(s.value)}
                 className={cn(
                   "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                  reader.size === s.value ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                  reader.size === s.value ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
                 )}
               >
                 {s.label}
@@ -108,7 +108,7 @@ export default function ReadingSettingsPage() {
                 onClick={() => setTtsRate(rate)}
                 className={cn(
                   "flex-1 rounded-sm py-1.5 font-sans text-sm font-medium transition-colors",
-                  reader.ttsRate === rate ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+                  reader.ttsRate === rate ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
                 )}
               >
                 {rate}×

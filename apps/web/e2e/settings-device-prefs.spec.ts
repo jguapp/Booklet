@@ -29,5 +29,5 @@ test("changing the default text size in Settings applies it to a newly-opened ar
   await page.goto("/settings/reading");
   await expect(
     page.getByRole("group", { name: "Default text size" }).getByRole("button", { name: "Large", exact: true }),
-  ).toHaveClass(/bg-surface\b/);
+  ).toHaveClass(/bg-accent\b/);
 });

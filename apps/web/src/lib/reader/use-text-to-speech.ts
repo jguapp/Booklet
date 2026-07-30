@@ -114,7 +114,13 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
     }
     if (generationRef.current !== myGeneration) return; // stopped while the model was loading
 
-    setStatus("playing");
+    // Stay "loading" through the first chunk's generation too, not just the
+    // model download -- flipping to "playing" here (before anything has
+    // actually started playing) is exactly the "says playing but I don't
+    // hear anything" gap: generating the first chunk of real speech from a
+    // freshly-loaded model can itself take several seconds. Only the first
+    // chunk needs this; by the second, "playing" already reflects reality.
+    let firstChunkStarted = false;
     try {
       // Cast is safe: reader.ttsVoice is validated against KOKORO_VOICES'
       // ids in device-prefs.ts's loadReaderPrefs, and isKokoroVoice() above
@@ -135,7 +141,14 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
           resolveCurrentChunkRef.current = resolve;
           audioEl.onended = () => resolve();
           audioEl.onerror = () => resolve();
-          audioEl.play().catch(() => resolve());
+          audioEl
+            .play()
+            .then(() => {
+              if (firstChunkStarted) return;
+              firstChunkStarted = true;
+              if (generationRef.current === myGeneration) setStatus("playing");
+            })
+            .catch(() => resolve());
         });
         resolveCurrentChunkRef.current = null;
 
