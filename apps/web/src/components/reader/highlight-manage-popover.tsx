@@ -99,34 +99,37 @@ export function HighlightManagePopover({
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setEditingNote(true)}
-            className="flex flex-1 items-center gap-1.5 rounded-sm px-2 py-1.5 font-sans text-xs font-medium text-ink-muted hover:bg-surface-2 hover:text-ink"
-          >
-            <IconPencil className="h-3.5 w-3.5" />
-            {noteText ? "Edit note" : "Add a note"}
-          </button>
-          {noteText && (
+        <div className="flex flex-col gap-2">
+          {noteText && <p className="whitespace-pre-wrap px-1 font-sans text-sm text-ink">{noteText}</p>}
+          <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setConfirming("note")}
-              title="Delete note"
-              className="flex h-7 w-7 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-2 hover:text-ink"
+              onClick={() => setEditingNote(true)}
+              className="flex flex-1 items-center gap-1.5 rounded-sm px-2 py-1.5 font-sans text-xs font-medium text-ink-muted hover:bg-surface-2 hover:text-ink"
+            >
+              <IconPencil className="h-3.5 w-3.5" />
+              {noteText ? "Edit note" : "Add a note"}
+            </button>
+            {noteText && (
+              <button
+                type="button"
+                onClick={() => setConfirming("note")}
+                title="Delete note"
+                className="flex h-7 w-7 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-2 hover:text-ink"
+              >
+                <IconTrash className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <div className="mx-0.5 h-5 w-px bg-border" />
+            <button
+              type="button"
+              onClick={() => setConfirming("highlight")}
+              title="Delete highlight"
+              className="flex h-7 w-7 items-center justify-center rounded-sm text-ink-muted hover:bg-highlight-orange hover:text-ink"
             >
               <IconTrash className="h-3.5 w-3.5" />
             </button>
-          )}
-          <div className="mx-0.5 h-5 w-px bg-border" />
-          <button
-            type="button"
-            onClick={() => setConfirming("highlight")}
-            title="Delete highlight"
-            className="flex h-7 w-7 items-center justify-center rounded-sm text-ink-muted hover:bg-highlight-orange hover:text-ink"
-          >
-            <IconTrash className="h-3.5 w-3.5" />
-          </button>
+          </div>
         </div>
       )}
 
