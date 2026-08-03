@@ -22,6 +22,9 @@ interface HighlightListItemProps {
    * `article` to skip the redundant self-referential title link. Ignored
    * when `article` is passed -- that already carries extractedText. */
   articleExtractedText?: string | null;
+  /** Extra bit of metadata appended to the citation/date row -- e.g. Daily
+   * Review's library section uses this for "Due in N days" transparency. */
+  extraMeta?: string;
   /** Extra action row, e.g. Daily Review's remembered/forgot/archive buttons. */
   actions?: React.ReactNode;
   onDelete?: (highlightId: string) => void;
@@ -33,6 +36,7 @@ export function HighlightListItem({
   highlight,
   article,
   articleExtractedText,
+  extraMeta,
   actions,
   onDelete,
   onSaveNote,
@@ -148,6 +152,12 @@ export function HighlightListItem({
               </>
             )}
             <span>{formatRelativeDate(highlight.createdAt)}</span>
+            {extraMeta && (
+              <>
+                <span>·</span>
+                <span>{extraMeta}</span>
+              </>
+            )}
           </div>
         </div>
 
