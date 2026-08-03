@@ -22,6 +22,7 @@ import { textToParagraphHtml } from "@/lib/reader/text-to-html";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { ReaderToolbar } from "./reader-toolbar";
 import { ReaderProgressBar } from "./reader-progress-bar";
+import { NotebookPanel } from "./notebook-panel";
 import { ArticleContent } from "./article-content";
 import { PdfReader } from "./pdf-reader";
 import { EpubReader } from "./epub-reader";
@@ -59,6 +60,13 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const [pdfPageText, setPdfPageText] = useState("");
   const [epubSectionText, setEpubSectionText] = useState("");
   const [relatedArticles, setRelatedArticles] = useState<{ articleId: string; articles: Article[] } | null>(null);
+  // Notebook panel -- closed by default each time a reader is opened
+  // (not a persisted device pref, unlike showProgressBar/pdfReadingMode --
+  // it's a per-session "peek at my highlights" toggle, not a standing
+  // reading preference).
+  const [showNotebook, setShowNotebook] = useState(false);
+  const [jumpToPdfPage, setJumpToPdfPage] = useState<{ page: number; nonce: number } | null>(null);
+  const [jumpToEpubCfi, setJumpToEpubCfi] = useState<{ cfi: string; nonce: number } | null>(null);
 
   // Which reader is actually rendering this article -- PDF/EPUB get their
   // own real readers (pdf-reader.tsx, epub-reader.tsx) once the file's
@@ -318,6 +326,27 @@ export function ReaderView({ articleId }: { articleId: string }) {
     setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
   }
 
+  // The Notebook panel's "click a highlight to go there" -- HTML jumps
+  // directly (the <mark> is already in the DOM, no reader state to
+  // reconcile); PDF/EPUB go through a nonce'd prop their own reader
+  // consumes, since navigating them means calling into pdfjs/epub.js state
+  // this component doesn't own. A fresh nonce every click (not just the
+  // target) so clicking the same highlight twice in a row still re-jumps
+  // (e.g. after scrolling away from it) instead of no-op'ing on an
+  // unchanged prop value.
+  function handleJumpToHighlight(highlight: Highlight) {
+    const position = highlight.position;
+    if (position.type === "text") {
+      document
+        .querySelector(`mark[data-highlight-id="${highlight.id}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else if (position.type === "pdf") {
+      setJumpToPdfPage({ page: position.pageNumber, nonce: Date.now() });
+    } else if (position.type === "epub") {
+      setJumpToEpubCfi({ cfi: position.cfi, nonce: Date.now() });
+    }
+  }
+
   async function handleStatusChange(nextStatus: ArticleStatus) {
     if (!article) return;
     const updated = await updateArticleStatus(article, nextStatus, isAuthenticated);
@@ -373,12 +402,19 @@ export function ReaderView({ articleId }: { articleId: string }) {
         size={size}
         onSizeChange={setReaderSize}
         progress={progress}
+        showNotebook={showNotebook}
+        onToggleNotebook={() => setShowNotebook((v) => !v)}
       />
       <main
         className={cn(
           "mx-auto px-6 py-12",
           usesPdfReader || usesEpubReader ? "max-w-[840px]" : "max-w-[680px]",
           reader.showProgressBar && "pb-20",
+          // Shifts the centered column left instead of letting it sit
+          // underneath the fixed-position Notebook panel -- overriding just
+          // margin-right (mx-auto still centers the left side) rather than
+          // reworking the layout into a flex row.
+          showNotebook && "mr-[380px]",
         )}
       >
         <div className="mb-4 flex items-center gap-2 text-ink-faint">
@@ -494,6 +530,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
             onProgressChange={handleProgressChange}
             onPageTextChange={setPdfPageText}
             readingMode={reader.pdfReadingMode}
+            jumpToPage={jumpToPdfPage}
             onCreateHighlight={(position, color, note) => handleCreateHighlight(position.text, position, color, note)}
             onDeleteHighlight={handleDeleteHighlight}
             onSaveNote={handleSaveNote}
@@ -508,6 +545,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
             initialProgressFraction={article.progressFraction}
             onProgressChange={handleProgressChange}
             onSectionTextChange={setEpubSectionText}
+            jumpToCfi={jumpToEpubCfi}
             onCreateHighlight={(cfi, selectedText, color, note) =>
               handleCreateHighlight(selectedText, { type: "epub", cfi }, color, note)
             }
@@ -583,6 +621,17 @@ export function ReaderView({ articleId }: { articleId: string }) {
           </div>
         )}
       </main>
+
+      {showNotebook && (
+        <NotebookPanel
+          article={article}
+          highlights={highlights}
+          onJump={handleJumpToHighlight}
+          onDeleteHighlight={handleDeleteHighlight}
+          onSaveNote={handleSaveNote}
+          onDeleteNote={handleDeleteNote}
+        />
+      )}
 
       {reader.showProgressBar && <ReaderProgressBar progress={progress} remainingMinutes={remainingMinutes} />}
     </div>

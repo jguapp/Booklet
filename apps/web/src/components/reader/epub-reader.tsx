@@ -32,6 +32,10 @@ interface EpubReaderProps {
   onDeleteHighlight: (highlightId: string) => void;
   onSaveNote: (highlightId: string, noteText: string) => void;
   onDeleteNote: (highlightId: string) => void;
+  /** Set (with a fresh nonce, so re-clicking the same target re-triggers)
+   * to navigate to a CFI from outside -- e.g. the Notebook panel's
+   * highlights list. */
+  jumpToCfi?: { cfi: string; nonce: number } | null;
 }
 
 interface PendingSelection {
@@ -78,6 +82,7 @@ export function EpubReader({
   onDeleteHighlight,
   onSaveNote,
   onDeleteNote,
+  jumpToCfi,
 }: EpubReaderProps) {
   const [rendition, setRendition] = useState<Rendition | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -241,6 +246,13 @@ export function EpubReader({
     // we actually were.
     if (currentCfiRef.current) rendition.display(currentCfiRef.current);
   }, [rendition, theme, size]);
+
+  // Jump to a CFI from outside (the Notebook panel's highlights list) --
+  // same rendition.display() call the re-layout effect above already uses.
+  useEffect(() => {
+    if (!jumpToCfi || !rendition) return;
+    rendition.display(jumpToCfi.cfi);
+  }, [jumpToCfi, rendition]);
 
   // Keep the rendered highlight annotations in sync with the highlights
   // list -- epub.js's annotations.add()/.remove() are the primitives; this
