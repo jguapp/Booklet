@@ -6,7 +6,7 @@ import { formatReadingTime, formatRelativeDate } from "@/lib/format";
 import { SourceIcon } from "./source-icon";
 import { StatusBadge } from "./status-badge";
 import { CollectionMenu } from "./collection-menu";
-import { IconArchive, IconInbox, IconStar, IconTrash } from "@/components/ui/icons";
+import { IconArchive, IconFolder, IconInbox, IconStar, IconTrash } from "@/components/ui/icons";
 import { ARTICLE_DRAG_MIME } from "@/lib/dnd/trash-drop";
 import { cn } from "@/lib/cn";
 
@@ -18,6 +18,12 @@ interface ArticleCardProps {
   collections?: Collection[];
   authenticated?: boolean;
   onCollectionCreated?: (collection: Collection) => void;
+  /** Which of `collections` this article currently belongs to -- a bulk
+   * fetch (loadCollectionMemberships), not a per-card one, see whichever
+   * page renders this card. Undefined (not just empty) while that fetch is
+   * still in flight, so the badge row doesn't flash empty-then-populated. */
+  memberCollections?: Collection[];
+  onMembershipChange?: (collectionId: string, isMember: boolean) => void;
 }
 
 export function ArticleCard({
@@ -28,6 +34,8 @@ export function ArticleCard({
   collections,
   authenticated,
   onCollectionCreated,
+  memberCollections,
+  onMembershipChange,
 }: ArticleCardProps) {
   const metaParts = [
     article.siteName ?? article.author,
@@ -106,6 +114,7 @@ export function ArticleCard({
               allCollections={collections}
               authenticated={authenticated}
               onCollectionCreated={onCollectionCreated}
+              onMembershipChange={onMembershipChange}
             />
           )}
           {onDelete && (
@@ -130,6 +139,25 @@ export function ArticleCard({
       </h3>
 
       <p className="font-sans text-xs text-ink-faint">{metaParts.join(" · ")}</p>
+
+      {memberCollections && memberCollections.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {memberCollections.map((c) => (
+            <span
+              key={c.id}
+              title={`In collection: ${c.name}`}
+              className="flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 font-sans text-[11px] text-ink-muted"
+            >
+              {c.color ? (
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: c.color }} aria-hidden />
+              ) : (
+                <IconFolder className="h-2.5 w-2.5 shrink-0" />
+              )}
+              {c.name}
+            </span>
+          ))}
+        </div>
+      )}
 
       {article.tags.length > 0 && (
         <div className="flex flex-wrap gap-1">
