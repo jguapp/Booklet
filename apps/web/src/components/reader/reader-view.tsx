@@ -56,6 +56,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const [progress, setProgress] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [fileBlob, setFileBlob] = useState<Blob | null>(null);
+  const [fileLoadStatus, setFileLoadStatus] = useState<"idle" | "loading" | "loaded" | "failed">("idle");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [pdfPageText, setPdfPageText] = useState("");
   const [epubSectionText, setEpubSectionText] = useState("");
@@ -78,6 +79,14 @@ export function ReaderView({ articleId }: { articleId: string }) {
   // down) and by the render logic at the bottom of this component.
   const usesPdfReader = article?.sourceType === "PDF" && fileBlob !== null;
   const usesEpubReader = article?.sourceType === "EPUB" && fileBlob !== null;
+  // True for the gap between "we know this is a PDF/EPUB" and "the real
+  // file has loaded (or definitively failed to)" -- distinct from a genuine
+  // load failure, which still needs to fall through to the extracted-text
+  // view below. Without this, that same fallback renders during the gap
+  // too, indistinguishable from "this is all there is" even though the real
+  // file is just still downloading/parsing.
+  const isFileLoadPending =
+    (article?.sourceType === "PDF" || article?.sourceType === "EPUB") && fileLoadStatus === "loading";
 
   const refresh = useCallback(() => {
     if (authStatus === "loading") return;
@@ -117,6 +126,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
         loadedFileKeyRef.current = null;
         if (!cancelled) {
           setFileBlob(null);
+          setFileLoadStatus("idle");
           setDownloadUrl(null);
         }
         return;
@@ -124,9 +134,15 @@ export function ReaderView({ articleId }: { articleId: string }) {
       const key = `${article.id}:${article.sourceType}:${isAuthenticated}`;
       if (key === loadedFileKeyRef.current) return;
       loadedFileKeyRef.current = key;
+      setFileLoadStatus("loading");
       const blob = await loadArticleFile(article.id, isAuthenticated).catch(() => null);
-      if (cancelled || !blob) return;
+      if (cancelled) return;
+      if (!blob) {
+        setFileLoadStatus("failed");
+        return;
+      }
       setFileBlob(blob);
+      setFileLoadStatus("loaded");
       objectUrl = URL.createObjectURL(blob);
       setDownloadUrl(objectUrl);
     }
@@ -509,7 +525,11 @@ export function ReaderView({ articleId }: { articleId: string }) {
         {article.sourceType !== "HTML" && (
           <p className="mb-6 font-sans text-xs text-ink-faint">
             {article.sourceType === "PDF" ? "PDF" : "EPUB"}
-            {!usesPdfReader && !usesEpubReader ? " · shown as extracted text, not the original page layout" : ""}
+            {isFileLoadPending
+              ? " · loading the original file…"
+              : !usesPdfReader && !usesEpubReader
+                ? " · shown as extracted text, not the original page layout"
+                : ""}
             {article.originalFilename ? ` · ${article.originalFilename}` : ""}
             {downloadUrl && (
               <>
@@ -553,6 +573,11 @@ export function ReaderView({ articleId }: { articleId: string }) {
             onSaveNote={handleSaveNote}
             onDeleteNote={handleDeleteNote}
           />
+        ) : isFileLoadPending ? (
+          <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border px-5 py-16 text-center">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-ink-faint border-t-transparent" />
+            <p className="font-sans text-sm text-ink-muted">Loading the original {article.sourceType === "PDF" ? "PDF" : "EPUB"}…</p>
+          </div>
         ) : isTextRenderable ? (
           <ArticleContent
             html={renderHtml ?? ""}

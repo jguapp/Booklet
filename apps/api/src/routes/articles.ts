@@ -255,6 +255,11 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         "Content-Disposition",
         `inline; filename="${(article.originalFilename ?? "download").replace(/"/g, "")}"`,
       );
+      // fileStorageKey is set once at upload and never replaced in place
+      // (only deleted, on the article's own deletion) -- safe to tell the
+      // browser this response never needs revalidating, so re-opening the
+      // same PDF/EPUB doesn't re-download it every time.
+      reply.header("Cache-Control", "private, max-age=31536000, immutable");
       return reply.send(buffer);
     },
   );
