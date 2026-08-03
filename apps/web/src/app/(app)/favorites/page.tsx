@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Article, Collection } from "@booklet/shared";
+import type { Article, ArticleCollectionMemberships, Collection } from "@booklet/shared";
 import { ArticleCard } from "@/components/library/article-card";
 import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
-import { loadCollections } from "@/lib/data/collections";
+import { loadCollectionMemberships, loadCollections } from "@/lib/data/collections";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
 
@@ -12,17 +12,21 @@ export default function FavoritesPage() {
   const { status, isAuthenticated } = useAuth();
   const [articles, setArticles] = useState<Article[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [membership, setMembership] = useState<ArticleCollectionMemberships>({});
   const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
-    Promise.all([loadArticles(isAuthenticated), loadCollections(isAuthenticated)]).then(
-      ([loadedArticles, loadedCollections]) => {
-        setArticles(loadedArticles);
-        setCollections(loadedCollections);
-        setLoaded(true);
-      },
-    );
+    Promise.all([
+      loadArticles(isAuthenticated),
+      loadCollections(isAuthenticated),
+      loadCollectionMemberships(isAuthenticated),
+    ]).then(([loadedArticles, loadedCollections, loadedMembership]) => {
+      setArticles(loadedArticles);
+      setCollections(loadedCollections);
+      setMembership(loadedMembership);
+      setLoaded(true);
+    });
   }, [status, isAuthenticated]);
 
   useEffect(() => {
@@ -51,6 +55,14 @@ export default function FavoritesPage() {
     setArticles((prev) => prev.filter((a) => a.id !== article.id));
   }
 
+  function handleMembershipChange(articleId: string, collectionId: string, isMember: boolean) {
+    setMembership((prev) => {
+      const current = prev[articleId] ?? [];
+      const next = isMember ? [...current, collectionId] : current.filter((id) => id !== collectionId);
+      return { ...prev, [articleId]: next };
+    });
+  }
+
   if (!loaded) return null;
 
   return (
@@ -77,6 +89,8 @@ export default function FavoritesPage() {
               collections={collections}
               authenticated={isAuthenticated}
               onCollectionCreated={(c) => setCollections((prev) => [...prev, c].sort((a, b) => a.name.localeCompare(b.name)))}
+              memberCollections={collections.filter((c) => (membership[article.id] ?? []).includes(c.id))}
+              onMembershipChange={(collectionId, isMember) => handleMembershipChange(article.id, collectionId, isMember)}
             />
           ))}
         </div>

@@ -98,10 +98,71 @@ test("adding an article to a brand new collection from the card menu, with no co
   // both created and the article's already a member of it.
   await expect(nameInput).toHaveCount(0);
 
+  // The card itself is tagged with its new collection immediately, with no
+  // reload -- this is the onMembershipChange path, not a refetch.
+  await expect(card.getByTitle("In collection: Weekend Reads")).toBeVisible();
+
   // Shows up in the sidebar immediately, no reload needed.
   const sidebarLink = page.locator("nav a", { hasText: "Weekend Reads" });
   await expect(sidebarLink).toBeVisible();
 
   await sidebarLink.click();
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
+
+  // Survives a real reload too -- not just optimistic local state.
+  await page.reload();
+  await expect(page.locator("a[href^='/reader/']").first().getByTitle("In collection: Weekend Reads")).toBeVisible();
+});
+
+test("removing an article from a collection removes its badge from the card", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("button", { name: /save article/i }).click();
+  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await waitForSaveModalToClose(page);
+
+  const card = page.locator("a[href^='/reader/']").first();
+  await card.hover();
+  await card.getByTitle("Add to collection").click();
+  const menu = page.locator("div.absolute.right-0.top-7");
+  await menu.getByText("New collection", { exact: true }).click();
+  await page.getByPlaceholder("Collection name").fill("Temp Collection");
+  await page.getByRole("button", { name: "Create & add" }).click();
+  await expect(card.getByTitle("In collection: Temp Collection")).toBeVisible();
+
+  // The menu stays open after creating -- toggle the same collection back
+  // off directly, no need to reopen it.
+  await menu.getByText("Temp Collection", { exact: true }).click();
+  await expect(card.getByTitle("In collection: Temp Collection")).toHaveCount(0);
+});
+
+/** Authenticated mode fetches membership from the real bulk API route
+ * (GET /api/articles/collection-memberships) instead of IndexedDB -- the
+ * rest of this file runs anonymous/local, so this is the only coverage of
+ * that actual network round trip. */
+test("collection badges work in authenticated mode too", async ({ page }) => {
+  const email = `collection-badge-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
+  await page.goto("/signup");
+  await page.getByLabel("Name").fill("Collection Badge Test");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("correct horse battery staple");
+  await page.getByRole("button", { name: /create account/i }).click();
+  await page.waitForURL(/\/library/, { timeout: 15_000 });
+
+  await page.getByRole("button", { name: /save article/i }).click();
+  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await waitForSaveModalToClose(page);
+
+  const card = page.locator("a[href^='/reader/']").first();
+  await card.hover();
+  await card.getByTitle("Add to collection").click();
+  const menu = page.locator("div.absolute.right-0.top-7");
+  await menu.getByText("New collection", { exact: true }).click();
+  await page.getByPlaceholder("Collection name").fill("Work Reading");
+  await page.getByRole("button", { name: "Create & add" }).click();
+  await expect(card.getByTitle("In collection: Work Reading")).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator("a[href^='/reader/']").first().getByTitle("In collection: Work Reading")).toBeVisible();
 });

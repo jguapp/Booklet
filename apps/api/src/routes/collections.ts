@@ -1,5 +1,11 @@
 import type { FastifyInstance } from "fastify";
-import type { Collection, CollectionFilter, CreateCollectionRequest, UpdateCollectionRequest } from "@booklet/shared";
+import type {
+  ArticleCollectionMemberships,
+  Collection,
+  CollectionFilter,
+  CreateCollectionRequest,
+  UpdateCollectionRequest,
+} from "@booklet/shared";
 import type { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
@@ -220,6 +226,41 @@ export async function registerCollectionRoutes(app: FastifyInstance): Promise<vo
       return reply.code(204).send();
     },
   );
+
+  // Bulk membership for every article at once -- library-card badges need
+  // to know "is this article in a collection" for a whole page of cards,
+  // and a per-card call to the route below would be N+1. Ordinary
+  // (non-smart) membership is one query; each smart collection then costs
+  // one more (reusing filterToArticleWhere, the same logic its own
+  // /articles route already uses) -- bounded by how many smart collections
+  // exist, not how many articles are on screen.
+  app.get("/api/articles/collection-memberships", { preHandler: requireAuth }, async (request, reply) => {
+    const [collections, links] = await Promise.all([
+      prisma.collection.findMany({ where: { userId: request.userId! } }),
+      prisma.articleCollection.findMany({
+        where: { collection: { userId: request.userId! } },
+        select: { articleId: true, collectionId: true },
+      }),
+    ]);
+
+    const membership: ArticleCollectionMemberships = {};
+    for (const link of links) {
+      (membership[link.articleId] ??= []).push(link.collectionId);
+    }
+
+    const smartCollections = collections.filter((c) => c.filter);
+    for (const collection of smartCollections) {
+      const matches = await prisma.article.findMany({
+        where: filterToArticleWhere(request.userId!, collection.filter as CollectionFilter),
+        select: { id: true },
+      });
+      for (const { id } of matches) {
+        (membership[id] ??= []).push(collection.id);
+      }
+    }
+
+    return reply.send(membership);
+  });
 
   app.get<{ Params: { id: string } }>(
     "/api/articles/:id/collections",

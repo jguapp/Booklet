@@ -21,6 +21,10 @@ interface CollectionMenuProps {
    * list without a full reload, so it shows up immediately in the sidebar
    * and any other open menu too. */
   onCollectionCreated?: (collection: Collection) => void;
+  /** Called right after a successful add/remove -- lets the card's badge
+   * (article-card.tsx) update instantly instead of waiting on a full
+   * membership refetch. */
+  onMembershipChange?: (collectionId: string, isMember: boolean) => void;
 }
 
 export function CollectionMenu({
@@ -28,6 +32,7 @@ export function CollectionMenu({
   allCollections: allCollectionsProp,
   authenticated,
   onCollectionCreated,
+  onMembershipChange,
 }: CollectionMenuProps) {
   // Smart collections have no manually-managed membership -- their
   // contents are computed from a filter, so they don't belong in an
@@ -87,6 +92,7 @@ export function CollectionMenu({
         else next.add(collectionId);
         return next;
       });
+      onMembershipChange?.(collectionId, !isMember);
     } finally {
       setPending(null);
     }
@@ -105,6 +111,7 @@ export function CollectionMenu({
       await addArticleToCollection(articleId, created.id, authenticated);
       setMemberIds((prev) => new Set(prev).add(created.id));
       onCollectionCreated?.(created);
+      onMembershipChange?.(created.id, true);
       notifyCollectionsChanged(); // the sidebar owns its own separate collections list
       setCreating(false);
       setNewName("");
