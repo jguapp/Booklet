@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Article, ArticleStatus, Collection, Highlight } from "@booklet/shared";
@@ -275,8 +274,10 @@ function LibraryPageInner() {
         <div className="mt-10">
           <h2 className="mb-3 font-serif text-lg font-semibold text-ink">Highlights</h2>
           <div className="flex flex-col gap-2">
+            {/* Plain <a>, not next/link's <Link> -- see article-card.tsx's
+                comment on why entering the reader needs a hard navigation. */}
             {searchResults.highlights.map((h) => (
-              <Link
+              <a
                 key={h.id}
                 href={`/reader/${h.articleId}`}
                 className="block rounded-md border border-border bg-surface px-4 py-3 transition-colors hover:border-accent/40"
@@ -285,7 +286,7 @@ function LibraryPageInner() {
                 {h.annotation && (
                   <p className="mt-1 font-sans text-xs text-ink-muted">{h.annotation.noteText}</p>
                 )}
-              </Link>
+              </a>
             ))}
           </div>
         </div>

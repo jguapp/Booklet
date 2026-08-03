@@ -170,7 +170,12 @@ export function CommandPalette({ navItems, collections, onClose }: CommandPalett
         label: r.title ?? "Untitled",
         sublabel: "Article",
         Icon: IconSearch,
-        run: () => go(`/reader/${r.id}`),
+        // A real (hard) navigation, not go()'s router.push() -- see
+        // article-card.tsx's comment on why entering the reader needs one.
+        run: () => {
+          onClose();
+          window.location.assign(`/reader/${r.id}`);
+        },
         score: 50,
       });
     }

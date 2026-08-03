@@ -3,7 +3,8 @@ import { waitForSaveModalToClose } from "./helpers";
 
 /**
  * Kokoro (lib/reader/kokoro-tts.ts) -- the open-source, client-side TTS
- * voice option, running entirely in-browser via WASM/WebGPU with no
+ * voice option, running entirely in-browser via WASM (WebGPU is
+ * deliberately never used -- see kokoro-tts.ts's DEVICE comment) with no
  * system-TTS dependency. Unlike the native SpeechSynthesis path (see
  * text-to-speech.spec.ts, which has to skip on headless Linux CI for lack
  * of installed system voices), this works the same in headless CI as on a
@@ -14,15 +15,14 @@ import { waitForSaveModalToClose } from "./helpers";
  * timeout instead of a tight one.
  */
 
-test("selecting a Kokoro voice and pressing play actually generates and plays real audio", async ({ page }) => {
-  test.setTimeout(180_000);
-
-  // use-text-to-speech.ts plays Kokoro chunks through `new Audio(url)` --
-  // a real, playing element, but deliberately never attached to the DOM
-  // (nothing needs to render it), so `document.querySelectorAll("audio")`
-  // can never see it. Instrument the real play() call instead of querying
-  // the DOM for evidence that audio genuinely started (not just that the
-  // UI *claims* "playing").
+// Real, valid speech samples stay within [-1, 1]; a corrupted-inference
+// bug (the actual "loads forever, then a burst of static" symptom this
+// guards against -- WebGPU produced samples up to ~10^26 for this exact
+// model) blows samples up to an enormous, easily-distinguishable
+// magnitude. Checking that HTMLMediaElement.play() merely resolved (as
+// this test did before) can't tell the two apart -- a garbage WAV plays
+// "successfully" too, it just sounds like static.
+async function instrumentAudioCapture(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     (window as unknown as { __playCount: number }).__playCount = 0;
     const originalPlay = HTMLMediaElement.prototype.play;
@@ -33,7 +33,38 @@ test("selecting a Kokoro voice and pressing play actually generates and plays re
       });
       return result;
     };
+
+    (window as unknown as { __audioMaxAbs: number[] }).__audioMaxAbs = [];
+    const origCreateObjectURL = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (obj: Blob | MediaSource) => {
+      if (obj instanceof Blob && obj.type === "audio/wav") {
+        obj.arrayBuffer().then((buf) => {
+          const view = new DataView(buf);
+          let maxAbs = 0;
+          for (let i = 44; i + 4 <= buf.byteLength; i += 4) {
+            const v = view.getFloat32(i, true);
+            if (Number.isFinite(v)) maxAbs = Math.max(maxAbs, Math.abs(v));
+          }
+          (window as unknown as { __audioMaxAbs: number[] }).__audioMaxAbs.push(maxAbs);
+        });
+      }
+      return origCreateObjectURL(obj);
+    };
   });
+}
+
+test("selecting a Kokoro voice and pressing play actually generates and plays real (not corrupted) audio", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+
+  // use-text-to-speech.ts plays Kokoro chunks through `new Audio(url)` --
+  // a real, playing element, but deliberately never attached to the DOM
+  // (nothing needs to render it), so `document.querySelectorAll("audio")`
+  // can never see it. Instrument the real play() call instead of querying
+  // the DOM for evidence that audio genuinely started (not just that the
+  // UI *claims* "playing").
+  await instrumentAudioCapture(page);
 
   await page.goto("/settings/reading");
   await page.getByRole("combobox", { name: "Read-aloud voice" }).selectOption({ label: "Heart (American, female)" });
@@ -61,6 +92,20 @@ test("selecting a Kokoro voice and pressing play actually generates and plays re
       timeout: 15_000,
     })
     .toBeGreaterThan(0);
+
+  // Regression guard for a real bug found by hand: onnxruntime-web's
+  // WebGPU backend produced numerically-corrupted inference output for
+  // this model (samples up to ~10^26, real speech stays within [-1, 1]) --
+  // played through <audio>, that's exactly "loads forever, then a burst of
+  // static." kokoro-tts.ts now never requests WebGPU, but this asserts on
+  // the actual generated samples so a regression (a future dependency bump
+  // re-enabling it, say) fails loudly here instead of shipping silently.
+  const maxAbsValues = await page.evaluate(() => (window as unknown as { __audioMaxAbs: number[] }).__audioMaxAbs);
+  expect(maxAbsValues.length).toBeGreaterThan(0);
+  for (const maxAbs of maxAbsValues) {
+    expect(maxAbs).toBeLessThanOrEqual(1.5); // real audio; garbage inference is orders of magnitude larger
+    expect(maxAbs).toBeGreaterThan(0); // not dead silence either
+  }
 
   await page.getByTitle("Stop reading aloud").click();
   await expect(page.getByTitle("Read aloud")).toBeVisible();

@@ -1,13 +1,14 @@
 /**
  * Open-source, zero-cost TTS: Kokoro (Apache-2.0, 82M params) running
  * entirely client-side via kokoro-js (built on @huggingface/transformers --
- * WASM/WebGPU + ONNX Runtime Web). No server, no API key, no per-request
- * cost -- the ~90MB quantized model downloads once from Hugging Face's CDN
- * on first use and is cached by the browser (transformers.js's own model
- * cache) after that. See use-text-to-speech.ts for how this plugs into the
- * existing play/pause/resume/stop reader controls, falling back to the
- * native SpeechSynthesis engine when a voice isn't selected or this fails
- * to load (unsupported browser, network hiccup on first download).
+ * WASM + ONNX Runtime Web; WebGPU is deliberately not used, see DEVICE
+ * below). No server, no API key, no per-request cost -- the ~90MB
+ * quantized model downloads once from Hugging Face's CDN on first use and
+ * is cached by the browser (transformers.js's own model cache) after that.
+ * See use-text-to-speech.ts for how this plugs into the existing
+ * play/pause/resume/stop reader controls, falling back to the native
+ * SpeechSynthesis engine when a voice isn't selected or this fails to load
+ * (unsupported browser, network hiccup on first download).
  */
 import { KokoroTTS, TextSplitterStream } from "kokoro-js";
 
@@ -82,38 +83,43 @@ export function isKokoroVoice(voiceId: string): boolean {
   return voiceId !== NATIVE_VOICE_ID;
 }
 
-// `"gpu" in navigator` only proves the WebGPU *API* exists -- it doesn't
-// mean a real adapter is available. Confirmed by hand: on a real Windows
-// Chromium without a usable GPU adapter, `navigator.gpu` exists but
-// `requestAdapter()` resolves to `null` ("No available adapters." logged
-// by the browser itself), and onnxruntime-web's WebGPU backend just hangs
-// rather than cleanly failing when handed that. Actually requesting an
-// adapter first (and falling back to wasm if it comes back null) avoids
-// that hang instead of only checking whether the API is present.
-async function pickDevice(): Promise<"webgpu" | "wasm"> {
-  if (typeof navigator === "undefined" || !("gpu" in navigator)) return "wasm";
-  try {
-    const adapter = await (navigator as unknown as { gpu: { requestAdapter(): Promise<unknown> } }).gpu.requestAdapter();
-    return adapter ? "webgpu" : "wasm";
-  } catch {
-    return "wasm";
-  }
-}
+// WebGPU is deliberately never used, even when available -- confirmed by
+// hand (raw sample inspection, not just "it sounds off") that
+// onnxruntime-web's WebGPU backend produces numerically-corrupted output
+// for this model on real Windows Chromium: generated samples came back
+// with |value| up to ~10^26 (valid audio is within [-1, 1]), regardless of
+// dtype (reproduced with both "q8" and "fp32" -- the fp32 device="webgpu"
+// combination the kokoro-js README itself recommends). Encoded into a WAV
+// and played, that's exactly what "loads forever, then a burst of static"
+// is -- not a WASM/WebGPU speed tradeoff, a genuine correctness bug in the
+// WebGPU execution path for this model/environment. WASM has none of this
+// (confirmed: sample magnitudes stay within [-1, 1], real speech).
+const DEVICE = "wasm";
 
 let ttsPromise: Promise<KokoroTTS> | null = null;
 
 /** Loaded once per page session and reused for every voice/article after
  * that -- the model itself doesn't depend on which voice is picked (voices
  * are small per-voice style vectors applied at generation time, not
- * separate models). */
+ * separate models).
+ *
+ * WASM speed depends heavily on `window.crossOriginIsolated`: without it,
+ * `SharedArrayBuffer` isn't available and onnxruntime-web's WASM backend
+ * silently falls back to single-threaded execution -- confirmed by hand,
+ * ~13s to first audio on a warm model cache on a 16-core machine, entirely
+ * single-threaded. next.config.ts sets the Cross-Origin-Opener-Policy/
+ * Cross-Origin-Embedder-Policy headers needed for this on /reader/* routes,
+ * but that only takes effect on a real (hard) navigation into the reader --
+ * see article-card.tsx's comment on why every link into /reader/:id is a
+ * plain <a>, not next/link's <Link>. */
 export function loadKokoro(): Promise<KokoroTTS> {
   if (!ttsPromise) {
-    ttsPromise = pickDevice()
-      .then((device) => withOrtNoiseSuppressed(() => KokoroTTS.from_pretrained(MODEL_ID, { dtype: "q8", device })))
-      .catch((err: unknown) => {
+    ttsPromise = withOrtNoiseSuppressed(() => KokoroTTS.from_pretrained(MODEL_ID, { dtype: "q8", device: DEVICE })).catch(
+      (err: unknown) => {
         ttsPromise = null; // don't cache a permanent failure -- allow retry on the next play()
         throw err;
-      });
+      },
+    );
   }
   return ttsPromise;
 }
