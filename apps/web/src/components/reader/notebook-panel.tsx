@@ -135,6 +135,7 @@ export function NotebookPanel({
               >
                 <HighlightListItem
                   highlight={h}
+                  articleExtractedText={article.extractedText}
                   onDelete={onDeleteHighlight}
                   onSaveNote={onSaveNote}
                   onDeleteNote={onDeleteNote}
