@@ -15,6 +15,13 @@ interface HighlightListItemProps {
   highlight: Highlight;
   /** Pass when this list isn't already scoped to one article (e.g. the Highlights dashboard). */
   article?: Article;
+  /** The owning article's extractedText, for computing a "Paragraph N"
+   * citation on HTML/text highlights -- separate from `article` since a
+   * caller already scoped to one article (the reader's own Notebook panel)
+   * still needs this for the citation even though it deliberately omits
+   * `article` to skip the redundant self-referential title link. Ignored
+   * when `article` is passed -- that already carries extractedText. */
+  articleExtractedText?: string | null;
   /** Extra action row, e.g. Daily Review's remembered/forgot/archive buttons. */
   actions?: React.ReactNode;
   onDelete?: (highlightId: string) => void;
@@ -25,6 +32,7 @@ interface HighlightListItemProps {
 export function HighlightListItem({
   highlight,
   article,
+  articleExtractedText,
   actions,
   onDelete,
   onSaveNote,
@@ -33,7 +41,7 @@ export function HighlightListItem({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(highlight.annotation?.noteText ?? "");
   const [confirming, setConfirming] = useState<"highlight" | "note" | null>(null);
-  const citation = highlightCitation(highlight);
+  const citation = highlightCitation(highlight, article?.extractedText ?? articleExtractedText);
 
   function startEditing() {
     setDraft(highlight.annotation?.noteText ?? "");

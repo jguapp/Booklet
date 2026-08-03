@@ -82,3 +82,39 @@ test("an EPUB highlight's citation shows a section reference", async ({ page }) 
   await page.goto("/highlights");
   await expect(page.getByText(/^Section \d+$/)).toBeVisible();
 });
+
+test("an HTML highlight's citation shows which paragraph it's in, not just paragraph 1", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("button", { name: /save article/i }).click();
+  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Tag_(metadata)"); // long -- multiple real paragraphs
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await waitForSaveModalToClose(page);
+
+  await page.locator("a[href^='/reader/']").first().click();
+  await expect(page).toHaveURL(/\/reader\//);
+
+  // The 3rd paragraph specifically -- proves this counts real boundaries
+  // instead of always landing on "Paragraph 1".
+  const paragraph = page.locator("[data-article-content] p").nth(2);
+  await expect(paragraph).toBeVisible({ timeout: 10_000 });
+  await paragraph.scrollIntoViewIfNeeded();
+  await paragraph.evaluate((el) => {
+    const textNode = el.firstChild;
+    if (!textNode) throw new Error("paragraph has no text node");
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, Math.min(20, textNode.textContent?.length ?? 0));
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await page.getByTitle("Yellow").click();
+
+  await page.goto("/highlights");
+  const citation = page.getByText(/^Paragraph \d+$/);
+  await expect(citation).toBeVisible();
+  const text = await citation.textContent();
+  const paragraphNumber = Number(text!.replace("Paragraph ", ""));
+  expect(paragraphNumber).toBeGreaterThan(1);
+});
