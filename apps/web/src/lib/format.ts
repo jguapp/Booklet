@@ -7,6 +7,18 @@ export function formatRelativeDate(iso: string, now: Date = new Date()): string 
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** "Due today" / "Due tomorrow" / "Due in N days" -- when a highlight will
+ * next resurface in the Daily Review queue (Highlight.nextDueAt). null
+ * means it's never been reviewed, so it's already eligible any time it's
+ * picked -- see resurface.ts's isDue(). */
+export function formatNextDue(nextDueAt: string | null, now: Date = new Date()): string {
+  if (nextDueAt === null) return "Due whenever it's next picked";
+  const daysUntil = Math.ceil((new Date(nextDueAt).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  if (daysUntil <= 0) return "Due today";
+  if (daysUntil === 1) return "Due tomorrow";
+  return `Due in ${daysUntil} days`;
+}
+
 /** "Deletes today" / "Deletes in N days" -- retentionDays after `sinceIso`. */
 export function formatDaysRemaining(sinceIso: string, retentionDays: number, now: Date = new Date()): string {
   const purgeAt = new Date(sinceIso).getTime() + retentionDays * 24 * 60 * 60 * 1000;

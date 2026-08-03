@@ -6,13 +6,22 @@ import { applySm2Review, feedbackToQuality, selectHighlightsToResurface } from "
 import { Button } from "@/components/ui/button";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
 import { loadArticles } from "@/lib/data/articles";
-import { updateHighlightFeedback } from "@/lib/data/highlights";
+import { loadHighlights, updateHighlightFeedback } from "@/lib/data/highlights";
 import { emailDigest, loadCurrentDigest } from "@/lib/data/digests";
-import { loadHighlights as loadLocalHighlights } from "@/lib/data/highlights";
 import { loadUserSettings } from "@/lib/mock/store";
+import { formatNextDue } from "@/lib/format";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useToast } from "@/lib/toast/toast-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
+import { cn } from "@/lib/cn";
+
+type LibraryTab = "REMEMBERED" | "FORGOT" | "ARCHIVED";
+
+const LIBRARY_TABS: { value: LibraryTab; label: string }[] = [
+  { value: "REMEMBERED", label: "Remembered" },
+  { value: "FORGOT", label: "Forgot" },
+  { value: "ARCHIVED", label: "Archived" },
+];
 
 export default function ResurfacePage() {
   const { status, isAuthenticated } = useAuth();
@@ -23,33 +32,37 @@ export default function ResurfacePage() {
   const [digestId, setDigestId] = useState<string | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("REMEMBERED");
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
     loadArticles(isAuthenticated).then(async (loadedArticles) => {
       setArticles(loadedArticles);
 
+      // loadArticles() already excludes trash -- a trashed article's
+      // highlights shouldn't keep resurfacing (a stronger "I'm done with
+      // this" signal than archiving, whose highlights stay eligible on
+      // purpose), so filter against the article IDs that survived that.
+      // The full set (not just today's batch) so the library section below
+      // can browse everything that's ever been remembered/forgotten/archived,
+      // not just what's currently up for review.
+      const nonTrashedArticleIds = new Set(loadedArticles.map((a) => a.id));
+      const loadedHighlights = (await loadHighlights(isAuthenticated)).filter((h) =>
+        nonTrashedArticleIds.has(h.articleId),
+      );
+      setHighlights(loadedHighlights);
+
       if (isAuthenticated) {
         // Server picks and persists the batch (see GET /api/digests/current),
         // so a reload -- or a second device -- sees the same highlights
         // instead of a freshly re-rolled random selection.
         const digest = await loadCurrentDigest();
-        const batchHighlights = digest.highlights ?? [];
-        setHighlights(batchHighlights);
-        setBatchIds(batchHighlights.map((h) => h.id));
+        setBatchIds((digest.highlights ?? []).map((h) => h.id));
         setDigestId(digest.id);
         return;
       }
 
-      // loadArticles() already excludes trash -- a trashed article's
-      // highlights shouldn't keep resurfacing (a stronger "I'm done with
-      // this" signal than archiving, whose highlights stay eligible on
-      // purpose), so filter against the article IDs that survived that.
-      const nonTrashedArticleIds = new Set(loadedArticles.map((a) => a.id));
-      const loadedHighlights = (await loadLocalHighlights(false)).filter((h) =>
-        nonTrashedArticleIds.has(h.articleId),
-      );
-      setHighlights(loadedHighlights);
       const highlightsPerDigest = loadUserSettings().highlightsPerDigest;
       const candidates: ResurfaceCandidate[] = loadedHighlights.map((h) => ({
         id: h.id,
@@ -73,6 +86,40 @@ export default function ResurfacePage() {
     const ids = new Set(batchIds);
     return highlights.filter((h) => ids.has(h.id) && !reviewedIds.has(h.id));
   }, [highlights, batchIds, reviewedIds]);
+
+  // Archived is checked first -- archiving is a separate, later action from
+  // feedback (see applyFeedback below), so a highlight can carry a stale
+  // REMEMBERED/FORGOT from before it was archived. Once archived it's
+  // excluded from rotation regardless (resurface.ts's isDue()), so this is
+  // the terminal bucket, checked ahead of the feedback ones.
+  const libraryHighlights = useMemo(() => {
+    return highlights.filter((h) => {
+      if (libraryTab === "ARCHIVED") return h.resurfaceArchivedAt !== null;
+      return h.resurfaceArchivedAt === null && h.lastFeedback === libraryTab;
+    });
+  }, [highlights, libraryTab]);
+
+  const libraryCounts = useMemo(() => {
+    const counts: Record<LibraryTab, number> = { REMEMBERED: 0, FORGOT: 0, ARCHIVED: 0 };
+    for (const h of highlights) {
+      if (h.resurfaceArchivedAt !== null) counts.ARCHIVED++;
+      else if (h.lastFeedback === "REMEMBERED") counts.REMEMBERED++;
+      else if (h.lastFeedback === "FORGOT") counts.FORGOT++;
+    }
+    return counts;
+  }, [highlights]);
+
+  // Restoring isn't itself a recall judgment -- unlike applyFeedback below,
+  // it deliberately leaves lastFeedback/SM-2 state untouched, just clears
+  // the archived flag so the highlight re-enters rotation at whatever
+  // schedule it already had.
+  async function handleRestore(highlightId: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await updateHighlightFeedback(target, { resurfaceArchivedAt: null }, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+    toast("Restored -- it's back in rotation.");
+  }
 
   async function applyFeedback(highlightId: string, feedback: ResurfaceFeedback | null, archive: boolean) {
     const target = highlights.find((h) => h.id === highlightId);
@@ -189,6 +236,89 @@ export default function ResurfacePage() {
             }
           />
         ))}
+      </div>
+
+      <div className="mt-12 border-t border-border pt-8">
+        <button
+          type="button"
+          onClick={() => setShowLibrary((v) => !v)}
+          className="flex w-full items-center justify-between gap-4 text-left"
+        >
+          <div>
+            <h2 className="font-serif text-lg font-semibold text-ink">Highlights library</h2>
+            <p className="mt-0.5 font-sans text-sm text-ink-muted">
+              Everything currently remembered, forgotten, or archived -- browse it, or move a highlight between
+              sections at any time.
+            </p>
+          </div>
+          <span className="shrink-0 font-sans text-xs font-medium text-accent">{showLibrary ? "Hide" : "Show"}</span>
+        </button>
+
+        {showLibrary && (
+          <div className="mt-5">
+            <div className="mb-4 flex gap-1 rounded-sm bg-surface-2 p-1">
+              {LIBRARY_TABS.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => setLibraryTab(t.value)}
+                  className={cn(
+                    "flex-1 rounded-sm px-3 py-1.5 font-sans text-sm font-medium transition-colors",
+                    libraryTab === t.value ? "bg-accent text-accent-contrast shadow-sm" : "text-ink-muted hover:text-ink",
+                  )}
+                >
+                  {t.label} ({libraryCounts[t.value]})
+                </button>
+              ))}
+            </div>
+
+            {libraryHighlights.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border px-6 py-12 text-center">
+                <p className="font-sans text-sm text-ink-muted">
+                  {libraryTab === "REMEMBERED"
+                    ? "Nothing marked as remembered yet."
+                    : libraryTab === "FORGOT"
+                      ? "Nothing marked as forgotten yet."
+                      : "Nothing archived yet."}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {libraryHighlights.map((h) => (
+                  <HighlightListItem
+                    key={h.id}
+                    highlight={h}
+                    article={articleById.get(h.articleId)}
+                    extraMeta={libraryTab === "ARCHIVED" ? "Won't resurface again" : formatNextDue(h.nextDueAt)}
+                    actions={
+                      libraryTab === "ARCHIVED" ? (
+                        <Button variant="secondary" onClick={() => handleRestore(h.id)}>
+                          Restore
+                        </Button>
+                      ) : (
+                        <>
+                          {libraryTab !== "FORGOT" && (
+                            <Button variant="secondary" onClick={() => applyFeedback(h.id, "FORGOT", false)}>
+                              Forgot this
+                            </Button>
+                          )}
+                          <Button variant="secondary" onClick={() => applyFeedback(h.id, null, true)}>
+                            Archive
+                          </Button>
+                          {libraryTab !== "REMEMBERED" && (
+                            <Button variant="primary" onClick={() => applyFeedback(h.id, "REMEMBERED", false)}>
+                              Remembered this
+                            </Button>
+                          )}
+                        </>
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
