@@ -605,10 +605,8 @@ export function ReaderView({ articleId }: { articleId: string }) {
               More from your library
             </h2>
             <div className="flex flex-col gap-1">
-              {/* Plain <a>, not next/link's <Link> -- see article-card.tsx's
-                  comment on why entering the reader needs a hard navigation. */}
               {visibleRelated.map((a) => (
-                <a
+                <Link
                   key={a.id}
                   href={`/reader/${a.id}`}
                   className="rounded-sm px-2 py-2 -mx-2 transition-colors hover:bg-surface-2"
@@ -617,7 +615,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
                   <p className="truncate font-sans text-xs text-ink-faint">
                     {a.siteName ?? a.author ?? "Saved article"}
                   </p>
-                </a>
+                </Link>
               ))}
             </div>
           </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import type { Article, Highlight } from "@booklet/shared";
 import { highlightColorHex } from "@booklet/shared";
@@ -126,12 +127,10 @@ export function HighlightListItem({
           )}
 
           <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-xs text-ink-faint">
-            {/* Plain <a>, not next/link's <Link> -- see article-card.tsx's
-                comment on why entering the reader needs a hard navigation. */}
             {article && (
-              <a href={`/reader/${article.id}`} className="font-medium text-accent hover:underline">
+              <Link href={`/reader/${article.id}`} className="font-medium text-accent hover:underline">
                 {article.title ?? "Untitled"}
-              </a>
+              </Link>
             )}
             {article && <span>·</span>}
             {citation && (

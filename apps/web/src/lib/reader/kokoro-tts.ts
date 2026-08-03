@@ -103,15 +103,16 @@ let ttsPromise: Promise<KokoroTTS> | null = null;
  * are small per-voice style vectors applied at generation time, not
  * separate models).
  *
- * WASM speed depends heavily on `window.crossOriginIsolated`: without it,
- * `SharedArrayBuffer` isn't available and onnxruntime-web's WASM backend
- * silently falls back to single-threaded execution -- confirmed by hand,
- * ~13s to first audio on a warm model cache on a 16-core machine, entirely
- * single-threaded. next.config.ts sets the Cross-Origin-Opener-Policy/
- * Cross-Origin-Embedder-Policy headers needed for this on /reader/* routes,
- * but that only takes effect on a real (hard) navigation into the reader --
- * see article-card.tsx's comment on why every link into /reader/:id is a
- * plain <a>, not next/link's <Link>. */
+ * Generation is genuinely slow regardless of threading -- confirmed by
+ * hand, isolated from all app/chunking overhead: a single realistic
+ * ~20-word sentence takes 12-18s via this model's own generate() call.
+ * next.config.ts sets Cross-Origin-Opener-Policy/Cross-Origin-Embedder-
+ * Policy on /reader/* (lets SharedArrayBuffer exist there, which
+ * onnxruntime-web's WASM backend needs for multi-threading) but confirmed
+ * this doesn't move the needle here -- the bottleneck is this 82M-param
+ * model's raw per-token WASM inference cost, not thread count. Left as
+ * real, correct config (harmless, free on a hard navigation) but nothing
+ * in the app forces one just for this. */
 export function loadKokoro(): Promise<KokoroTTS> {
   if (!ttsPromise) {
     ttsPromise = withOrtNoiseSuppressed(() => KokoroTTS.from_pretrained(MODEL_ID, { dtype: "q8", device: DEVICE })).catch(

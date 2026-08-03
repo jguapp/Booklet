@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { Article, Collection } from "@booklet/shared";
 import { formatReadingTime, formatRelativeDate } from "@/lib/format";
 import { SourceIcon } from "./source-icon";
@@ -37,17 +38,10 @@ export function ArticleCard({
   const isArchived = article.status === "ARCHIVED";
 
   return (
-    // A plain <a>, not next/link's <Link> -- entering the reader needs a
-    // real (hard) navigation so the Cross-Origin-Opener-Policy/Embedder-
-    // Policy headers next.config.ts scopes to /reader/* actually take
-    // effect (they gate window.crossOriginIsolated, which is fixed at
-    // initial-document-load time and does NOT retroactively apply to a
-    // client-side/SPA transition into an already-loaded page). Kokoro TTS
-    // needs that isolation for multi-threaded WASM -- see kokoro-tts.ts.
-    <a
+    <Link
       href={`/reader/${article.id}`}
       draggable
-      onDragStart={(e: React.DragEvent) => {
+      onDragStart={(e) => {
         e.dataTransfer.setData(ARTICLE_DRAG_MIME, article.id);
         e.dataTransfer.effectAllowed = "move";
       }}
@@ -155,6 +149,6 @@ export function ArticleCard({
           <div className="h-full bg-accent" style={{ width: `${Math.round(article.progressFraction * 100)}%` }} />
         </div>
       )}
-    </a>
+    </Link>
   );
 }
