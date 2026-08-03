@@ -17,8 +17,12 @@ export function formatDaysRemaining(sinceIso: string, retentionDays: number, now
 }
 
 /** "2h 14m" / "14m" / "45s" -- shared by Stats and Recap, both of which
- * show accumulated activeReadingSeconds. */
-export function formatDuration(totalSeconds: number): string {
+ * show accumulated activeReadingSeconds. Rounded up front: callers can
+ * pass a non-integer (e.g. Stats' avg-per-article is a plain division),
+ * and without this the "Ns" fallback below interpolates the raw float
+ * verbatim -- "25.333333333333332s" instead of "25s". */
+export function formatDuration(totalSecondsInput: number): string {
+  const totalSeconds = Math.round(totalSecondsInput);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   if (hours > 0) return `${hours}h ${minutes}m`;

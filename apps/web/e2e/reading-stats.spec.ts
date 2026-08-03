@@ -61,3 +61,42 @@ test("finishing an article updates streak, completion rate, and time spent", asy
   const timeCard = page.locator("div.rounded-md", { hasText: "Time spent" });
   await expect(timeCard.getByText("0s", { exact: true })).toHaveCount(0);
 });
+
+test("Avg. per article shows a clean duration when the division doesn't come out even", async ({ page }) => {
+  await page.goto("/settings/library");
+  await page.getByRole("group", { name: "Reading stats" }).getByRole("button", { name: "On", exact: true }).click();
+
+  // Two articles with deliberately uneven real reading times, so
+  // totalReadingSeconds / 2 is very unlikely to land on a whole number --
+  // this is what actually exercises the avg-per-article division (dividing
+  // by 1, as the test above does, is always a no-op and can't reproduce it).
+  const articles = [
+    { url: "https://en.wikipedia.org/wiki/Tag_(metadata)", waitMs: 2_200 },
+    { url: "https://en.wikipedia.org/wiki/Metadata", waitMs: 3_900 },
+  ];
+
+  for (const { url, waitMs } of articles) {
+    await page.goto("/library");
+    await page.getByRole("button", { name: /save article/i }).click();
+    await page.getByPlaceholder(/example\.com/).fill(url);
+    await page.getByRole("button", { name: /^save$/i }).click();
+    await waitForSaveModalToClose(page);
+
+    await page.locator("a[href^='/reader/']").first().click();
+    await expect(page).toHaveURL(/\/reader\//);
+    await page.waitForLoadState("networkidle");
+
+    await page.waitForTimeout(waitMs);
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.waitForTimeout(300); // auto-archive effect
+
+    await page.locator('a[title="Back to library"]').click();
+    await page.waitForURL(/\/library/);
+  }
+
+  await page.goto("/stats");
+  const avgCard = page.locator("div.rounded-md", { hasText: "Avg. per article" });
+  const avgValue = await avgCard.locator("p").first().textContent();
+  expect(avgValue).toMatch(/^\d/); // a real value, not the "--" no-data fallback
+  expect(avgValue).not.toContain(".");
+});
