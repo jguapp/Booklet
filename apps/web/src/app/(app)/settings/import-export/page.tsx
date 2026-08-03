@@ -12,10 +12,13 @@ import {
   type ImportRow,
 } from "@/lib/data/export-import";
 import {
+  IconAmazonLogo,
+  IconAnkiLogo,
   IconInstapaperLogo,
   IconLogseqLogo,
   IconNotionLogo,
   IconObsidianLogo,
+  IconPocketLogo,
   IconRoamResearchLogo,
 } from "@/components/ui/brand-icons";
 import { IconGlobe } from "@/components/ui/icons";
@@ -34,8 +37,9 @@ import { cn } from "@/lib/cn";
  * destinations.
  *
  * Logos are real brand marks (Simple Icons, CC0 -- see brand-icons.tsx),
- * not generic placeholders. Pocket and Readwise have no entry there, so
- * those two fall back to a plain letter badge.
+ * not generic placeholders. Readwise has no entry there and no clear
+ * stand-in, so it still falls back to a plain letter badge; Kindle uses
+ * Amazon's mark since it has no standalone logo of its own available.
  */
 
 const BADGE_CLASS: Record<string, string> = {
@@ -197,7 +201,7 @@ export default function ImportExportPage() {
         <div className="flex flex-col gap-3">
           <ImportRowCard
             id="pocket"
-            icon={<span className="font-serif text-base font-semibold">P</span>}
+            icon={<IconPocketLogo className="h-full w-full" />}
             name="Pocket"
             description="Export your list from Pocket as a CSV, then import it here. Each URL is fetched and saved for real."
             buttonLabel="Choose CSV"
@@ -227,7 +231,7 @@ export default function ImportExportPage() {
 
           <ImportRowCard
             id="kindle"
-            icon={<span className="font-serif text-base font-semibold">K</span>}
+            icon={<IconAmazonLogo className="h-full w-full" />}
             name="Kindle highlights"
             description="Connect your Kindle over USB and copy documents/My Clippings.txt off it, then choose that file here. One article per book, with every highlight and note attached."
             buttonLabel="Choose file"
@@ -310,7 +314,7 @@ export default function ImportExportPage() {
 
           <ImportRowCard
             id="anki"
-            icon={<span className="font-serif text-base font-semibold">A</span>}
+            icon={<IconAnkiLogo className="h-full w-full" />}
             name="Anki"
             description="Every highlight as a flashcard (front: the highlight, back: your note or the source) -- Anki's own File > Import reads this with zero setup."
             buttonLabel={exportingAnki ? "Exporting…" : "Export .txt"}
