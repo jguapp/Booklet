@@ -218,6 +218,7 @@ export default function HighlightsPage() {
               key={h.id}
               highlight={h}
               article={showingOneArticle ? undefined : articleById.get(h.articleId)}
+              articleExtractedText={articleById.get(h.articleId)?.extractedText}
               onDelete={handleDelete}
               onSaveNote={handleSaveNote}
               onDeleteNote={handleDeleteNote}

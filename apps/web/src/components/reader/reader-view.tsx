@@ -605,6 +605,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
                 <HighlightListItem
                   key={h.id}
                   highlight={h}
+                  articleExtractedText={article.extractedText}
                   onDelete={handleDeleteHighlight}
                   onSaveNote={handleSaveNote}
                   onDeleteNote={handleDeleteNote}
