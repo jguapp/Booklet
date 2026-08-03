@@ -16,14 +16,26 @@ import { localArticles, localFiles } from "@/lib/local/db";
 
 export { ApiError };
 
+// Authenticated mode has no local copy to read from (unlike the IndexedDB
+// path below), so without this every reader open -- including reopening the
+// same article -- re-downloads the whole original file over the network.
+// fileStorageKey is set once at upload and never replaced in place (see the
+// matching Cache-Control header on the route itself), so caching by
+// articleId for the lifetime of the tab is safe.
+const fileCache = new Map<string, Blob>();
+
 /** Raw PDF/EPUB bytes for the real (page/CFI) readers -- local file from IndexedDB, or the auth-gated download route. */
 export async function loadArticleFile(articleId: string, authenticated: boolean): Promise<Blob | null> {
   if (!authenticated) {
     const file = await localFiles.get(articleId);
     return file?.blob ?? null;
   }
+  const cached = fileCache.get(articleId);
+  if (cached) return cached;
   try {
-    return await apiFetchBlob(`/api/articles/${articleId}/file`);
+    const blob = await apiFetchBlob(`/api/articles/${articleId}/file`);
+    fileCache.set(articleId, blob);
+    return blob;
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;
