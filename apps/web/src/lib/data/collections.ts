@@ -1,4 +1,10 @@
-import type { ArticleSummary, Collection, CreateCollectionRequest, UpdateCollectionRequest } from "@booklet/shared";
+import type {
+  ArticleCollectionMemberships,
+  ArticleSummary,
+  Collection,
+  CreateCollectionRequest,
+  UpdateCollectionRequest,
+} from "@booklet/shared";
 import { matchesCollectionFilter } from "@booklet/shared";
 import { apiFetch, ApiError } from "@/lib/api/client";
 import { localArticleCollections, localArticles, localCollections } from "@/lib/local/db";
@@ -17,6 +23,29 @@ export async function loadCollections(authenticated: boolean): Promise<Collectio
     })),
   );
   return withCounts.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Bulk membership for a whole article list -- one call, not one per card. */
+export async function loadCollectionMemberships(authenticated: boolean): Promise<ArticleCollectionMemberships> {
+  if (authenticated) return apiFetch<ArticleCollectionMemberships>("/api/articles/collection-memberships");
+
+  const [links, collections, allArticles] = await Promise.all([
+    localArticleCollections.getAll(),
+    localCollections.getAll(),
+    localArticles.getAll(),
+  ]);
+
+  const membership: ArticleCollectionMemberships = {};
+  for (const link of links) {
+    (membership[link.articleId] ??= []).push(link.collectionId);
+  }
+  for (const c of collections) {
+    if (!c.filter) continue;
+    for (const a of allArticles) {
+      if (matchesCollectionFilter(a, c.filter)) (membership[a.id] ??= []).push(c.id);
+    }
+  }
+  return membership;
 }
 
 /** True if `candidateId` is `ancestorId` itself or a descendant of it --

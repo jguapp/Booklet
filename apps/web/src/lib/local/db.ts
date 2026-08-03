@@ -206,6 +206,7 @@ export const localFiles = {
 };
 
 export const localArticleCollections = {
+  getAll: () => getAll<LocalArticleCollection>(ARTICLE_COLLECTIONS_STORE),
   getForArticle: (articleId: string) =>
     getAllByIndex<LocalArticleCollection>(ARTICLE_COLLECTIONS_STORE, "articleId", articleId),
   getForCollection: (collectionId: string) =>

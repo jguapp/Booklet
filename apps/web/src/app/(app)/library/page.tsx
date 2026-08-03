@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import type { Article, ArticleStatus, Collection, Highlight } from "@booklet/shared";
+import type { Article, ArticleCollectionMemberships, ArticleStatus, Collection, Highlight } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { IconSearch } from "@/components/ui/icons";
@@ -12,7 +12,7 @@ import { SaveArticleModal } from "@/components/library/save-article-modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/cn";
 import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
-import { loadArticlesInCollection, loadCollections } from "@/lib/data/collections";
+import { loadArticlesInCollection, loadCollectionMemberships, loadCollections } from "@/lib/data/collections";
 import { searchLibrary } from "@/lib/data/search";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { useAuth } from "@/lib/auth/auth-provider";
@@ -43,6 +43,7 @@ function LibraryPageInner() {
 
   const [articles, setArticles] = useState<Article[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [membership, setMembership] = useState<ArticleCollectionMemberships>({});
   const [loaded, setLoaded] = useState(false);
   // Defaults to "Unread" -- the actual queue of what's waiting to be read --
   // rather than "All" (the entire, potentially-overwhelming backlog; see the
@@ -62,9 +63,11 @@ function LibraryPageInner() {
     Promise.all([
       collectionId ? loadArticlesInCollection(collectionId, isAuthenticated) : loadArticles(isAuthenticated),
       loadCollections(isAuthenticated),
-    ]).then(([loadedArticles, loadedCollections]) => {
+      loadCollectionMemberships(isAuthenticated),
+    ]).then(([loadedArticles, loadedCollections, loadedMembership]) => {
       setArticles(loadedArticles as Article[]);
       setCollections(loadedCollections);
+      setMembership(loadedMembership);
       setLoaded(true);
     });
   }, [status, isAuthenticated, collectionId]);
@@ -143,6 +146,14 @@ function LibraryPageInner() {
   async function handleDelete(article: Article) {
     await trashArticle(article, isAuthenticated);
     setArticles((prev) => prev.filter((a) => a.id !== article.id));
+  }
+
+  function handleMembershipChange(articleId: string, collectionId: string, isMember: boolean) {
+    setMembership((prev) => {
+      const current = prev[articleId] ?? [];
+      const next = isMember ? [...current, collectionId] : current.filter((id) => id !== collectionId);
+      return { ...prev, [articleId]: next };
+    });
   }
 
   if (!loaded) return null;
@@ -259,6 +270,8 @@ function LibraryPageInner() {
               collections={collections}
               authenticated={isAuthenticated}
               onCollectionCreated={(c) => setCollections((prev) => [...prev, c].sort((a, b) => a.name.localeCompare(b.name)))}
+              memberCollections={collections.filter((c) => (membership[article.id] ?? []).includes(c.id))}
+              onMembershipChange={(collectionId, isMember) => handleMembershipChange(article.id, collectionId, isMember)}
             />
           ))}
         </div>

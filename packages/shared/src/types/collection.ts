@@ -33,6 +33,14 @@ export interface Collection {
   articleCount?: number;
 }
 
+/** Bulk membership for a whole article list -- articleId -> the collectionIds
+ * it belongs to. Kept separate from Article/ArticleSummary itself (rather
+ * than embedding a `collectionIds` field there) since it needs its own
+ * always-fresh fetch: membership changes don't bump the article's own
+ * updatedAt, and smart collections' membership isn't stored on the article
+ * at all. */
+export type ArticleCollectionMemberships = Record<string, string[]>;
+
 export interface CreateCollectionRequest {
   name: string;
   color?: string | null;
