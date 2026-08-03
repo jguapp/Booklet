@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Highlight, HighlightColor, TextPosition } from "@booklet/shared";
 import { computeTextPosition, highlightColorHex, isLegacyHighlightColor, resolveTextPosition } from "@booklet/shared";
 import {
+  createOffsetPointFinder,
   plainTextOf,
-  rangeForTextOffsets,
   textOffsetsForRange,
   wrapRangeInElements,
 } from "@/lib/reader/dom-range";
@@ -98,17 +98,34 @@ export function ArticleContent({
     // Pass 1: resolve + wrap every highlight first. Wrapping only splits
     // existing text nodes (no net new characters), so offsets computed from
     // `fullText` stay valid across iterations within this pass.
-    const marksByHighlight = new Map<string, HTMLElement[]>();
+    //
+    // Resolving every position is pure string work (resolveTextPosition
+    // only touches fullText), so it's done for all of them up front and
+    // sorted by start -- that's what lets the single createOffsetPointFinder
+    // below walk the container's text nodes just once for the whole
+    // article's highlights instead of restarting from the top for each one
+    // (see its own doc comment for why that used to dominate this pass's
+    // cost on a heavily-highlighted article).
+    const resolved: { highlight: (typeof highlights)[number]; start: number; end: number }[] = [];
     for (const highlight of highlights) {
       // This renderer only knows how to place "text" positions -- a PDF/EPUB
       // highlight has no meaning inside an HTML article's DOM.
       if (highlight.position.type !== "text") continue;
-
       const resolution = resolveTextPosition(fullText, highlight.position);
       if (resolution.status === "unresolved") continue;
+      resolved.push({ highlight, start: resolution.start, end: resolution.end });
+    }
+    resolved.sort((a, b) => a.start - b.start);
 
-      const range = rangeForTextOffsets(container, resolution.start, resolution.end);
-      if (!range) continue;
+    const pointFor = createOffsetPointFinder(container);
+    const marksByHighlight = new Map<string, HTMLElement[]>();
+    for (const { highlight, start, end } of resolved) {
+      const startPoint = pointFor(start);
+      const endPoint = pointFor(end);
+      if (!startPoint || !endPoint) continue;
+      const range = document.createRange();
+      range.setStart(startPoint.node, startPoint.offset);
+      range.setEnd(endPoint.node, endPoint.offset);
 
       const marks = wrapRangeInElements(container, range, () => {
         const mark = document.createElement("mark");
