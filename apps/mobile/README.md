@@ -78,6 +78,21 @@ pnpm --filter @booklet/mobile android   # needs Android Studio + an emulator
 Points at `http://localhost:4000` (`10.0.2.2:4000` on the Android emulator,
 which aliases the host machine) by default -- see `src/lib/config.ts`.
 
+All four scripts run with `EXPO_OFFLINE=1` baked in (via `cross-env`, for
+Windows compatibility -- plain `VAR=value cmd` isn't reliably portable in a
+package.json script). This skips `expo start`'s own startup call to Expo's
+API for SDK/dependency-compatibility data (`expo:doctor:dependencies:*` in
+`EXPO_DEBUG=1` output) -- confirmed by hand that this isn't a local network,
+proxy, or cache problem (every one of Expo's own endpoints answered fine
+directly, via both `curl` and a plain Node `fetch`, seconds apart from a
+failing `expo start`) but genuine intermittent flakiness from that specific
+API: one direct call returned real data, the next returned `{"data":[]}` (an
+empty array Expo's own client treats as an error), and `expo start` itself
+failed outright with an unhandled `TypeError: fetch failed` more than once.
+Since that check is advisory only -- it's not required for Metro to actually
+serve anything -- skipping it is the right default rather than something to
+remember to type by hand every time this happens.
+
 ## Verified, and what wasn't
 
 The web target now actually runs, end to end -- confirmed with Playwright
