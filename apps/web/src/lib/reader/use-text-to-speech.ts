@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pickBestVoice } from "./tts-voice";
-import { isKokoroVoice, loadKokoro, toSafeTextStream, type KokoroVoiceId } from "./kokoro-tts";
+import { isPiperVoice, loadPiper, toSafeTextChunks, type PiperVoiceId } from "./piper-tts";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 
 export type TtsStatus = "idle" | "loading" | "playing" | "paused";
@@ -19,9 +19,9 @@ interface UseTextToSpeechResult {
 /**
  * Two engines behind one interface: the browser's native SpeechSynthesis
  * (zero cost, zero setup, works offline, but voice quality is whatever's
- * installed on the OS) and Kokoro (kokoro-tts.ts -- also zero cost, but a
+ * installed on the OS) and Piper (piper-tts.ts -- also zero cost, but a
  * genuinely natural-sounding open-source model running client-side via
- * WASM/WebGPU). Which one plays is decided per-call by `reader.ttsVoice`
+ * WASM). Which one plays is decided per-call by `reader.ttsVoice`
  * (device-prefs.ts), not baked into the hook -- so switching voices in
  * Settings takes effect on the next play() with no reader-view.tsx changes
  * needed. `text` is read fresh from the start whenever play() is called;
@@ -36,9 +36,9 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
   const supported = typeof window !== "undefined";
   const { reader } = useDevicePrefs();
 
-  // Kokoro plays through a real <audio> element (not raw Web Audio API
+  // Piper plays through a real <audio> element (not raw Web Audio API
   // buffers) so pause/resume are free. `generation` increments on every
-  // stop()/text change so an in-flight stream loop from a previous play()
+  // stop()/text change so an in-flight chunk loop from a previous play()
   // knows to abandon itself instead of racing a newly-started one.
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -94,20 +94,25 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
     setStatus("playing");
   }, [text, reader.ttsRate]);
 
-  // Generates and plays one sentence-grouped chunk at a time (kokoro-js's
-  // own tts.stream(), not a hand-rolled splitter) -- a whole multi-thousand-
-  // word article in one generate() call would be slow to start and memory-
-  // heavy client-side. Each chunk is generated only once the previous one
-  // has finished playing (simpler and more robust than pipelining
-  // generation ahead of playback), so there's a brief gap between chunks
-  // while the next one renders.
-  const playKokoro = useCallback(async () => {
+  // Generates and plays one sentence-grouped chunk at a time
+  // (toSafeTextChunks, since Piper's predict() is one-shot, not a stream) --
+  // a whole multi-thousand-word article in one predict() call would mean no
+  // audio until the entire thing finishes synthesizing. Each chunk is
+  // generated only once the previous one has finished playing (simpler and
+  // more robust than pipelining generation ahead of playback), so there's a
+  // brief gap between chunks while the next one renders. Playback rate is
+  // applied via the <audio> element's own playbackRate (browsers
+  // pitch-correct this by default) since Piper's predict() has no per-call
+  // rate parameter -- its inference-time length_scale is fixed per voice
+  // model, unlike Kokoro's generate()-time `speed` option.
+  const playPiper = useCallback(async () => {
     const myGeneration = ++generationRef.current;
     setStatus("loading");
 
-    let tts;
+    const voice = reader.ttsVoice as PiperVoiceId;
+    let session;
     try {
-      tts = await loadKokoro();
+      session = await loadPiper(voice);
     } catch {
       if (generationRef.current === myGeneration) setStatus("idle");
       return;
@@ -117,24 +122,23 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
     // Stay "loading" through the first chunk's generation too, not just the
     // model download -- flipping to "playing" here (before anything has
     // actually started playing) is exactly the "says playing but I don't
-    // hear anything" gap: generating the first chunk of real speech from a
-    // freshly-loaded model can itself take several seconds. Only the first
-    // chunk needs this; by the second, "playing" already reflects reality.
+    // hear anything" gap: generating the first chunk of real speech can
+    // itself take a couple of seconds. Only the first chunk needs this; by
+    // the second, "playing" already reflects reality.
     let firstChunkStarted = false;
     try {
-      // Cast is safe: reader.ttsVoice is validated against KOKORO_VOICES'
-      // ids in device-prefs.ts's loadReaderPrefs, and isKokoroVoice() above
-      // already ruled out NATIVE_VOICE_ID -- kokoro-js just doesn't export
-      // that exact literal union for callers to type against directly.
-      const voice = reader.ttsVoice as KokoroVoiceId;
-      for await (const { audio } of tts.stream(toSafeTextStream(text), { voice, speed: reader.ttsRate })) {
-        if (generationRef.current !== myGeneration) return; // stopped mid-stream
+      for (const chunk of toSafeTextChunks(text)) {
+        if (generationRef.current !== myGeneration) return; // stopped mid-loop
 
-        const url = URL.createObjectURL(audio.toBlob());
+        const blob = await session.predict(chunk);
+        if (generationRef.current !== myGeneration) return; // stopped during generation
+
+        const url = URL.createObjectURL(blob);
         revokeObjectUrl();
         objectUrlRef.current = url;
 
         const audioEl = new Audio(url);
+        audioEl.playbackRate = reader.ttsRate;
         audioElRef.current = audioEl;
 
         await new Promise<void>((resolve) => {
@@ -161,16 +165,16 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
 
   const play = useCallback(() => {
     if (!supported || !text.trim()) return;
-    if (isKokoroVoice(reader.ttsVoice)) {
-      playKokoro();
+    if (isPiperVoice(reader.ttsVoice)) {
+      playPiper();
     } else {
       playNative();
     }
-  }, [supported, text, reader.ttsVoice, playKokoro, playNative]);
+  }, [supported, text, reader.ttsVoice, playPiper, playNative]);
 
   const pause = useCallback(() => {
     if (!supported) return;
-    if (isKokoroVoice(reader.ttsVoice)) {
+    if (isPiperVoice(reader.ttsVoice)) {
       audioElRef.current?.pause();
     } else {
       window.speechSynthesis.pause();
@@ -180,7 +184,7 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
 
   const resume = useCallback(() => {
     if (!supported) return;
-    if (isKokoroVoice(reader.ttsVoice)) {
+    if (isPiperVoice(reader.ttsVoice)) {
       audioElRef.current?.play();
     } else {
       window.speechSynthesis.resume();
