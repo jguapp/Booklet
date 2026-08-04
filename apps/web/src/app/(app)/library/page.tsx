@@ -15,6 +15,7 @@ import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus
 import { loadArticlesInCollection, loadCollectionMemberships, loadCollections } from "@/lib/data/collections";
 import { searchLibrary } from "@/lib/data/search";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
+import { useRefreshOnFocus } from "@/lib/data/use-refresh-on-focus";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
 
@@ -76,6 +77,11 @@ function LibraryPageInner() {
     refresh();
   }, [refresh]);
   useOnTrashed(refresh); // a drag-and-drop trash drop elsewhere (app layout) doesn't touch this page's own state
+  // A save through the extension or another tab/device has no way to reach
+  // this page's state directly (see useRefreshOnFocus) -- catch it up the
+  // moment this tab is looked at again, same as coming back and hitting
+  // reload would, just without asking for that.
+  useRefreshOnFocus(refresh);
 
   // Debounced so authenticated mode (which asks the server -- see
   // lib/data/search.ts for why the already-loaded article list can't
