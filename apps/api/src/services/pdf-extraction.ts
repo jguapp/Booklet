@@ -2,7 +2,7 @@
 // the default build assumes a browser (Worker, DOM canvas, etc).
 import { getDocument, type PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createCanvas } from "@napi-rs/canvas";
-import { OcrWorkerPool } from "./ocr-service.js";
+import { getSharedOcrPool } from "./ocr-service.js";
 
 export class PdfExtractionError extends Error {}
 
@@ -76,34 +76,33 @@ export async function extractPdfText(data: Uint8Array): Promise<PdfExtractionRes
   let finalPageTexts = pageTexts;
 
   if (isTextSparse(pageTexts)) {
-    const ocrPool = new OcrWorkerPool();
-    try {
-      const ocrPageCount = Math.min(doc.numPages, MAX_OCR_PAGES);
-      const ocrTexts: string[] = [];
-      for (let pageNumber = 1; pageNumber <= ocrPageCount; pageNumber++) {
-        const page = await doc.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: OCR_RENDER_SCALE });
-        const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-        const context = canvas.getContext("2d");
-        // pdf.js's render() wants a full CanvasRenderingContext2D; @napi-rs/
-        // canvas's SKRSContext2D implements the same surface it actually
-        // calls (fillRect, drawImage, path ops, etc.), close enough that
-        // this cast is the standard way these two libraries are paired.
-        // `canvas: null` opts into the canvasContext-only path (pdf.js
-        // otherwise expects a real HTMLCanvasElement, which this isn't).
-        await page.render({
-          canvas: null,
-          canvasContext: context as unknown as CanvasRenderingContext2D,
-          viewport,
-        }).promise;
-        const text = await ocrPool.recognize(canvas.toBuffer("image/png"));
-        ocrTexts.push(text);
-      }
-      finalPageTexts = ocrTexts;
-      textSource = "OCR";
-    } finally {
-      await ocrPool.terminate();
+    // Shared across requests -- see getSharedOcrPool's own comment. Never
+    // terminated here: this is the whole point, an OCR'd upload after the
+    // first one in this process's life shouldn't pay worker startup again.
+    const ocrPool = getSharedOcrPool();
+    const ocrPageCount = Math.min(doc.numPages, MAX_OCR_PAGES);
+    const ocrTexts: string[] = [];
+    for (let pageNumber = 1; pageNumber <= ocrPageCount; pageNumber++) {
+      const page = await doc.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: OCR_RENDER_SCALE });
+      const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+      const context = canvas.getContext("2d");
+      // pdf.js's render() wants a full CanvasRenderingContext2D; @napi-rs/
+      // canvas's SKRSContext2D implements the same surface it actually
+      // calls (fillRect, drawImage, path ops, etc.), close enough that
+      // this cast is the standard way these two libraries are paired.
+      // `canvas: null` opts into the canvasContext-only path (pdf.js
+      // otherwise expects a real HTMLCanvasElement, which this isn't).
+      await page.render({
+        canvas: null,
+        canvasContext: context as unknown as CanvasRenderingContext2D,
+        viewport,
+      }).promise;
+      const text = await ocrPool.recognize(canvas.toBuffer("image/png"));
+      ocrTexts.push(text);
     }
+    finalPageTexts = ocrTexts;
+    textSource = "OCR";
   }
 
   const text = finalPageTexts.join("\n\n");

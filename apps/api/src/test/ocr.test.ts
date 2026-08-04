@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import { isTextSparse } from "../services/pdf-extraction.js";
-import { OcrWorkerPool } from "../services/ocr-service.js";
+import { OcrWorkerPool, getSharedOcrPool } from "../services/ocr-service.js";
 
 describe("isTextSparse", () => {
   it("is not sparse when pages have real amounts of text", () => {
@@ -53,4 +53,18 @@ describe("OcrWorkerPool", () => {
     },
     30_000, // first run downloads/loads the trained-data model
   );
+});
+
+describe("getSharedOcrPool", () => {
+  // The actual bug this guards: pdf-extraction.ts used to create a fresh
+  // OcrWorkerPool per request and terminate it at the end, paying Tesseract's
+  // multi-second worker-startup cost (loading the WASM engine + trained
+  // data) on every single OCR'd upload instead of once per process. An
+  // identity check is deliberately what this asserts, not a timing
+  // comparison -- timing-based tests are exactly the kind that flake under
+  // CI/system load without actually proving the thing that matters, which is
+  // that every caller gets the same, already-warm pool.
+  it("returns the same pool instance across calls, not a fresh one each time", () => {
+    expect(getSharedOcrPool()).toBe(getSharedOcrPool());
+  });
 });
