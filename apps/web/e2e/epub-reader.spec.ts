@@ -14,6 +14,7 @@ import { waitForSaveModalToClose } from "./helpers";
  */
 
 const TWO_CHAPTER_EPUB = path.join(process.cwd(), "e2e", "fixtures", "two-chapter.epub");
+const COVER_IN_SPINE_EPUB = path.join(process.cwd(), "e2e", "fixtures", "cover-in-spine.epub");
 
 async function selectWordInFirstParagraph(page: Page, word: string) {
   return page.evaluate((needle) => {
@@ -72,4 +73,26 @@ test("upload an EPUB, highlight real rendered text across chapters, and see it p
   await page.getByTitle("Delete highlight").click();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(mark).toHaveCount(0);
+});
+
+test("a fresh open skips an image-only cover page and lands on the real first chapter", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("button", { name: /save article/i }).click();
+  await page.getByRole("button", { name: /upload a file/i }).click();
+  await page.locator("input[type='file']").setInputFiles(COVER_IN_SPINE_EPUB);
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await waitForSaveModalToClose(page);
+
+  await page.locator("a[href^='/reader/']").first().click();
+  await expect(page).toHaveURL(/\/reader\//);
+
+  const iframe = page.frameLocator("[data-epub-reader] iframe");
+  await expect(iframe.locator("h1")).toHaveText("Chapter One", { timeout: 10_000 });
+  await expect(iframe.locator("img")).toHaveCount(0);
+
+  // The cover isn't gone, just not where a fresh open lands -- Prev still
+  // reaches it like any other earlier page.
+  await page.getByText("← Prev", { exact: true }).click();
+  await expect(iframe.locator("img")).toHaveCount(1, { timeout: 10_000 });
+  await expect(iframe.locator("h1")).toHaveCount(0);
 });
