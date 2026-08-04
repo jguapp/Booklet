@@ -1,3 +1,4 @@
+import http from "node:http";
 import path from "node:path";
 import { chromium, expect, test } from "@playwright/test";
 
@@ -121,4 +122,105 @@ test("log in through the popup, then save the active page through the real API",
   expect(result.body.sourceType).toBe("HTML");
 
   await context.close();
+});
+
+const HIGHLIGHT_TARGET = "Whales are fully aquatic placental marine mammals";
+
+/**
+ * A real page served over http:// -- the content script only injects into
+ * http(s) documents, so about:blank/data: URLs can't exercise it at all.
+ * Enough prose that Readability treats it as an article rather than a stub.
+ */
+function startArticleServer(): Promise<{ url: string; close: () => Promise<void> }> {
+  const body = `<!doctype html><html><head><title>Whale</title></head><body><article>
+    <h1>Whale</h1>
+    <p id="target">${HIGHLIGHT_TARGET} and a widely distributed and diverse group of
+    carnivorous marine mammals that are members of the infraorder Cetacea.</p>
+    ${"<p>Whales are creatures of the open ocean and feed, mate, give birth, suckle and raise their young at sea.</p>".repeat(8)}
+  </article></body></html>`;
+
+  return new Promise((resolve) => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(body);
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      resolve({
+        url: `http://127.0.0.1:${port}/whale`,
+        close: () => new Promise((done) => server.close(() => done())),
+      });
+    });
+  });
+}
+
+test("highlight a live page, then import it with its highlights", async () => {
+  const email = `highlight-e2e-${Date.now()}@example.com`;
+  const password = "correct horse battery staple";
+
+  const signup = await fetch(`${API_URL}/api/auth/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, name: "Highlight E2E" }),
+  });
+  expect(signup.ok).toBe(true);
+  const { accessToken, accessTokenExpiresAt } = (await signup.json()) as {
+    accessToken: string;
+    accessTokenExpiresAt: string;
+  };
+
+  const site = await startArticleServer();
+  const context = await launchWithExtension();
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent("serviceworker", { timeout: 10_000 });
+
+  await worker.evaluate(
+    async (session) => chrome.storage.local.set({ booklet_session: session }),
+    { accessToken, accessTokenExpiresAt, email },
+  );
+
+  const page = await context.newPage();
+  await page.goto(site.url);
+
+  // Select the first sentence the way a reader would, then let the content
+  // script's mouseup handler notice it.
+  await page.evaluate((quote) => {
+    const target = document.querySelector("#target")!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(target, 0);
+    range.setEnd(target, quote.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  }, HIGHLIGHT_TARGET);
+
+  // Playwright's selectors pierce open shadow roots, which is where the
+  // extension's own UI lives (page CSS can't be trusted not to eat it).
+  await page.getByRole("button", { name: "Highlight" }).click();
+  await expect(page.locator("mark.booklet-web-highlight")).toHaveCount(1);
+
+  await expect(page.getByText("1 highlight", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Open in Booklet" }).click();
+
+  // The import clears local highlights only once the server confirms, so the
+  // bar disappearing is itself the success signal.
+  await expect(page.locator("mark.booklet-web-highlight")).toHaveCount(0, { timeout: 20_000 });
+
+  const list = await fetch(`${API_URL}/api/articles?url=${encodeURIComponent(site.url)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const { articles } = (await list.json()) as { articles: { id: string; title: string | null }[] };
+  expect(articles).toHaveLength(1);
+
+  const highlightsRes = await fetch(`${API_URL}/api/highlights?articleId=${articles[0].id}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const highlights = (await highlightsRes.json()) as { selectedText: string; position: { type: string } }[];
+  expect(highlights).toHaveLength(1);
+  expect(highlights[0].selectedText).toBe(HIGHLIGHT_TARGET);
+  expect(highlights[0].position.type).toBe("text");
+
+  await context.close();
+  await site.close();
 });
