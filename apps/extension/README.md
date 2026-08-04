@@ -1,7 +1,23 @@
 # Booklet browser extension
 
 A Manifest V3 extension: log in once, then save the page you're on to your
-Booklet library from the toolbar popup or the right-click context menu.
+Booklet library in a single click of the toolbar button, or from the
+right-click context menu.
+
+The toolbar button has no popup while you're signed in -- a popup and
+`chrome.action.onClicked` are mutually exclusive (whichever is set wins, and
+a declared popup means the click event never fires), so one-click saving is
+expressed by clearing `default_popup` while a session exists and restoring it
+when there isn't one, in `background.ts`'s `syncActionBehaviour`. Signed out,
+the button still opens the login form. That swap is the whole feature, and
+it's what `e2e/extension.spec.ts` asserts.
+
+Since a click no longer opens anything, feedback is a badge on the icon --
+`✓` saved, `!` failed or not a saveable page (`about:`, `chrome://`, a blank
+tab). Saving a page that's already in the library counts as `✓`: it's the
+expected result of clicking twice, and the page is in Booklet either way.
+Account details moved with it -- the signed-in address is the button's
+tooltip, and logging out is a right-click item on the icon.
 
 Authenticated only -- there's no local/anonymous mode here the way there is
 in the web app. An extension can't reach the web app's IndexedDB (different
@@ -56,6 +72,23 @@ regression test (`apps/api/src/test/integration.test.ts`'s `cors` describe
 block) confirmed to actually fail without the `moz-extension://` allowance,
 not just added alongside it.
 
+The popup reserves its full height in CSS (`#root { min-height: 250px }`)
+rather than letting the panel size itself once content arrives. That looks
+like dead styling and isn't: everything below the static header is appended
+by `popup.ts` only after an awaited `chrome.storage` read, so without it the
+document is 84px tall at `DOMContentLoaded` and the browser opens a
+header-only sliver it then has to re-measure and grow. Chrome and stock
+Firefox both regrow correctly; Gecko *forks* that reimplement panel chrome
+(Zen Browser, and the same class of bug in other Firefox derivatives) are
+where a panel measured once at 84px stays there and presents as an empty
+box. Reserving the height means the popup opens at its final 334px and never
+resizes -- worth keeping even though vanilla Firefox doesn't need it, since
+"blank popup, no error anywhere" is close to undebuggable when reported from
+a fork. Relatedly, the top-level `renderSaveView()` call has a `.catch()`
+that renders the failure into the popup: a floating rejection there leaves
+`#root` empty forever, and the popup's devtools target closes along with the
+panel, so there's otherwise nowhere for the error to show up.
+
 Verify a real, unpacked build actually loads in Firefox (not just passes
 lint) with:
 
@@ -81,8 +114,12 @@ coverage now, not one-off manual checks.
 
 - `src/popup.ts` / `popup.html` -- the toolbar popup: login form, or (once
   signed in) a "Save this page" button.
-- `src/background.ts` -- the MV3 service worker; registers the "Save page to
-  Booklet" right-click context menu item.
+- `src/background.ts` -- the MV3 service worker; owns one-click save
+  (`chrome.action.onClicked` + the popup swap above), badge feedback, and the
+  "Save page to Booklet" / "Log out of Booklet" context menu items.
+  `syncActionBehaviour` re-runs on every worker wake, not just
+  install/startup, since an MV3 worker is torn down freely and the whole
+  thing is one storage read.
 - `src/api.ts` -- a small fetch wrapper, same shape as the web app's
   `lib/api/client.ts` but using `chrome.storage.local` instead of
   `localStorage` for the access token (extension storage, not accessible to
