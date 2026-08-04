@@ -11,6 +11,7 @@ import { deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/dat
 import { comparePositionInArticle } from "@/lib/highlights/position-sort";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
+import { useRefreshOnFocus } from "@/lib/data/use-refresh-on-focus";
 import { cn } from "@/lib/cn";
 
 type ViewMode = "grouped" | "flat";
@@ -35,6 +36,11 @@ export default function HighlightsPage() {
     refresh();
   }, [refresh]);
   useOnTrashed(refresh);
+  // The extension's "highlight the open web, then import" flow (see
+  // apps/extension) attaches highlights to an article via the API directly
+  // -- catch those up the moment this tab is looked at again, same as
+  // library/page.tsx does for fresh saves.
+  useRefreshOnFocus(refresh);
 
   const articleById = useMemo(() => new Map(articles.map((a) => [a.id, a])), [articles]);
   const isSearching = search.trim().length > 0;
