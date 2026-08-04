@@ -8,16 +8,16 @@
  */
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
 import { DEFAULT_HIGHLIGHT_BAR_COLORS, sanitizeHighlightBarColors } from "@booklet/shared";
-import { KOKORO_VOICES, NATIVE_VOICE_ID } from "./kokoro-tts";
+import { PIPER_VOICES, NATIVE_VOICE_ID } from "./piper-tts";
 
 const KEY = "booklet-reader-prefs";
 const SIZES: ReaderSize[] = ["sm", "md", "lg", "xl"];
-const VALID_VOICES = new Set([NATIVE_VOICE_ID, ...KOKORO_VOICES.map((v) => v.id)]);
+const VALID_VOICES = new Set([NATIVE_VOICE_ID, ...PIPER_VOICES.map((v) => v.id)]);
 
 export interface ReaderPrefs {
   size: ReaderSize;
   ttsRate: number;
-  /** NATIVE_VOICE_ID (the device's own SpeechSynthesis) or a Kokoro voice id. */
+  /** NATIVE_VOICE_ID (the device's own SpeechSynthesis) or a Piper voice id. */
   ttsVoice: string;
   /** Which colors show up in the highlight picker, and in what order --
    * see packages/shared highlight-colors.ts. */
