@@ -24,6 +24,35 @@ describe("API integration", () => {
     await app.close();
   });
 
+  describe("cors", () => {
+    it("allows chrome-extension:// and moz-extension:// origins, but not an arbitrary one", async () => {
+      const chromeRes = await app.inject({
+        method: "GET",
+        url: "/api/health",
+        headers: { origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop" },
+      });
+      expect(chromeRes.headers["access-control-allow-origin"]).toBe(
+        "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+      );
+
+      const firefoxRes = await app.inject({
+        method: "GET",
+        url: "/api/health",
+        headers: { origin: "moz-extension://12345678-1234-1234-1234-123456789012" },
+      });
+      expect(firefoxRes.headers["access-control-allow-origin"]).toBe(
+        "moz-extension://12345678-1234-1234-1234-123456789012",
+      );
+
+      const untrustedRes = await app.inject({
+        method: "GET",
+        url: "/api/health",
+        headers: { origin: "https://evil.example.com" },
+      });
+      expect(untrustedRes.headers["access-control-allow-origin"]).toBeUndefined();
+    });
+  });
+
   describe("auth", () => {
     it("rejects signup with a too-short password", async () => {
       const res = await app.inject({

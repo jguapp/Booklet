@@ -190,6 +190,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @booklet/api exec prisma migrate deploy
       - run: pnpm --filter @booklet/extension build
+      # Mozilla's own manifest validator -- catches Firefox-specific
+      # manifest.json regressions (an unsupported strict_min_version for a
+      # key actually in use, a missing required key like
+      # data_collection_permissions) that nothing else here would, since
+      # the e2e suite below only runs against Chromium.
+      - run: pnpm --filter @booklet/extension lint:firefox
       - run: pnpm --filter @booklet/extension exec playwright install --with-deps chromium
       # Loading a real extension needs an actual background service worker,
       # which (confirmed empirically, see e2e/extension.spec.ts) doesn't

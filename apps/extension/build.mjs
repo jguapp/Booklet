@@ -13,7 +13,7 @@ const options = {
   bundle: true,
   outdir: "dist",
   format: "esm",
-  target: ["chrome110", "firefox109"],
+  target: ["chrome110", "firefox112"], // matches manifest.json's strict_min_version
   sourcemap: true,
 };
 
