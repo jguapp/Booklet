@@ -91,3 +91,24 @@ export interface SaveArticleResult {
 export async function saveArticle(url: string): Promise<SaveArticleResult> {
   return apiFetch<SaveArticleResult>("/api/articles", { method: "POST", body: JSON.stringify({ url }) });
 }
+
+/** Find an article already in the library by URL. Matched server-side against
+ * both the raw and canonical URL, the same way the save route's duplicate
+ * check is -- so this can't miss a row that saving would reject as a 409. */
+export async function findArticleByUrl(url: string): Promise<SaveArticleResult | null> {
+  const body = await apiFetch<{ articles: SaveArticleResult[] }>(
+    `/api/articles?limit=1&url=${encodeURIComponent(url)}`,
+  );
+  return body.articles[0] ?? null;
+}
+
+export interface CreateHighlightInput {
+  articleId: string;
+  selectedText: string;
+  position: { type: "text"; exact: string; prefix: string; suffix: string; start: number; end: number };
+  color: string;
+}
+
+export async function createHighlight(input: CreateHighlightInput): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>("/api/highlights", { method: "POST", body: JSON.stringify(input) });
+}
