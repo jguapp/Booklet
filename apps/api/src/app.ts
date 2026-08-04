@@ -46,15 +46,17 @@ export async function buildApp(): Promise<FastifyInstance> {
   // fixed origin string is brittle in dev. Any localhost port is fine locally;
   // production still pins to the one configured WEB_ORIGIN. `credentials: true`
   // is required so the refresh-token cookie rides along with fetch requests.
-  // chrome-extension:// origins are always allowed -- the browser extension
-  // is a real, separate client (see apps/extension), and its origin isn't an
-  // http(s) URL CORS can pin the way WEB_ORIGIN pins the web app; the actual
-  // security boundary is the auth token/session, same as the localhost-any-port
-  // allowance below already relies on.
+  // chrome-extension:// (Chrome/Edge/other Chromium browsers) and
+  // moz-extension:// (Firefox) origins are always allowed -- the browser
+  // extension is a real, separate client (see apps/extension) that runs on
+  // both, and neither origin scheme is an http(s) URL CORS can pin the way
+  // WEB_ORIGIN pins the web app; the actual security boundary is the auth
+  // token/session, same as the localhost-any-port allowance below already
+  // relies on.
   await app.register(cors, {
     origin: (origin, callback) => {
       if (!origin) return callback(null, true); // same-origin / non-browser requests (e.g. curl)
-      if (/^chrome-extension:\/\//.test(origin)) return callback(null, true);
+      if (/^(chrome|moz)-extension:\/\//.test(origin)) return callback(null, true);
       if (isDev && /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return callback(null, true);
       if (!isDev && process.env.WEB_ORIGIN && origin === process.env.WEB_ORIGIN) return callback(null, true);
       callback(null, false);
