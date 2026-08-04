@@ -4,10 +4,10 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
-    "web": "expo start --web",
-    "android": "expo start --android",
-    "ios": "expo start --ios"
+    "start": "cross-env EXPO_OFFLINE=1 expo start",
+    "web": "cross-env EXPO_OFFLINE=1 expo start --web",
+    "android": "cross-env EXPO_OFFLINE=1 expo start --android",
+    "ios": "cross-env EXPO_OFFLINE=1 expo start --ios"
   },
   "dependencies": {
     "@babel/runtime": "^7.25.0",
@@ -25,6 +25,7 @@
     "@expo/metro-runtime": "^5.0.5",
     "@types/react": "~19.0.10",
     "babel-preset-expo": "^13.0.0",
+    "cross-env": "^10.1.0",
     "react-dom": "19.0.0",
     "react-native-web": "^0.20.0",
     "typescript": "^5.8.3"
