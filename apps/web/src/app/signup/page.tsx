@@ -66,10 +66,16 @@ function SignupPageInner() {
               <span className="font-sans text-xs font-medium text-ink-muted">Email</span>
               <Input type="email" name="email" required placeholder="you@example.com" />
             </label>
-            <label className="flex flex-col gap-1.5">
-              <span className="font-sans text-xs font-medium text-ink-muted">Password</span>
-              <PasswordInput name="password" required minLength={8} placeholder="••••••••" />
-            </label>
+            {/* Explicit htmlFor/id, not a wrapping <label> -- see login/page.tsx's
+                comment on the same pattern: a wrapping label would also
+                associate with (and expose to getByLabel) PasswordInput's own
+                show/hide button, not just the input. */}
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="password" className="font-sans text-xs font-medium text-ink-muted">
+                Password
+              </label>
+              <PasswordInput id="password" name="password" required minLength={8} placeholder="••••••••" />
+            </div>
 
             {error && <p className="font-sans text-sm text-red-500">{error}</p>}
 

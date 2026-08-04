@@ -66,7 +66,9 @@ test("setting a Kindle email lets you send an article from the reader", async ({
   await page.goto("/signup");
   await page.getByLabel("Name").fill("Kindle Test");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("correct horse battery staple");
+  // exact: true -- a substring match of "Password" also catches the
+  // password field's own "Show password" visibility toggle button.
+  await page.getByLabel("Password", { exact: true }).fill("correct horse battery staple");
   await page.getByRole("button", { name: /create account/i }).click();
   await page.waitForURL(/\/library/, { timeout: 15_000 });
 

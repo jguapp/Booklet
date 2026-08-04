@@ -48,7 +48,9 @@ async function signUpAndGetToken(page: import("@playwright/test").Page): Promise
   await page.goto("/signup");
   await page.getByLabel("Name").fill("Refresh Focus Test");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
+  // exact: true -- a substring match of "Password" also catches the
+  // password field's own "Show password" visibility toggle button.
+  await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: /create account/i }).click();
   await page.waitForURL(/\/library/, { timeout: 15_000 });
   await page.waitForLoadState("networkidle");

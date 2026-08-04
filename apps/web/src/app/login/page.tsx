@@ -62,15 +62,21 @@ function LoginPageInner() {
               <span className="font-sans text-xs font-medium text-ink-muted">Email</span>
               <Input type="email" name="email" required autoFocus placeholder="you@example.com" />
             </label>
-            <label className="flex flex-col gap-1.5">
+            {/* Explicit htmlFor/id, not a wrapping <label>: PasswordInput's
+                own show/hide button lives inside it, and a wrapping label
+                associates with -- and exposes to getByLabel -- everything
+                nested inside it, the button included, not just the input. */}
+            <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
-                <span className="font-sans text-xs font-medium text-ink-muted">Password</span>
+                <label htmlFor="password" className="font-sans text-xs font-medium text-ink-muted">
+                  Password
+                </label>
                 <Link href="/forgot-password" className="font-sans text-xs font-medium text-accent">
                   Forgot password?
                 </Link>
               </div>
-              <PasswordInput name="password" required placeholder="••••••••" />
-            </label>
+              <PasswordInput id="password" name="password" required placeholder="••••••••" />
+            </div>
 
             {error && <p className="font-sans text-sm text-red-500">{error}</p>}
 
