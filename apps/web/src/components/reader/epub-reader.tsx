@@ -53,6 +53,24 @@ function isEpubHighlight(h: Highlight): h is Highlight & { position: { type: "ep
   return h.position.type === "epub";
 }
 
+// Real-world EPUBs (Standard Ebooks, most Calibre conversions, etc.) very
+// commonly include a dedicated cover page -- an <img>-only xhtml wrapper --
+// as the very first spine item. Standard, valid authoring, but redundant
+// here: the same cover is already extracted and shown on the library card
+// (see epub-extraction.ts's findCoverManifestItem), so landing a fresh open
+// on it just makes the reader look broken ("Page 1 of 1", no real content)
+// rather than one click away from the actual first page. Content-based
+// rather than metadata-based (matching against the extracted cover's own
+// manifest item) since the spine's cover page and the manifest's cover
+// image are frequently two different files -- a wrapper xhtml embedding the
+// image, not the image itself -- so href-matching them would miss the
+// common case entirely.
+function looksLikeCoverPage(doc: Document): boolean {
+  const hasImage = doc.body?.querySelector("img") !== null;
+  const text = (doc.body?.textContent ?? "").trim();
+  return hasImage && text.length < 30;
+}
+
 // contents.window is the iframe's own window (epub.js renders each spine
 // section in its own iframe) -- a selection rect from there is relative to
 // that iframe's viewport, not this component's. Find the actual <iframe>
@@ -148,6 +166,21 @@ export function EpubReader({
         if (cancelled) {
           r.destroy();
           return;
+        }
+
+        // Only on a genuinely fresh open -- a saved reading position deeper
+        // in the book always wins via the resumeAt logic further down,
+        // which re-displays after this regardless.
+        if (initialProgressRef.current === 0) {
+          const initialContents = r.getContents() as unknown as Contents[] | undefined;
+          const firstDoc = initialContents?.[0]?.document;
+          if (firstDoc && looksLikeCoverPage(firstDoc)) {
+            await r.next();
+            if (cancelled) {
+              r.destroy();
+              return;
+            }
+          }
         }
 
         r.on("selected", (cfiRange: string, contents: Contents) => {
