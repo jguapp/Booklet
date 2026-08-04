@@ -2,6 +2,14 @@ import dns from "node:dns/promises";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import type { ExtractedContent } from "@booklet/shared";
+import {
+  fetchTweetThread,
+  parseTweetUrl,
+  renderThreadHtml,
+  threadTitle,
+  threadToText,
+  type ThreadTweet,
+} from "./twitter-extraction.js";
 
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_HTML_BYTES = 10 * 1024 * 1024; // 10MB safety cap
@@ -29,6 +37,42 @@ const MAX_COVER_IMAGE_BYTES = 512 * 1024; // 512KB
 export class ExtractionError extends Error {}
 
 /**
+ * Turn a collected thread into the same ExtractedContent shape every other
+ * saved article uses -- reusing inlineImages so a saved thread is
+ * self-contained (pbs.twimg.com URLs rot and hotlink-block like any other
+ * remote image) and the reading-time maths stays in one place.
+ */
+async function buildThreadContent(thread: ThreadTweet[]): Promise<ExtractedContent> {
+  const text = threadToText(thread);
+  const wordCount = text ? text.split(/\s+/).filter(Boolean).length : 0;
+  const rawHtml = renderThreadHtml(thread);
+
+  const { html, skippedImageCount } = await inlineImages(rawHtml, "https://x.com/").catch(() => ({
+    html: rawHtml,
+    skippedImageCount: 0,
+  }));
+
+  const firstPhoto = thread.flatMap((tweet) => tweet.photos)[0] ?? null;
+  const coverImageUrl = firstPhoto
+    ? await fetchImageAsDataUri(firstPhoto, "https://x.com/", MAX_COVER_IMAGE_BYTES)
+        .then((result) => result?.uri ?? null)
+        .catch(() => null)
+    : null;
+
+  return {
+    title: threadTitle(thread),
+    author: `${thread[0].authorName} (@${thread[0].authorHandle})`,
+    siteName: "X",
+    excerpt: text.slice(0, 280).trim() || null,
+    html,
+    text,
+    readingTimeEstimate: wordCount > 0 ? Math.max(1, Math.round(wordCount / WORDS_PER_MINUTE)) : null,
+    skippedImageCount,
+    coverImageUrl,
+  };
+}
+
+/**
  * Fetches a user-supplied URL server-side and runs Readability against it.
  * Blocks requests (including each redirect hop) that resolve to a private/
  * loopback/link-local address -- without this, "save article by URL" is a
@@ -36,6 +80,17 @@ export class ExtractionError extends Error {}
  * http://169.254.169.254/ or an internal service).
  */
 export async function fetchAndExtract(rawUrl: string): Promise<ExtractedContent> {
+  // x.com serves a JS-rendered shell with no article content, so Readability
+  // finds nothing and the save lands FAILED. Build the article from the
+  // syndication endpoint instead -- and if any part of that comes up empty,
+  // fall through to the generic path rather than failing, since that endpoint
+  // is undocumented and can change without notice.
+  const tweetId = parseTweetUrl(rawUrl);
+  if (tweetId) {
+    const thread = await fetchTweetThread(tweetId).catch(() => null);
+    if (thread && thread.length > 0) return await buildThreadContent(thread);
+  }
+
   const pageHtml = await fetchHtml(rawUrl);
 
   let dom: JSDOM;
