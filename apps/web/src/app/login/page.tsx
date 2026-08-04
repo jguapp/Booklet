@@ -4,7 +4,9 @@ import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { BookletPeekMark, PasswordPeekProvider } from "@/components/ui/password-peek";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { OAuthButtons } from "@/components/auth/oauth-buttons";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { ApiError } from "@/lib/api/client";
@@ -12,7 +14,9 @@ import { ApiError } from "@/lib/api/client";
 export default function LoginPage() {
   return (
     <Suspense fallback={null}>
-      <LoginPageInner />
+      <PasswordPeekProvider>
+        <LoginPageInner />
+      </PasswordPeekProvider>
     </Suspense>
   );
 }
@@ -46,9 +50,7 @@ function LoginPageInner() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-paper px-6">
       <div className="w-full max-w-sm">
-        <Link href="/" className="mb-8 block text-center font-serif text-xl font-semibold text-ink">
-          Booklet
-        </Link>
+        <BookletPeekMark />
 
         <div className="rounded-md border border-border bg-surface px-6 py-7">
           <h1 className="mb-6 font-serif text-xl font-semibold text-ink">Log in</h1>
@@ -67,7 +69,7 @@ function LoginPageInner() {
                   Forgot password?
                 </Link>
               </div>
-              <Input type="password" name="password" required placeholder="••••••••" />
+              <PasswordInput name="password" required placeholder="••••••••" />
             </label>
 
             {error && <p className="font-sans text-sm text-red-500">{error}</p>}

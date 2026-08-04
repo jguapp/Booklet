@@ -267,3 +267,23 @@ export function IconPencil(props: IconProps) {
     </svg>
   );
 }
+
+export function IconEye(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M1.5 10S4.5 4.5 10 4.5 18.5 10 18.5 10 15.5 15.5 10 15.5 1.5 10 1.5 10Z" strokeLinejoin="round" />
+      <circle cx="10" cy="10" r="2.5" />
+    </svg>
+  );
+}
+
+export function IconEyeOff(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M7.7 5c.73-.32 1.5-.5 2.3-.5 5.5 0 8.5 5.5 8.5 5.5a15 15 0 0 1-2.4 3.05" strokeLinecap="round" />
+      <path d="M14 14.6a7.4 7.4 0 0 1-4 1.15C4.5 15.75 1.5 10 1.5 10a15 15 0 0 1 3.4-3.9" strokeLinecap="round" />
+      <path d="M8.2 8.2a2.5 2.5 0 0 0 3.5 3.5" strokeLinecap="round" />
+      <path d="m3 3 14 14" strokeLinecap="round" />
+    </svg>
+  );
+}
