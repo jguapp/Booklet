@@ -37,3 +37,20 @@ export class OcrWorkerPool {
     }
   }
 }
+
+// Shared across every OCR'd upload for the life of the process, not one per
+// request. pdf-extraction.ts used to create-and-terminate a fresh
+// OcrWorkerPool inside every request that needed OCR -- correct on its own
+// terms (a pool reused across one document's pages), but it discarded the
+// expensive part (worker startup: loading the WASM engine + trained data,
+// multiple seconds) at the end of every single request, paying it again on
+// the very next upload. A held-open worker costs real, bounded memory for
+// the process's lifetime; that's the right trade against paying a multi-
+// second tax on every OCR'd PDF, which is what "near instant" upload
+// actually depends on.
+let sharedPool: OcrWorkerPool | null = null;
+
+export function getSharedOcrPool(): OcrWorkerPool {
+  if (!sharedPool) sharedPool = new OcrWorkerPool();
+  return sharedPool;
+}
