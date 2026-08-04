@@ -272,6 +272,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       tag?: string;
       trashed?: string;
       favorited?: string;
+      url?: string;
     };
 
     if (query.status && !STATUSES.includes(query.status as ArticleStatus)) {
@@ -292,6 +293,19 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         ...(query.status ? { status: query.status as ArticleStatus } : {}),
         ...(query.tag ? { tags: { has: query.tag } } : {}),
         ...(query.favorited === "true" ? { favorited: true } : {}),
+        // "Do I already have this page?" -- matched the same way the POST
+        // route's duplicate check does (raw url OR canonicalUrl), so a
+        // lookup can't miss a row that a save would have rejected as a
+        // duplicate. The extension needs this to attach highlights to an
+        // already-saved article instead of failing on the 409.
+        ...(query.url
+          ? {
+              OR: [
+                { url: query.url },
+                ...(canonicalizeUrl(query.url) ? [{ canonicalUrl: canonicalizeUrl(query.url) }] : []),
+              ],
+            }
+          : {}),
       },
       orderBy: trashed ? [{ deletedAt: "desc" }, { id: "desc" }] : [{ savedAt: "desc" }, { id: "desc" }],
       take: limit + 1,

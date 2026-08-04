@@ -1,4 +1,15 @@
-import { ApiError, STORAGE_KEY, getSession, logout, saveArticle } from "./api";
+import {
+  ApiError,
+  STORAGE_KEY,
+  createHighlight,
+  findArticleByUrl,
+  getSession,
+  logout,
+  saveArticle,
+} from "./api";
+import { WEB_APP_URL } from "./config";
+import { isImportRequest, type ImportResponse } from "./messages";
+import type { StoredHighlight } from "./highlight-store";
 
 const MENU_SAVE = "booklet-save-page";
 const MENU_LOGOUT = "booklet-logout";
@@ -77,6 +88,82 @@ async function saveTab(tab: chrome.tabs.Tab | undefined): Promise<void> {
     await flashBadge(tabId, "!", BADGE_ERROR);
   }
 }
+
+/**
+ * Save the page, then attach the highlights made on it while reading.
+ *
+ * Runs here rather than in the content script because the page's own origin
+ * can't reach the API -- CORS only allows the extension origin, and the
+ * session token deliberately lives in extension storage where page scripts
+ * can't read it.
+ */
+async function importPage(url: string, highlights: StoredHighlight[]): Promise<ImportResponse> {
+  const session = await getSession();
+  if (!session) {
+    return { ok: false, error: "not_signed_in", message: "Log in to Booklet first." };
+  }
+
+  let articleId: string;
+  try {
+    articleId = (await saveArticle(url)).id;
+  } catch (err) {
+    // Already in the library: attach to the existing article rather than
+    // refusing the import and stranding the highlights.
+    if (err instanceof ApiError && err.status === 409) {
+      const existing = await findArticleByUrl(url).catch(() => null);
+      if (!existing) return { ok: false, error: "save_failed", message: "Couldn't find the saved article." };
+      articleId = existing.id;
+    } else {
+      return {
+        ok: false,
+        error: "save_failed",
+        message: err instanceof ApiError ? err.message : "Couldn't save this page.",
+      };
+    }
+  }
+
+  let importedCount = 0;
+  for (const highlight of highlights) {
+    try {
+      await createHighlight({
+        articleId,
+        selectedText: highlight.exact,
+        position: {
+          type: "text",
+          exact: highlight.exact,
+          prefix: highlight.prefix,
+          suffix: highlight.suffix,
+          // Offsets into the live page, which is not the string these resolve
+          // against -- the server anchors to extractedText and re-finds the
+          // quote by prefix/exact/suffix. Sent as the hint that anchoring
+          // tries first, not as the source of truth.
+          start: highlight.start,
+          end: highlight.end,
+        },
+        color: "YELLOW",
+      });
+      importedCount += 1;
+    } catch {
+      // Keep going: one unparseable highlight shouldn't cost the user the
+      // other nine. A partial count is reported back honestly below.
+    }
+  }
+
+  if (importedCount === 0 && highlights.length > 0) {
+    return { ok: false, error: "highlights_failed", message: "Saved the page, but no highlights transferred." };
+  }
+
+  await chrome.tabs.create({ url: `${WEB_APP_URL}/reader/${articleId}` });
+  return { ok: true, articleId, importedCount };
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!isImportRequest(message)) return false;
+  importPage(message.url, message.highlights)
+    .then(sendResponse)
+    .catch(() => sendResponse({ ok: false, error: "save_failed", message: "Couldn't save this page." }));
+  return true; // keeps the message channel open for the async reply
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {

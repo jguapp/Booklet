@@ -183,6 +183,36 @@ describe("API integration", () => {
       articleId = body.id;
     });
 
+    it("finds an already-saved article by URL, matching the canonical form too", async () => {
+      const exact = await app.inject({
+        method: "GET",
+        url: `/api/articles?url=${encodeURIComponent("http://127.0.0.1:1/definitely-unreachable")}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(exact.json().articles).toHaveLength(1);
+      expect(exact.json().articles[0].id).toBe(articleId);
+
+      // The extension looks a page up by whatever URL the tab happens to
+      // have, which routinely carries tracking params the saved row doesn't.
+      // This has to match the same way the duplicate check does, or the
+      // "already saved" path would fail to find a row that a re-save would
+      // still reject as a 409.
+      const decorated = await app.inject({
+        method: "GET",
+        url: `/api/articles?url=${encodeURIComponent("http://127.0.0.1:1/definitely-unreachable?utm_source=twitter")}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(decorated.json().articles).toHaveLength(1);
+      expect(decorated.json().articles[0].id).toBe(articleId);
+
+      const missing = await app.inject({
+        method: "GET",
+        url: `/api/articles?url=${encodeURIComponent("http://127.0.0.1:1/never-saved")}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(missing.json().articles).toHaveLength(0);
+    });
+
     it("rejects saving the same URL twice", async () => {
       const res = await app.inject({
         method: "POST",
