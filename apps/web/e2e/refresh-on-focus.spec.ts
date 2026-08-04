@@ -13,14 +13,33 @@ import { expect, test } from "@playwright/test";
  * client that could write to the same library) and then write directly
  * against the API with a fresh access token, exactly the way the
  * extension's background.ts does, rather than going through the page at
- * all. The dispatched `focus` event stands in for the user actually
- * switching back to the tab -- document.visibilityState already reports
- * "visible" for a real foregrounded browser window in these tests, so the
- * production code's `visibilitychange` handler would fire the same way a
- * real tab switch triggers it.
+ * all.
+ *
+ * simulateTabSwitchAway/Back stand in for the user actually switching away
+ * and back -- the hook only refetches once it has genuinely observed the
+ * tab go away first (see use-refresh-on-focus.ts: a bare `focus` with no
+ * preceding away-state is what a fresh page load fires too, so it's
+ * deliberately ignored). A test that only dispatched `focus` would be
+ * asserting on a no-op.
  */
 
 const API_URL = "http://localhost:4000";
+
+async function simulateTabSwitchAway(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("blur"));
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+}
+
+async function simulateTabSwitchBack(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+  });
+}
 
 async function signUpAndGetToken(page: import("@playwright/test").Page): Promise<string> {
   const email = `refresh-focus-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
@@ -48,6 +67,9 @@ async function signUpAndGetToken(page: import("@playwright/test").Page): Promise
 test("a save made outside the page appears once the tab regains focus, without a reload", async ({ page }) => {
   const token = await signUpAndGetToken(page);
   await page.waitForTimeout(300);
+  // The hook only arms once it has seen the tab actually go away -- a fresh
+  // page load's own initial focus doesn't count (see use-refresh-on-focus.ts).
+  await simulateTabSwitchAway(page);
 
   const before = await page.locator("a[href^='/reader/']").count();
 
@@ -65,9 +87,9 @@ test("a save made outside the page appears once the tab regains focus, without a
   await page.waitForTimeout(800);
   expect(await page.locator("a[href^='/reader/']").count()).toBe(before);
 
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await simulateTabSwitchBack(page);
 
-  await expect(page.locator("a[href^='/reader/']")).toHaveCount(before + 1, { timeout: 10_000 });
+  await expect(page.locator("a[href^='/reader/']")).toHaveCount(before + 1, { timeout: 15_000 });
   await expect(page.getByText("Alan Turing", { exact: false }).first()).toBeVisible();
 });
 
@@ -85,6 +107,7 @@ test("the same holds for highlights imported outside the page (the extension's O
 
   await page.goto("/highlights");
   await page.waitForTimeout(300);
+  await simulateTabSwitchAway(page);
   const distinctiveText = page.getByText("a distinctive test phrase for refresh-on-focus", { exact: false });
   await expect(distinctiveText).toHaveCount(0);
 
@@ -107,7 +130,7 @@ test("the same holds for highlights imported outside the page (the extension's O
   });
   expect(highlightRes.status).toBe(201);
 
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await simulateTabSwitchBack(page);
 
-  await expect(distinctiveText).toBeVisible({ timeout: 10_000 });
+  await expect(distinctiveText).toBeVisible({ timeout: 15_000 });
 });
