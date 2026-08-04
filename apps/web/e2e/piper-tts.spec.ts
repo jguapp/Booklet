@@ -2,26 +2,28 @@ import { expect, test } from "@playwright/test";
 import { waitForSaveModalToClose } from "./helpers";
 
 /**
- * Kokoro (lib/reader/kokoro-tts.ts) -- the open-source, client-side TTS
- * voice option, running entirely in-browser via WASM (WebGPU is
- * deliberately never used -- see kokoro-tts.ts's DEVICE comment) with no
- * system-TTS dependency. Unlike the native SpeechSynthesis path (see
- * text-to-speech.spec.ts, which has to skip on headless Linux CI for lack
- * of installed system voices), this works the same in headless CI as on a
- * real desktop -- it doesn't ask the OS for anything.
+ * Piper (lib/reader/piper-tts.ts) -- the open-source, client-side TTS voice
+ * option, running entirely in-browser via onnxruntime-web's WASM backend
+ * (it never requests WebGPU -- confirmed by reading @mintplex-labs/piper-
+ * tts-web's own source, its InferenceSession.create() call passes no
+ * executionProviders option at all, so this doesn't carry the WebGPU
+ * numerical-corruption risk Kokoro's TTS had on this same stack). Unlike
+ * the native SpeechSynthesis path (see text-to-speech.spec.ts, which has to
+ * skip on headless Linux CI for lack of installed system voices), this
+ * works the same in headless CI as on a real desktop -- it doesn't ask the
+ * OS for anything.
  *
- * The first play genuinely downloads the ~90MB quantized model from
- * Hugging Face's CDN rather than mocking it, so this is allowed a generous
- * timeout instead of a tight one.
+ * The first play genuinely downloads that voice's ~60MB model from Hugging
+ * Face's CDN rather than mocking it, so this is allowed a generous timeout
+ * instead of a tight one.
  */
 
-// Real, valid speech samples stay within [-1, 1]; a corrupted-inference
-// bug (the actual "loads forever, then a burst of static" symptom this
-// guards against -- WebGPU produced samples up to ~10^26 for this exact
-// model) blows samples up to an enormous, easily-distinguishable
-// magnitude. Checking that HTMLMediaElement.play() merely resolved (as
-// this test did before) can't tell the two apart -- a garbage WAV plays
-// "successfully" too, it just sounds like static.
+// Real speech is neither silent nor a flat DC offset; a broken pipeline
+// (predict() resolving with an empty/garbage buffer, wrong sample rate,
+// etc.) tends to produce exactly one of those instead of something that
+// merely sounds different. Checking that HTMLMediaElement.play() merely
+// resolved (as this test did before) can't tell "played real audio" apart
+// from "played a technically-valid but silent/garbage WAV."
 async function instrumentAudioCapture(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     (window as unknown as { __playCount: number }).__playCount = 0;
@@ -34,18 +36,28 @@ async function instrumentAudioCapture(page: import("@playwright/test").Page) {
       return result;
     };
 
-    (window as unknown as { __audioMaxAbs: number[] }).__audioMaxAbs = [];
+    // piper-tts-web's predict() encodes to 16-bit PCM WAV (audio/x-wav),
+    // not Kokoro's 32-bit float WAV -- see pcm2wav() in the package's own
+    // source, which also clamps any out-of-range float into valid int16
+    // before this point, so (unlike the old Kokoro test) an amplitude check
+    // here can't distinguish "correct" from "corrupted-then-clamped." What
+    // it *can* still catch: a pipeline bug that produces silence or a flat
+    // buffer instead of varying samples.
+    (window as unknown as { __audioNonSilentRatios: number[] }).__audioNonSilentRatios = [];
     const origCreateObjectURL = URL.createObjectURL.bind(URL);
     URL.createObjectURL = (obj: Blob | MediaSource) => {
-      if (obj instanceof Blob && obj.type === "audio/wav") {
+      if (obj instanceof Blob && obj.type === "audio/x-wav") {
         obj.arrayBuffer().then((buf) => {
           const view = new DataView(buf);
-          let maxAbs = 0;
-          for (let i = 44; i + 4 <= buf.byteLength; i += 4) {
-            const v = view.getFloat32(i, true);
-            if (Number.isFinite(v)) maxAbs = Math.max(maxAbs, Math.abs(v));
+          let nonSilent = 0;
+          let total = 0;
+          for (let i = 44; i + 2 <= buf.byteLength; i += 2) {
+            total++;
+            if (Math.abs(view.getInt16(i, true)) > 200) nonSilent++; // ignore quantization/dither noise near zero
           }
-          (window as unknown as { __audioMaxAbs: number[] }).__audioMaxAbs.push(maxAbs);
+          (window as unknown as { __audioNonSilentRatios: number[] }).__audioNonSilentRatios.push(
+            total > 0 ? nonSilent / total : 0,
+          );
         });
       }
       return origCreateObjectURL(obj);
@@ -53,13 +65,13 @@ async function instrumentAudioCapture(page: import("@playwright/test").Page) {
   });
 }
 
-test("selecting a Kokoro voice and pressing play actually generates and plays real (not corrupted) audio", async ({
+test("selecting a Piper voice and pressing play actually generates and plays real (not silent) audio", async ({
   page,
 }) => {
   test.setTimeout(180_000);
 
-  // use-text-to-speech.ts plays Kokoro chunks through `new Audio(url)` --
-  // a real, playing element, but deliberately never attached to the DOM
+  // use-text-to-speech.ts plays Piper chunks through `new Audio(url)` -- a
+  // real, playing element, but deliberately never attached to the DOM
   // (nothing needs to render it), so `document.querySelectorAll("audio")`
   // can never see it. Instrument the real play() call instead of querying
   // the DOM for evidence that audio genuinely started (not just that the
@@ -93,18 +105,12 @@ test("selecting a Kokoro voice and pressing play actually generates and plays re
     })
     .toBeGreaterThan(0);
 
-  // Regression guard for a real bug found by hand: onnxruntime-web's
-  // WebGPU backend produced numerically-corrupted inference output for
-  // this model (samples up to ~10^26, real speech stays within [-1, 1]) --
-  // played through <audio>, that's exactly "loads forever, then a burst of
-  // static." kokoro-tts.ts now never requests WebGPU, but this asserts on
-  // the actual generated samples so a regression (a future dependency bump
-  // re-enabling it, say) fails loudly here instead of shipping silently.
-  const maxAbsValues = await page.evaluate(() => (window as unknown as { __audioMaxAbs: number[] }).__audioMaxAbs);
-  expect(maxAbsValues.length).toBeGreaterThan(0);
-  for (const maxAbs of maxAbsValues) {
-    expect(maxAbs).toBeLessThanOrEqual(1.5); // real audio; garbage inference is orders of magnitude larger
-    expect(maxAbs).toBeGreaterThan(0); // not dead silence either
+  const ratios = await page.evaluate(
+    () => (window as unknown as { __audioNonSilentRatios: number[] }).__audioNonSilentRatios,
+  );
+  expect(ratios.length).toBeGreaterThan(0);
+  for (const ratio of ratios) {
+    expect(ratio).toBeGreaterThan(0.1); // real speech, not silence or a near-flat buffer
   }
 
   await page.getByTitle("Stop reading aloud").click();
@@ -119,18 +125,15 @@ test("the system voice is the default, and switching back to it needs no downloa
 test("a real, full-length article with an external-links/citations tail doesn't hang forever", async ({ page }) => {
   test.setTimeout(180_000);
 
-  // Regression test for a real bug found by hand: kokoro-js's own
-  // TextSplitterStream.push(), handed a whole article's text (tens of
-  // thousands of characters) in one call instead of one sentence at a
-  // time, could loop forever and never return -- confirmed in complete
-  // isolation (a plain Node script, no browser/WASM/GPU involved at all)
-  // using this exact Wikipedia article's extracted text, which triggered
-  // it specifically in its "External links" tail (bare URLs, list items,
-  // no terminal punctuation). That hang blocked the main thread hard
-  // enough to eventually crash the tab. Fixed by pre-chunking text
-  // ourselves (kokoro-tts.ts's toSafeTextStream) instead of handing
-  // kokoro-js one giant blob. The "Dog" article used in the test above
-  // never happened to trigger this, so it alone wouldn't have caught this.
+  // General end-to-end regression guard: piper-tts.ts pre-chunks text
+  // itself (toSafeTextChunks) rather than handing Piper's one-shot
+  // predict() a whole article at once, specifically so a long, irregularly-
+  // punctuated tail (bare URLs, list items, no terminal punctuation, as in
+  // this article's "External links" section) can't stall generation. Kept
+  // as a real end-to-end check with a real article rather than a unit test
+  // of the chunker alone, since the original bug this class of test guards
+  // against (kokoro-js's TextSplitterStream hanging on exactly this kind of
+  // input) only ever showed up with real extracted article text.
   await page.goto("/settings/reading");
   await page.getByRole("combobox", { name: "Read-aloud voice" }).selectOption({ label: "Heart (American, female)" });
 
@@ -145,9 +148,7 @@ test("a real, full-length article with an external-links/citations tail doesn't 
 
   await page.getByTitle("Read aloud").click();
   // The model's already cached from the earlier test in this file, so this
-  // is bounded by real generation time, not a fresh ~90MB download --
-  // before the fix, this never resolved at all (confirmed hanging past
-  // 170s in manual testing) rather than just being slow.
+  // is bounded by real generation time, not a fresh ~60MB download.
   await expect(page.getByTitle("Pause reading aloud")).toBeVisible({ timeout: 120_000 });
 
   await page.getByTitle("Stop reading aloud").click();
