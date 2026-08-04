@@ -56,6 +56,23 @@ regression test (`apps/api/src/test/integration.test.ts`'s `cors` describe
 block) confirmed to actually fail without the `moz-extension://` allowance,
 not just added alongside it.
 
+The popup reserves its full height in CSS (`#root { min-height: 250px }`)
+rather than letting the panel size itself once content arrives. That looks
+like dead styling and isn't: everything below the static header is appended
+by `popup.ts` only after an awaited `chrome.storage` read, so without it the
+document is 84px tall at `DOMContentLoaded` and the browser opens a
+header-only sliver it then has to re-measure and grow. Chrome and stock
+Firefox both regrow correctly; Gecko *forks* that reimplement panel chrome
+(Zen Browser, and the same class of bug in other Firefox derivatives) are
+where a panel measured once at 84px stays there and presents as an empty
+box. Reserving the height means the popup opens at its final 334px and never
+resizes -- worth keeping even though vanilla Firefox doesn't need it, since
+"blank popup, no error anywhere" is close to undebuggable when reported from
+a fork. Relatedly, the top-level `renderSaveView()` call has a `.catch()`
+that renders the failure into the popup: a floating rejection there leaves
+`#root` empty forever, and the popup's devtools target closes along with the
+panel, so there's otherwise nowhere for the error to show up.
+
 Verify a real, unpacked build actually loads in Firefox (not just passes
 lint) with:
 
