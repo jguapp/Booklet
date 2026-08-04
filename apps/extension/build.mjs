@@ -8,20 +8,26 @@ cpSync("manifest.json", "dist/manifest.json");
 cpSync("src/popup.html", "dist/popup.html");
 cpSync("icons", "dist/icons", { recursive: true, filter: (src) => !src.endsWith(".svg") });
 
-const options = {
-  entryPoints: ["src/popup.ts", "src/background.ts"],
+const shared = {
   bundle: true,
   outdir: "dist",
-  format: "esm",
   target: ["chrome110", "firefox112"], // matches manifest.json's strict_min_version
   sourcemap: true,
 };
 
+// Two builds because the output formats genuinely differ. The popup and the
+// background page are both declared as modules in the manifest; a content
+// script is injected as a classic script with no import support, where an
+// ESM bundle's top-level `export {}` is a parse error.
+const builds = [
+  { ...shared, entryPoints: ["src/popup.ts", "src/background.ts"], format: "esm" },
+  { ...shared, entryPoints: ["src/content.ts"], format: "iife" },
+];
+
 if (watch) {
-  const ctx = await esbuild.context(options);
-  await ctx.watch();
+  await Promise.all(builds.map(async (options) => (await esbuild.context(options)).watch()));
   console.log("watching for changes...");
 } else {
-  await esbuild.build(options);
+  await Promise.all(builds.map((options) => esbuild.build(options)));
   console.log("built to dist/");
 }

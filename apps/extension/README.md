@@ -110,6 +110,50 @@ does Chromium's `--load-extension`, unlike the manifest-level and
 CORS-level checks above, which are both real automated regression
 coverage now, not one-off manual checks.
 
+## Highlighting the open web
+
+`src/content.ts` runs on every http(s) page: select text, click **Highlight**,
+and it's painted and stored locally. Once a page has any, a floating bar
+offers **Open in Booklet**, which saves the article and attaches every
+highlight to it.
+
+The interesting part is anchoring. Booklet stores highlights against
+`Article.extractedText` -- Readability's output -- which is a *different
+string* from the live page's text: no nav, no ads, different whitespace, and
+completely different offsets. So the offsets captured here are explicitly not
+the source of truth. What survives the gap is the TextQuote part (`exact`
+plus 32 characters of context either side), which
+`packages/shared/src/highlight-anchor.ts`'s `resolveTextPosition` searches for
+*before* it ever trusts `start`/`end`. That function was written for
+re-extraction drift; live page → `extractedText` is the same problem with a
+larger delta, so no new anchoring mechanism and no schema change were needed
+-- the extension just has to capture good context. `src/text-anchor.ts`
+mirrors its resolution ladder for the in-page case (restoring highlights after
+a reload, where the DOM has also moved on).
+
+Two things that look like over-engineering and aren't:
+
+- **The UI lives in a shadow root.** Page CSS is hostile by default -- broad
+  resets, `!important`, z-index wars -- and a shadow root is the only way to
+  get a toolbar that renders the same everywhere without a per-site
+  stylesheet. The host carries `data-booklet-ui` so the text-mapping walker
+  skips it; otherwise the bar's own label could end up quoted inside a
+  highlight's context.
+- **The import runs in the background script**, not the content script. The
+  page's origin can't reach the API (CORS only allows the extension origin),
+  and the session token deliberately lives in extension storage where page
+  scripts can't read it.
+
+Local highlights are cleared only once the server confirms the import, so a
+failure can't silently lose them. Highlights that no longer resolve in the
+page are kept rather than dropped -- the page may just not have finished
+rendering, and they still import fine, since the server re-anchors
+independently of whether the extension could repaint them.
+
+`GET /api/articles?url=` exists for this: on a 409 the import attaches to the
+already-saved article instead of stranding the highlights, and that lookup
+matches the same raw-or-canonical way the duplicate check does.
+
 ## What's here
 
 - `src/popup.ts` / `popup.html` -- the toolbar popup: login form, or (once
@@ -120,6 +164,12 @@ coverage now, not one-off manual checks.
   `syncActionBehaviour` re-runs on every worker wake, not just
   install/startup, since an MV3 worker is torn down freely and the whole
   thing is one storage read.
+- `src/content.ts` -- the in-page highlighting UI (shadow-root toolbar and
+  bar), injected on every http(s) page.
+- `src/text-anchor.ts` -- DOM range ↔ text offset mapping, anchor
+  re-resolution, and the `<mark>` painting/unpainting.
+- `src/highlight-store.ts` -- per-page pending highlights in
+  `chrome.storage.local`.
 - `src/api.ts` -- a small fetch wrapper, same shape as the web app's
   `lib/api/client.ts` but using `chrome.storage.local` instead of
   `localStorage` for the access token (extension storage, not accessible to
