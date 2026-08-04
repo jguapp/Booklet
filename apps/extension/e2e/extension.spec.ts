@@ -38,6 +38,42 @@ test("manifest loads and registers a background service worker", async () => {
   await context.close();
 });
 
+test("the toolbar button swaps between one-click save and the login popup", async () => {
+  const context = await launchWithExtension();
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent("serviceworker", { timeout: 10_000 });
+
+  // A popup and chrome.action.onClicked are mutually exclusive -- whichever
+  // is set wins, and a declared popup means the click event never fires. So
+  // this popup/no-popup swap *is* the one-click behaviour; there's no other
+  // observable state to assert against.
+  await expect
+    .poll(() => worker.evaluate(() => chrome.action.getPopup({})), { timeout: 10_000 })
+    .toMatch(/popup\.html$/);
+
+  await worker.evaluate(async () => {
+    await chrome.storage.local.set({
+      booklet_session: {
+        accessToken: "not-a-real-token",
+        accessTokenExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        email: "one-click@example.com",
+      },
+    });
+  });
+
+  // Signing in clears the popup, so the next click saves directly.
+  await expect.poll(() => worker.evaluate(() => chrome.action.getPopup({})), { timeout: 10_000 }).toBe("");
+  // With no popup, the tooltip is the only place the active account is visible.
+  expect(await worker.evaluate(() => chrome.action.getTitle({}))).toContain("one-click@example.com");
+
+  await worker.evaluate(() => chrome.storage.local.remove("booklet_session"));
+  await expect
+    .poll(() => worker.evaluate(() => chrome.action.getPopup({})), { timeout: 10_000 })
+    .toMatch(/popup\.html$/);
+
+  await context.close();
+});
+
 test("log in through the popup, then save the active page through the real API", async () => {
   const email = `extension-e2e-${Date.now()}@example.com`;
   const password = "correct horse battery staple";

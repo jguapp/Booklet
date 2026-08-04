@@ -6,7 +6,9 @@ interface StoredSession {
   email: string;
 }
 
-const STORAGE_KEY = "booklet_session";
+/** Exported so the background script can watch this exact key via
+ * chrome.storage.onChanged rather than re-declaring the literal. */
+export const STORAGE_KEY = "booklet_session";
 
 export async function getSession(): Promise<StoredSession | null> {
   const result = await chrome.storage.local.get(STORAGE_KEY);
