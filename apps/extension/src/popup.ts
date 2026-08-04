@@ -110,4 +110,17 @@ async function renderSaveView() {
   root.append(accountRow, saveButton, status);
 }
 
-renderSaveView();
+// Nothing below the static header is in the document until this resolves, so a
+// rejection here (an unreadable stored session, a chrome.* call the browser
+// refuses) used to leave #root empty forever -- the popup just opens blank,
+// with the failure reachable only from the popup's own devtools target, which
+// closes along with the panel. Put the error in the popup where it can actually
+// be read instead.
+renderSaveView().catch((err) => {
+  console.error("[booklet] popup failed to render", err);
+  root.replaceChildren(
+    el("p", { class: "status error" }, [
+      err instanceof ApiError ? err.message : "Couldn't open Booklet. Try reloading the extension.",
+    ]),
+  );
+});
