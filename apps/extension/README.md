@@ -30,16 +30,52 @@ point at a deployed API instead.
 ## Firefox support
 
 `manifest.json`'s `background` declares both `service_worker` (Chrome) and
-`scripts` (Firefox versions before MV3 service-worker support landed) so
+`scripts` (Firefox, which still ignores `service_worker` even in current
+versions -- confirmed via `web-ext lint`, not just inferred from docs) so
 one manifest works on both, plus a `browser_specific_settings.gecko.id` --
 Firefox requires a stable id for a MV3 add-on. The extension code itself
 uses the `chrome.*` namespace throughout (not `browser.*`); Firefox ships
 `chrome.*` as a compatibility alias with the same promise-based calling
 convention this code already uses, so no polyfill was needed.
 
+`strict_min_version` is `142.0` -- not an arbitrary floor, but the actual
+minimum Firefox version that supports every manifest key this extension
+uses (`background.type: "module"` needs 112+; the required
+`data_collection_permissions` key, added under Mozilla's late-2025 data
+transparency policy, needs 140 desktop / 142 Android). `pnpm lint:firefox`
+runs Mozilla's own `web-ext lint` against the real built `dist/` and is
+wired into CI (`test-extension-e2e` job) specifically to catch exactly
+this class of "manifest key exists but the declared min version predates
+browser support for it" mismatch automatically going forward.
+
+The API's CORS config (`apps/api/src/app.ts`) allows both
+`chrome-extension://` and `moz-extension://` origins -- browser extensions
+aren't `http(s)://` origins CORS can pin the normal way, and Firefox's
+scheme is different from Chrome's. Verified with a real, currently-passing
+regression test (`apps/api/src/test/integration.test.ts`'s `cors` describe
+block) confirmed to actually fail without the `moz-extension://` allowance,
+not just added alongside it.
+
+Verify a real, unpacked build actually loads in Firefox (not just passes
+lint) with:
+
+```bash
+pnpm --filter @booklet/extension build
+pnpm --filter @booklet/extension run:firefox   # launches real Firefox with it loaded as a temporary add-on
+```
+
 Not done: publishing to addons.mozilla.org (needs a Mozilla developer
-account this environment doesn't have) and Safari support (needs Xcode's
+account this environment doesn't have -- everything above is what that
+submission would need to pass review with, not a substitute for actually
+submitting it) and Safari support (needs Xcode's
 `safari-web-extension-converter`, macOS-only).
+
+Not automated: there's no Firefox equivalent of `e2e/extension.spec.ts`
+(login through the popup, save a page through the real API) -- Playwright
+doesn't support loading an unpacked WebExtension into Firefox the way it
+does Chromium's `--load-extension`, unlike the manifest-level and
+CORS-level checks above, which are both real automated regression
+coverage now, not one-off manual checks.
 
 ## What's here
 
