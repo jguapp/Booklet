@@ -4,12 +4,22 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { BookletPeekMark, PasswordPeekProvider } from "@/components/ui/password-peek";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { OAuthButtons } from "@/components/auth/oauth-buttons";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { ApiError } from "@/lib/api/client";
 
 export default function SignupPage() {
+  return (
+    <PasswordPeekProvider>
+      <SignupPageInner />
+    </PasswordPeekProvider>
+  );
+}
+
+function SignupPageInner() {
   const router = useRouter();
   const { signup } = useAuth();
   const [submitting, setSubmitting] = useState(false);
@@ -36,9 +46,7 @@ export default function SignupPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-paper px-6">
       <div className="w-full max-w-sm">
-        <Link href="/" className="mb-8 block text-center font-serif text-xl font-semibold text-ink">
-          Booklet
-        </Link>
+        <BookletPeekMark />
 
         <div className="rounded-md border border-border bg-surface px-6 py-7">
           <h1 className="mb-1.5 font-serif text-xl font-semibold text-ink">Create an account</h1>
@@ -60,7 +68,7 @@ export default function SignupPage() {
             </label>
             <label className="flex flex-col gap-1.5">
               <span className="font-sans text-xs font-medium text-ink-muted">Password</span>
-              <Input type="password" name="password" required minLength={8} placeholder="••••••••" />
+              <PasswordInput name="password" required minLength={8} placeholder="••••••••" />
             </label>
 
             {error && <p className="font-sans text-sm text-red-500">{error}</p>}
