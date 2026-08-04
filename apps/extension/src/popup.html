@@ -34,6 +34,22 @@
         color: var(--color-ink);
       }
 
+      /* Reserve the popup's full height up front, so the panel is already its
+         final size on first paint.
+
+         Everything below the header is appended by popup.js only after an
+         awaited chrome.storage read, so without this #root starts empty and the
+         document is 84px tall at DOMContentLoaded -- the browser opens a
+         header-only sliver and has to re-measure and grow the panel a moment
+         later. Chrome and stock Firefox both regrow correctly, but that regrow
+         is the fragile step in Gecko forks that reimplement panel chrome (Zen),
+         where a panel measured once at 84px just stays there and reads as an
+         empty box. 250px is the login view's exact content height, so the popup
+         now opens at its final 334px and never resizes at all. */
+      #root {
+        min-height: 250px;
+      }
+
       .header {
         display: flex;
         align-items: center;
