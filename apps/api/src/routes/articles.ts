@@ -13,6 +13,7 @@ import { requireAuth } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
 import { EpubExtractionError, extractEpubText } from "../services/epub-extraction.js";
 import { PdfExtractionError, extractPdfText } from "../services/pdf-extraction.js";
+import { isWeakBookTitle, lookupBookMetadata } from "../services/open-library.js";
 import { deleteStoredFile, readStoredFile, saveFile } from "../services/storage-service.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
 import { sendEmail } from "../services/email-service.js";
@@ -212,11 +213,36 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
 
       const fileStorageKey = await saveFile(request.userId!, originalFilename, buffer);
 
+      const filenameTitle = originalFilename.replace(/\.(pdf|epub)$/i, "");
+      let title = extracted?.title ?? null;
+      let author: string | null = null;
+      let coverImageUrl = extracted?.coverImageUrl ?? null;
+
+      // Embedded book metadata is missing or junk far more often than not --
+      // a PDF /Title is regularly a LaTeX job name or "Microsoft Word - draft3"
+      // and an EPUB may carry nothing at all, leaving the library card showing
+      // a raw filename with no author and no cover. Fill those gaps from Open
+      // Library, but only the gaps: a real embedded title is better evidence
+      // of what this exact file is than a catalogue search that can land on
+      // the wrong edition. Enrichment failing is not an upload failing.
+      if (isWeakBookTitle(title, filenameTitle)) {
+        const found = await lookupBookMetadata({ originalFilename, text: extracted?.text }).catch(() => null);
+        if (found) {
+          title = found.title ?? title;
+          author = found.author;
+          // Only when we have nothing. A rendered PDF page 1 or an EPUB's
+          // declared cover is the actual file's own artwork; Open Library's is
+          // a guess at the edition, so it loses when both exist.
+          coverImageUrl ??= found.coverImageUrl;
+        }
+      }
+
       const article = await prisma.article.create({
         data: {
           userId: request.userId!,
           url: null,
-          title: extracted?.title ?? originalFilename.replace(/\.(pdf|epub)$/i, ""),
+          title: title ?? filenameTitle,
+          author,
           sourceType,
           extractionStatus: extracted ? "SUCCESS" : "FAILED",
           extractionError,
@@ -225,7 +251,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
           fileStorageKey,
           originalFilename,
-          coverImageUrl: extracted?.coverImageUrl ?? null,
+          coverImageUrl,
         },
       });
 
