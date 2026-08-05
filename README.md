@@ -44,10 +44,10 @@ A handful of choices that aren't just "yet another CRUD app":
   fed through [Tesseract.js](https://github.com/naptha/tesseract.js)
   automatically on upload — no toggle, no "try OCR" button, no API key.
 - **A real open-source TTS model, running in your browser.**
-  [Piper](https://github.com/rhasspy/piper) (MIT) does inference entirely
-  client-side via WASM (ONNX Runtime Web) — several genuinely
-  natural-sounding voices, zero server cost, zero API key, each voice's
-  model just downloads once and is cached.
+  [Kokoro](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX)
+  (82M params, Apache-2.0) does inference entirely client-side via
+  WASM/WebGPU — several genuinely natural-sounding voices, zero server
+  cost, zero API key, the model just downloads once and is cached.
 - **A public, versioned API.** `/api/v1`, personal access tokens, and
   HMAC-signed webhooks — the same integration surface a much bigger
   product would ship, kept deliberately decoupled from the internal
@@ -58,7 +58,7 @@ A handful of choices that aren't just "yet another CRUD app":
   reason — syncing across devices — and nothing is gated behind creating
   one.
 - **CI that's actually green.** Typecheck/lint, unit, integration, two
-  real e2e suites (including a genuine Piper model download and a
+  real e2e suites (including a genuine Kokoro model download and a
   headless-Chromium extension load), and a Docker build-and-smoke-test —
   on every push, not just on the paths someone remembered to check.
 
@@ -116,9 +116,9 @@ throughout. Grouped by area rather than one flat list:
 - [x] Dictionary lookup — select any word in an article, PDF, or EPUB and
       look it up inline (Apple Books-style popover), no separate tab
 - [x] Text-to-speech, two engines — the browser's native Web Speech API
-      (zero setup, the default), or **Piper**, an open-source model running
-      client-side via WASM with several natural-sounding voice options, no
-      server and no API key either way
+      (zero setup, the default), or **Kokoro**, an open-source 82M-param
+      model running client-side via WASM/WebGPU with several natural-
+      sounding voice options, no server and no API key either way
 - [x] Reading progress — a visual progress bar for every reader (article,
       PDF, EPUB), plus periodic + visibility-triggered persistence (not just
       on navigate-away — a hard reload or tab close can interrupt an
@@ -206,7 +206,7 @@ throughout. Grouped by area rather than one flat list:
       (the full API surface via Fastify's `.inject()`), and e2e (Playwright:
       the local/anonymous IndexedDB path, real PDF/EPUB rendering and
       highlighting, dictionary lookup, both TTS engines — including a real
-      Piper model download and generation, not mocked — OAuth, and the
+      Kokoro model download and generation, not mocked — OAuth, and the
       browser extension loaded for real in Chromium) — see
       [Testing](#testing)
 - [x] CI — GitHub Actions runs the full suite (typecheck/lint, unit,
@@ -234,8 +234,9 @@ real PDF (`pdf-reader.spec.ts`) and EPUB (`epub-reader.spec.ts`) readers
 end to end (actual canvas rendering and iframe-based pagination in a real
 browser, not mocked), dictionary lookup, native text-to-speech (skipped
 automatically in environments with no system TTS voice, such as headless
-CI), **Piper text-to-speech (`piper-tts.spec.ts`) — a real model
-download and generation, not mocked**, Kindle import/export
+CI), **Kokoro text-to-speech (`kokoro-tts.spec.ts`) — a real model
+download and generation, not mocked, which is also how a real WebGPU-
+adapter-detection bug got caught**, Kindle import/export
 (`kindle-sync.spec.ts`), the command palette, smart/nested collections,
 duplicate detection, related articles, and tags/search/reading-progress
 persistence (`tags-search-progress.spec.ts`). `apps/mobile` has no
@@ -301,7 +302,7 @@ what's verified and what isn't within these constraints.
 | Article extraction | Mozilla Readability + jsdom (HTML), pdfjs-dist (PDF), jszip + jsdom (EPUB) |
 | PDF/EPUB rendering | pdfjs-dist (canvas + text layer) and epub.js (paginated, CFI-anchored) in the browser -- real page/chapter rendering, not extracted text |
 | OCR | Tesseract.js -- in-process WASM, no external API, triggered only when a PDF's native text layer is empty/sparse |
-| Text-to-speech | Browser SpeechSynthesis (default) or Piper via @mintplex-labs/piper-tts-web -- an open-weight model doing inference client-side over WASM (ONNX Runtime Web), no server |
+| Text-to-speech | Browser SpeechSynthesis (default) or Kokoro via kokoro-js -- an 82M-param open-weight model doing inference client-side over WASM/WebGPU (ONNX Runtime Web), no server |
 | Auth | Email/password + OAuth (Google, GitHub), JWT access + refresh tokens; every method is optional — only needed for sync |
 | Local storage | IndexedDB (no-account mode is the default, not a fallback) |
 | Email | Resend, with a console-log fallback when unconfigured |

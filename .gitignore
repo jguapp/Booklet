@@ -43,8 +43,3 @@ Thumbs.db
 # misc
 *.tsbuildinfo
 .turbo/
-
-# onnxruntime-web's WASM runtime, copied from node_modules at postinstall
-# time (see apps/web/scripts/copy-onnx-wasm.mjs) so it's never out of sync
-# with whatever version is actually installed -- not source, not committed.
-apps/web/public/onnx-runtime/
