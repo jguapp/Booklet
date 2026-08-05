@@ -1,12 +1,8 @@
 <div align="center">
+  <img src=".github/assets/banner.svg" alt="Booklet — save what you find, keep what you highlight" width="100%" />
+</div>
 
-# 📖 Booklet
-
-**A read-it-later and annotation app for people who save more than they read.**
-
-Save an article, PDF, or EPUB. Read it in a clean distraction-free view.
-Highlight and annotate as you go. Have those highlights resurface later
-instead of disappearing into a list you never reopen.
+<div align="center">
 
 [![CI](https://img.shields.io/github/actions/workflow/status/jguapp/Booklet/ci.yml?branch=main&style=for-the-badge&label=CI&logo=githubactions&logoColor=white)](https://github.com/jguapp/Booklet/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-proprietary-red?style=for-the-badge)
@@ -26,28 +22,140 @@ instead of disappearing into a list you never reopen.
 
 </div>
 
+## Why this exists
+
+Read-it-later apps have a well-known failure mode: articles pile up in a
+queue nobody ever clears, and highlights — the actual reason most of them
+got saved in the first place — vanish into a list that's never reopened
+again. Booklet is built around fixing that second half specifically. A
+highlight isn't a stored string; it's a flashcard whether you meant it to
+be one or not, and it resurfaces later on a real spaced-repetition
+schedule (SM-2, the same algorithm behind Anki) instead of sitting inert.
+
+Everything else follows from a handful of opinions taken further than most
+projects in this space bother to:
+
+- **Offline is the default, not a fallback.** Saving, reading,
+  highlighting, resurfacing, PDF/EPUB rendering, search, OCR, and
+  text-to-speech all work with zero account, backed by IndexedDB in the
+  browser. An account exists for exactly one reason — syncing a library
+  across devices — and nothing product-facing is gated behind creating one.
+- **A saved PDF or EPUB is rendered, not flattened.** Pages render via
+  `pdfjs-dist` (real canvas output plus a precisely positioned, selectable
+  text layer); EPUB chapters render via `epub.js` (real pagination, real
+  iframe rendering). Highlights anchor to page coordinates or an EPUB CFI
+  range — not a character offset into a lossy text extraction that drifts
+  the moment formatting changes.
+- **Read-aloud is engineered to feel instant, not just work.** Kokoro (an
+  open-weight, 82M-parameter TTS model) runs through a small pool of real
+  worker processes on the server, over ONNX Runtime's native execution
+  path — measured concurrent generation fast enough that the gap between
+  one sentence ending and the next starting is 1-2 milliseconds, not the
+  multi-second pause most from-scratch TTS integrations settle for. See
+  [Architecture](#architecture) for why that took a process pool instead
+  of the more obvious approach.
+- **The integration surface is a first-class product, not an
+  afterthought.** A versioned `/api/v1`, personal access tokens, and
+  HMAC-signed webhooks ship alongside the app itself — kept deliberately
+  decoupled from the internal routes so a frontend refactor can't quietly
+  break someone's script.
+
 No account is required to use any of this — saves and highlights live in
-the browser (IndexedDB) by default. Creating an account is opt-in and exists
-for one reason: syncing your library and highlights across devices. Signing
-in for the first time migrates whatever's already saved locally onto the
-account, rather than leaving it behind.
+the browser (IndexedDB) by default, and signing in for the first time
+migrates whatever's already saved locally onto the account rather than
+leaving it behind.
 
 **This is proprietary software.** Booklet is not open source. No license is
 granted for use, modification, or redistribution of any part of this
-repository — see [License](#license).
+repository — see [License](#license). The engineering practices below
+(real CI, a documented architecture, a public API) are the same ones an
+open-source project of this size would carry; the source just isn't
+licensed for reuse.
+
+## Architecture
+
+A pnpm monorepo: one Fastify API backing three real clients (a Next.js web
+app, a Manifest V3 browser extension, and an Expo/React Native mobile
+app), plus a fourth "client" that never touches the network at
+all — signed-out mode reads and writes IndexedDB directly in the browser
+and only starts talking to the API once an account exists.
+
+```mermaid
+flowchart LR
+    subgraph Clients["Clients"]
+        Web["Web app<br/>Next.js (App Router)"]
+        Ext["Browser extension<br/>Manifest V3"]
+        Mobile["Mobile<br/>Expo / React Native"]
+    end
+
+    IDB[("IndexedDB<br/>(signed out)")]
+
+    subgraph API["apps/api — Fastify"]
+        Auth["Auth<br/>JWT + OAuth"]
+        Core["Articles · Highlights<br/>Collections · Digests"]
+        TTS["Kokoro TTS<br/>process pool"]
+        OCR["OCR<br/>Tesseract.js"]
+        V1["/api/v1<br/>tokens + webhooks"]
+    end
+
+    DB[("PostgreSQL<br/>via Prisma")]
+    Files[("Local file storage<br/>uploaded PDF/EPUB")]
+    Resend["Resend<br/>(email)"]
+
+    Web -- "no account" --> IDB
+    Web -- "signed in" --> API
+    Ext --> API
+    Mobile --> API
+
+    Core --> DB
+    Core --> Files
+    Core --> TTS
+    Core --> OCR
+    Core --> Resend
+    Auth --> DB
+    V1 --> DB
+```
+
+A few decisions in that diagram are worth explaining rather than just
+drawing:
+
+- **The Kokoro TTS pool is real child processes, not worker threads.**
+  `onnxruntime-node`'s native binding was confirmed by hand to crash the
+  whole Node process the instant `generate()` runs inside a
+  `worker_thread` — loading the model there works fine, generating audio
+  doesn't. A pool of independent OS processes sidesteps that entirely
+  (each is just another `node` invocation, exactly like the main server
+  itself) while still turning "generate one sentence at a time" into
+  genuine wall-clock parallelism: three concurrent generations measured
+  at roughly the same time as one, not three times as long.
+- **The API is stateless enough that the file store is the only thing
+  that isn't.** Uploaded PDFs/EPUBs live on local disk today
+  (`storage-service.ts`, streamed rather than fully buffered into memory
+  on read), behind a narrow enough interface that swapping it for S3 is a
+  three-function change, not a rewrite.
+- **Signed-out mode isn't a demo mode.** `apps/web/src/lib/local/db.ts`
+  and `apps/web/src/lib/data/*.ts` implement the exact same
+  save/highlight/resurface contract IndexedDB-side that `apps/api`
+  implements Postgres-side — the UI layer calls one repository interface
+  and doesn't know or care which backend is answering.
 
 ## A few things worth pointing at
 
-A handful of choices that aren't just "yet another CRUD app":
+Some other choices that aren't just "yet another CRUD app":
 
 - **OCR that runs itself.** A scanned PDF with no usable text layer gets
   fed through [Tesseract.js](https://github.com/naptha/tesseract.js)
   automatically on upload — no toggle, no "try OCR" button, no API key.
-- **A real open-source TTS model, running in your browser.**
-  [Kokoro](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX)
-  (82M params, Apache-2.0) does inference entirely client-side via
-  WASM/WebGPU — several genuinely natural-sounding voices, zero server
-  cost, zero API key, the model just downloads once and is cached.
+- **A real open-source TTS model — and a real playback experience around
+  it.** [Kokoro](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX)
+  (82M params, Apache-2.0) generates through a small server-side worker
+  pool (see [Architecture](#architecture)) fast enough to keep up with
+  playback in real time, driving a persistent, Spotify-style "now
+  playing" bar that survives navigating away from the article, live
+  word-level read-along highlighting, and a Readwise-style section
+  indicator tracking which paragraph is currently being read — no API
+  key either way, since inference is self-hosted, just server-side now
+  instead of in-browser WASM.
 - **A public, versioned API.** `/api/v1`, personal access tokens, and
   HMAC-signed webhooks — the same integration surface a much bigger
   product would ship, kept deliberately decoupled from the internal
@@ -117,8 +225,15 @@ throughout. Grouped by area rather than one flat list:
       look it up inline (Apple Books-style popover), no separate tab
 - [x] Text-to-speech, two engines — the browser's native Web Speech API
       (zero setup, the default), or **Kokoro**, an open-source 82M-param
-      model running client-side via WASM/WebGPU with several natural-
-      sounding voice options, no server and no API key either way
+      model generated through a server-side worker-process pool (real
+      `onnxruntime-node` native execution, not a WASM sandbox — measured
+      2.5-3.8x faster) so playback keeps up with generation in real time.
+      Drives a persistent, Spotify-style player bar that survives
+      navigating away from the article, live word-level read-along
+      highlighting (estimated from playback position, since the model
+      emits no per-word timestamps), and a Readwise-style left-border
+      indicator for the current paragraph. No API key either way — the
+      model is self-hosted, just server-side now instead of in-browser WASM
 - [x] Reading progress — a visual progress bar for every reader (article,
       PDF, EPUB), plus periodic + visibility-triggered persistence (not just
       on navigate-away — a hard reload or tab close can interrupt an
@@ -234,9 +349,11 @@ real PDF (`pdf-reader.spec.ts`) and EPUB (`epub-reader.spec.ts`) readers
 end to end (actual canvas rendering and iframe-based pagination in a real
 browser, not mocked), dictionary lookup, native text-to-speech (skipped
 automatically in environments with no system TTS voice, such as headless
-CI), **Kokoro text-to-speech (`kokoro-tts.spec.ts`) — a real model
-download and generation, not mocked, which is also how a real WebGPU-
-adapter-detection bug got caught**, Kindle import/export
+CI), **Kokoro text-to-speech (`tts-player.spec.ts`) — real server-side
+generation and playback, not mocked, covering the persistent player bar,
+read-along highlighting, and a regression guard against a chunking bug
+that once turned one Wikipedia article into 2,283 separate TTS
+requests**, Kindle import/export
 (`kindle-sync.spec.ts`), the command palette, smart/nested collections,
 duplicate detection, related articles, and tags/search/reading-progress
 persistence (`tags-search-progress.spec.ts`). `apps/mobile` has no
@@ -302,7 +419,7 @@ what's verified and what isn't within these constraints.
 | Article extraction | Mozilla Readability + jsdom (HTML), pdfjs-dist (PDF), jszip + jsdom (EPUB) |
 | PDF/EPUB rendering | pdfjs-dist (canvas + text layer) and epub.js (paginated, CFI-anchored) in the browser -- real page/chapter rendering, not extracted text |
 | OCR | Tesseract.js -- in-process WASM, no external API, triggered only when a PDF's native text layer is empty/sparse |
-| Text-to-speech | Browser SpeechSynthesis (default) or Kokoro via kokoro-js -- an 82M-param open-weight model doing inference client-side over WASM/WebGPU (ONNX Runtime Web), no server |
+| Text-to-speech | Browser SpeechSynthesis (default) or Kokoro via kokoro-js -- an 82M-param open-weight model, generated server-side through a pool of worker processes over ONNX Runtime's native execution path (`onnxruntime-node`), not in-browser WASM |
 | Auth | Email/password + OAuth (Google, GitHub), JWT access + refresh tokens; every method is optional — only needed for sync |
 | Local storage | IndexedDB (no-account mode is the default, not a fallback) |
 | Email | Resend, with a console-log fallback when unconfigured |

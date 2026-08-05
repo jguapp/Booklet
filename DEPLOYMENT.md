@@ -27,6 +27,12 @@ is read for the fallback behavior):
   digest emails log to the console instead of sending
 - `SENTRY_DSN` (API) / `NEXT_PUBLIC_SENTRY_DSN` (web) -- without them,
   error monitoring is a no-op
+- `TTS_POOL_SIZE` (API, default `3`) -- Kokoro text-to-speech generates
+  through this many real child processes (`apps/api/src/services/
+  tts-pool.ts`), each holding its own quantized 82M-param model instance
+  in memory for the process's whole lifetime, not per-request. Real but
+  moderate memory cost per worker; size this to the host's actual
+  headroom rather than leaving the default unexamined on a small instance.
 
 ## Database
 
