@@ -1,0 +1,1695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Booklet — The Complete Technical Documentation</title>
+<style>
+  :root {
+    --paper: #EDEBE2;
+    --surface: #FAF9F4;
+    --surface-2: #F3F1E9;
+    --ink: #211F1A;
+    --ink-muted: #5C584D;
+    --ink-faint: #86816F;
+    --border: #DBD6C8;
+    --accent: #1F6F6B;
+    --accent-strong: #14514E;
+    --accent-contrast: #FBFAF6;
+    --code-bg: #FAF9F4;
+    --code-border: #DBD6C8;
+    --highlight-yellow: #F3DE9C;
+    --warn-bg: #FBEFD9;
+    --warn-border: #E0B84A;
+    --danger: #B3432E;
+    --serif: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --max-width: 860px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14181A;
+      --surface: #1C2124;
+      --surface-2: #20272A;
+      --ink: #E8E4DA;
+      --ink-muted: #A6A093;
+      --ink-faint: #767065;
+      --border: #2D3336;
+      --accent: #55C4B8;
+      --accent-strong: #7ED8CD;
+      --accent-contrast: #0B1413;
+      --code-bg: #181D1F;
+      --code-border: #2D3336;
+      --highlight-yellow: #55461D;
+      --warn-bg: #2A2416;
+      --warn-border: #6B5A22;
+      --danger: #D97A63;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #14181A; --surface: #1C2124; --surface-2: #20272A;
+    --ink: #E8E4DA; --ink-muted: #A6A093; --ink-faint: #767065; --border: #2D3336;
+    --accent: #55C4B8; --accent-strong: #7ED8CD; --accent-contrast: #0B1413;
+    --code-bg: #181D1F; --code-border: #2D3336; --highlight-yellow: #55461D;
+    --warn-bg: #2A2416; --warn-border: #6B5A22; --danger: #D97A63;
+  }
+  :root[data-theme="light"] {
+    --paper: #EDEBE2; --surface: #FAF9F4; --surface-2: #F3F1E9;
+    --ink: #211F1A; --ink-muted: #5C584D; --ink-faint: #86816F; --border: #DBD6C8;
+    --accent: #1F6F6B; --accent-strong: #14514E; --accent-contrast: #FBFAF6;
+    --code-bg: #FAF9F4; --code-border: #DBD6C8; --highlight-yellow: #F3DE9C;
+    --warn-bg: #FBEFD9; --warn-border: #E0B84A; --danger: #B3432E;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.65;
+    font-size: 17px;
+  }
+
+  a { color: var(--accent-strong); }
+  :root[data-theme="dark"] a, @media (prefers-color-scheme: dark) { a { color: var(--accent); } }
+
+  /* ---------- Layout ---------- */
+  .layout {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { display: none; }
+    nav.toc.open { display: block; }
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 28px 20px 60px 28px;
+    border-right: 1px solid var(--border);
+    font-size: 14px;
+  }
+  nav.toc .toc-title {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 18px;
+    margin-bottom: 4px;
+  }
+  nav.toc .toc-sub {
+    color: var(--ink-faint);
+    font-size: 12.5px;
+    margin-bottom: 20px;
+  }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; }
+  nav.toc > ol > li { margin-bottom: 2px; }
+  nav.toc a {
+    display: block;
+    padding: 5px 8px;
+    border-radius: 6px;
+    color: var(--ink-muted);
+    text-decoration: none;
+    font-weight: 600;
+  }
+  nav.toc ol ol a { font-weight: 400; padding-left: 20px; font-size: 13.5px; }
+  nav.toc a:hover { background: var(--surface-2); color: var(--ink); }
+
+  main {
+    min-width: 0;
+    padding: 40px 48px 120px;
+  }
+  @media (max-width: 640px) {
+    main { padding: 28px 20px 100px; }
+  }
+  main > .content { max-width: var(--max-width); margin: 0 auto; }
+
+  /* ---------- Cover ---------- */
+  .cover {
+    max-width: var(--max-width);
+    margin: 0 auto 64px;
+    padding-bottom: 40px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cover .eyebrow {
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+  .cover h1 {
+    font-family: var(--serif);
+    font-size: 46px;
+    line-height: 1.1;
+    margin: 0 0 18px;
+  }
+  .cover .tagline {
+    font-size: 19px;
+    color: var(--ink-muted);
+    max-width: 640px;
+    margin-bottom: 24px;
+  }
+  .cover .meta {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    font-size: 13.5px;
+    color: var(--ink-faint);
+  }
+  .cover .meta span { display: inline-flex; align-items: center; gap: 6px; }
+
+  /* ---------- Typography ---------- */
+  h1, h2, h3, h4 { font-family: var(--serif); font-weight: 700; color: var(--ink); scroll-margin-top: 24px; }
+  h2 {
+    font-size: 30px;
+    margin: 64px 0 18px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--border);
+  }
+  h2 .part-label {
+    display: block;
+    font-family: var(--sans);
+    font-size: 12.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  h3 { font-size: 22px; margin: 40px 0 14px; }
+  h4 { font-size: 17px; margin: 28px 0 10px; font-family: var(--sans); text-transform: uppercase; letter-spacing: 0.04em; font-size: 13.5px; color: var(--accent-strong); }
+  p { margin: 0 0 16px; }
+  ul, ol { margin: 0 0 16px; padding-left: 24px; }
+  li { margin-bottom: 8px; }
+  strong { color: var(--ink); }
+  code {
+    font-family: var(--mono);
+    font-size: 0.87em;
+    background: var(--surface-2);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    border: 1px solid var(--code-border);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    margin: 0 0 20px;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: 1em; }
+  .cm { color: var(--ink-faint); font-style: italic; }
+  .kw { color: var(--accent-strong); font-weight: 600; }
+  :root[data-theme="dark"] .kw { color: var(--accent); }
+
+  blockquote {
+    margin: 0 0 20px;
+    padding: 4px 20px;
+    border-left: 3px solid var(--accent);
+    color: var(--ink-muted);
+    font-style: italic;
+  }
+
+  table { border-collapse: collapse; width: 100%; margin: 0 0 20px; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--ink-faint); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; }
+
+  .callout {
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    background: var(--surface);
+    border-radius: 0 10px 10px 0;
+    padding: 16px 20px;
+    margin: 0 0 24px;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout.why { border-left-color: var(--accent); }
+  .callout.warn { border-left-color: var(--warn-border); background: var(--warn-bg); }
+  .callout.rejected { border-left-color: var(--danger); }
+  .callout .callout-label {
+    font-weight: 700;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-strong);
+    margin-bottom: 6px;
+    display: block;
+  }
+  .callout.warn .callout-label { color: #8A6D1A; }
+  :root[data-theme="dark"] .callout.warn .callout-label { color: var(--warn-border); }
+  .callout.rejected .callout-label { color: var(--danger); }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin: 0 0 24px;
+  }
+  .card {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .card h4 { margin: 0 0 8px; color: var(--ink); font-family: var(--serif); font-size: 16px; letter-spacing: 0; text-transform: none; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--ink-muted); }
+
+  .tag {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--ink-muted);
+    margin: 0 6px 6px 0;
+  }
+
+  .glossary dt { font-weight: 700; color: var(--ink); font-family: var(--serif); font-size: 17px; margin-top: 18px; }
+  .glossary dd { margin: 4px 0 0; color: var(--ink-muted); }
+
+  hr.divider { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+
+  footer.doc-footer {
+    max-width: var(--max-width);
+    margin: 80px auto 0;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--ink-faint);
+    font-size: 13.5px;
+  }
+
+  .theme-toggle {
+    position: fixed;
+    top: 16px;
+    right: 20px;
+    z-index: 10;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--ink-muted);
+  }
+  .mobile-toc-toggle { display: none; }
+  @media (max-width: 900px) {
+    .mobile-toc-toggle {
+      display: block;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      width: 100%;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      font-family: var(--sans);
+      font-weight: 700;
+      font-size: 14px;
+      text-align: left;
+      color: var(--ink);
+    }
+  }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" id="themeToggle" type="button">🌓 Theme</button>
+
+<div class="layout">
+  <button class="mobile-toc-toggle" id="mobileTocToggle" type="button">☰ Contents</button>
+  <nav class="toc" id="toc">
+    <div class="toc-title">📖 Booklet</div>
+    <div class="toc-sub">The Coding Bible — v1, living document</div>
+    <ol>
+      <li><a href="#part-0">0. How to Use This Document</a></li>
+      <li><a href="#part-1">I. The Big Picture</a>
+        <ol>
+          <li><a href="#what-is-booklet">What Booklet Is</a></li>
+          <li><a href="#why-it-exists">Why It Exists</a></li>
+          <li><a href="#design-principles">Design Principles</a></li>
+        </ol>
+      </li>
+      <li><a href="#part-2">II. Architecture</a>
+        <ol>
+          <li><a href="#the-monorepo">The Monorepo</a></li>
+          <li><a href="#offline-first">The Offline-First Model</a></li>
+          <li><a href="#system-diagram">System Diagram</a></li>
+          <li><a href="#request-lifecycle">Anatomy of Saving an Article</a></li>
+        </ol>
+      </li>
+      <li><a href="#part-3">III. The Technology Stack</a>
+        <ol>
+          <li><a href="#tech-typescript">TypeScript, Everywhere</a></li>
+          <li><a href="#tech-node-fastify">Node.js + Fastify</a></li>
+          <li><a href="#tech-postgres-prisma">PostgreSQL + Prisma</a></li>
+          <li><a href="#tech-nextjs">Next.js + React</a></li>
+          <li><a href="#tech-tailwind">Tailwind CSS</a></li>
+          <li><a href="#tech-pnpm-turbo">pnpm Workspaces + Turborepo</a></li>
+          <li><a href="#tech-testing-tools">Vitest + Playwright</a></li>
+          <li><a href="#tech-indexeddb">IndexedDB</a></li>
+        </ol>
+      </li>
+      <li><a href="#part-4">IV. The Data Model</a></li>
+      <li><a href="#part-5">V. Feature Deep Dives</a>
+        <ol>
+          <li><a href="#feat-auth">Authentication &amp; Sessions</a></li>
+          <li><a href="#feat-extraction">Article Extraction</a></li>
+          <li><a href="#feat-reader">The Reader &amp; Highlight Anchoring</a></li>
+          <li><a href="#feat-ocr">OCR</a></li>
+          <li><a href="#feat-tts">Text-to-Speech (the full story)</a></li>
+          <li><a href="#feat-resurface">Resurfacing (SM-2)</a></li>
+          <li><a href="#feat-search">Search</a></li>
+          <li><a href="#feat-collections">Collections</a></li>
+          <li><a href="#feat-import-export">Import / Export</a></li>
+          <li><a href="#feat-api">The Public API</a></li>
+          <li><a href="#feat-extension">Browser Extension</a></li>
+          <li><a href="#feat-mobile">Mobile App</a></li>
+        </ol>
+      </li>
+      <li><a href="#part-6">VI. Testing Philosophy</a></li>
+      <li><a href="#part-7">VII. CI/CD &amp; Deployment</a></li>
+      <li><a href="#part-8">VIII. Glossary</a></li>
+      <li><a href="#part-9">IX. Roads Not Taken</a></li>
+      <li><a href="#part-10">X. Changelog of This Document</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <div class="content">
+
+      <div class="cover">
+        <div class="eyebrow">Internal Technical Documentation</div>
+        <h1>Booklet: The Complete Technical Documentation</h1>
+        <p class="tagline">
+          Every technical decision behind this project, why it was made, what
+          it replaced, and how it actually works — written so a complete
+          beginner can read it front to back and come out able to rebuild
+          this project, explain any part of it, and make their own informed
+          design decisions on top of it.
+        </p>
+        <div class="meta">
+          <span>📅 Started 2026-08-05</span>
+          <span>✏️ Living document — grows with the codebase</span>
+          <span>🎯 Audience: the project's own maintainer, and anyone new to it</span>
+        </div>
+      </div>
+
+      <section id="part-0">
+        <h2>0. How to Use This Document</h2>
+        <p>
+          This file is meant to be read, not skimmed — but it's also meant to
+          be a reference you jump around in later. Every major section
+          follows the same shape: <strong>what</strong> the thing is,
+          <strong>why</strong> it exists in the form it does, and
+          <strong>how</strong> it's actually implemented, with real file
+          paths and real code. Boxes like the one below call out the
+          reasoning explicitly, separate from the description, so you can
+          find "why did we do it this way" without re-reading a whole
+          section.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why</span>
+          <p>
+            This is what a "why" box looks like. Anywhere you see one, it's
+            answering a design question directly — the kind of question an
+            interviewer, a new contributor, or future-you six months from now
+            would actually ask.
+          </p>
+        </div>
+        <div class="callout rejected">
+          <span class="callout-label">Considered and rejected</span>
+          <p>
+            This is what a rejected-alternative box looks like. This project
+            has a real history of trying something, measuring it, and
+            deliberately reversing course — that history is preserved here on
+            purpose, not cleaned up. See <a href="#part-9">Part IX</a> for a
+            dedicated index of every one of these.
+          </p>
+        </div>
+        <p>
+          <strong>This document is honest about its own limits.</strong> It's
+          being written by an AI assistant (Claude) working alongside the
+          project's owner, drawing on the real implementation, real commit
+          history, and real measurements taken during development — not
+          invented after the fact. Where a claim is a measured fact (a
+          benchmark, a real bug reproduction), it says so. Where something is
+          a judgment call or a plausible-but-unverified characterization
+          (some of the TTS voice descriptions, for instance), it says that
+          too. Sections marked <span class="tag">stub</span> are placeholders
+          for the next editing pass, not finished — this is v1 of something
+          meant to keep growing, not a one-shot document pretending to be
+          complete.
+        </p>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-1">
+        <h2><span class="part-label">Part I</span>The Big Picture</h2>
+
+        <h3 id="what-is-booklet">What Booklet Is</h3>
+        <p>
+          Booklet is a read-it-later and annotation app: save an article,
+          PDF, or EPUB from anywhere; read it in a clean, distraction-free
+          view; highlight and annotate as you go; and — the part most apps in
+          this space skip — actually see those highlights again later,
+          through a real spaced-repetition schedule instead of a pile that
+          quietly grows forever.
+        </p>
+        <p>
+          It's a monorepo containing a real backend API, a web app, a browser
+          extension, and a mobile app, all built around one architectural
+          commitment: <strong>everything works with zero account.</strong>
+          Saving, reading, highlighting, resurfacing, PDF/EPUB rendering,
+          search, OCR, and text-to-speech all run entirely client-side
+          against the browser's own IndexedDB when signed out. An account
+          exists for exactly one reason — syncing a library across devices —
+          and nothing product-facing is gated behind creating one.
+        </p>
+
+        <h3 id="why-it-exists">Why It Exists</h3>
+        <p>
+          Read-it-later apps have a well-known failure mode. You save
+          something interesting, fully intending to read it later, and it
+          joins a queue that only ever grows. Occasionally you do read
+          something and highlight a passage that actually mattered to you —
+          and then that highlight disappears into a list you never open
+          again, indistinguishable from the hundred other things you saved
+          and forgot.
+        </p>
+        <p>
+          Booklet's actual thesis is that the second half of that problem —
+          highlights vanishing — is the more interesting one to fix, and that
+          fixing it properly means borrowing the one piece of technology that
+          already solved "how do you make sure you actually remember
+          something": spaced repetition. A highlight in Booklet isn't a
+          stored string; structurally, it's a flashcard whether the person
+          who made it thought of it that way or not. It resurfaces later on
+          a real SM-2 schedule (the same algorithm behind Anki, see
+          <a href="#feat-resurface">Resurfacing</a>), with interval growth on
+          recall and a reset on a miss — not a random reminder, not "here's
+          five things from your library," an actual memory-scheduling
+          algorithm making the call.
+        </p>
+        <p>
+          Everything else about the project follows from taking a handful of
+          related opinions further than most similar tools bother to: that a
+          saved PDF or EPUB should be <em>rendered</em>, not flattened into
+          plain text; that read-aloud should feel instant, not like a
+          novelty; and that the entire save → read → highlight → resurface
+          loop should work the same way whether or not you've ever created an
+          account.
+        </p>
+
+        <h3 id="design-principles">Design Principles</h3>
+        <div class="card-grid">
+          <div class="card">
+            <h4>Offline is the default</h4>
+            <p>Not a fallback mode, not a degraded experience — the primary, first-class way to use the app. See <a href="#offline-first">The Offline-First Model</a>.</p>
+          </div>
+          <div class="card">
+            <h4>Render, don't flatten</h4>
+            <p>A PDF's pages and an EPUB's chapters are rendered as themselves — real canvas output, real pagination — not reduced to plain text and re-flowed.</p>
+          </div>
+          <div class="card">
+            <h4>Real algorithms, not heuristics</h4>
+            <p>Where a real, well-understood algorithm exists for a problem (SM-2 for spaced repetition), it's used directly rather than approximated with a simpler-looking heuristic.</p>
+          </div>
+          <div class="card">
+            <h4>The integration surface is a product</h4>
+            <p>The public API, personal access tokens, and webhooks aren't an afterthought bolted onto the internal routes — they're a deliberately separate, versioned surface.</p>
+          </div>
+          <div class="card">
+            <h4>Measure, don't assume</h4>
+            <p>Performance and architecture decisions in this codebase are backed by real, hand-run measurements — see the TTS section for the most extensive example of this discipline.</p>
+          </div>
+          <div class="card">
+            <h4>Fix root causes</h4>
+            <p>When something breaks, the instinct throughout this project's history has been to find the actual mechanism, not to route around the symptom with a workaround.</p>
+          </div>
+        </div>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-2">
+        <h2><span class="part-label">Part II</span>Architecture</h2>
+
+        <h3 id="the-monorepo">The Monorepo</h3>
+        <p>
+          Booklet is one pnpm workspace containing five real packages:
+        </p>
+        <pre><code><span class="cm">apps/</span>
+  api/            <span class="cm"># Fastify API + Prisma schema — the one backend</span>
+  web/            <span class="cm"># Next.js web app</span>
+  extension/      <span class="cm"># Browser extension (Manifest V3, Chrome + Firefox)</span>
+  mobile/         <span class="cm"># Expo / React Native app</span>
+<span class="cm">packages/</span>
+  shared/         <span class="cm"># Types + pure logic shared by every app above</span>
+                  <span class="cm"># (request/response DTOs, highlight anchoring, SM-2, tts-voices, ...)</span></code></pre>
+        <div class="callout why">
+          <span class="callout-label">Why a monorepo</span>
+          <p>
+            Four real clients (web, extension, mobile, plus the API itself)
+            need to agree on the exact same request/response shapes,
+            highlight-anchoring math, and SM-2 scheduling logic. Splitting
+            those into separate repositories would mean either duplicating
+            that logic four times (and letting the copies drift, silently,
+            the moment one gets fixed and the others don't) or publishing it
+            as a versioned package with all the release-and-bump ceremony
+            that implies for what is, in practice, one team iterating on one
+            product. <code>packages/shared</code> exists specifically so
+            "the highlight-anchoring algorithm" and "what an
+            <code>ArticleSummary</code> looks like on the wire" are each
+            defined exactly once.
+          </p>
+        </div>
+
+        <h3 id="offline-first">The Offline-First Model</h3>
+        <p>
+          Every product surface in the web app is built against one
+          repository-style interface, with two real implementations behind
+          it:
+        </p>
+        <ul>
+          <li><strong>Local mode</strong> (no account) — reads and writes
+            IndexedDB directly in the browser, via
+            <code>apps/web/src/lib/local/db.ts</code>.</li>
+          <li><strong>Synced mode</strong> (signed in) — talks to the real
+            Fastify API, which persists to PostgreSQL.</li>
+        </ul>
+        <p>
+          <code>apps/web/src/lib/data/*.ts</code> is the seam: every page and
+          component calls functions like <code>loadArticles(isAuthenticated)</code>
+          or <code>createHighlight(...)</code> from that layer, and the layer
+          itself decides which backend actually answers, based on whether
+          the caller is authenticated. The UI code never branches on "am I
+          signed in" itself — it just calls the same function either way.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why this isn't just a demo mode</span>
+          <p>
+            The local implementation isn't a stripped-down preview meant to
+            get someone to sign up — it implements the <em>exact</em> same
+            contract as the server-backed one: the same save/highlight/
+            resurface behavior, the same SM-2 scheduling math (imported
+            directly from <code>packages/shared</code>, not reimplemented),
+            the same search semantics. Signing in for the first time migrates
+            whatever's already in IndexedDB onto the new account rather than
+            discarding it, which only makes sense if the two modes were
+            genuinely equivalent the whole time.
+          </p>
+        </div>
+
+        <h3 id="system-diagram">System Diagram</h3>
+        <pre><code>┌─────────────┐   ┌──────────────────┐   ┌──────────────┐
+│   Web app   │   │ Browser extension│   │  Mobile app  │
+│  (Next.js)  │   │  (Manifest V3)   │   │(Expo/RN)     │
+└──────┬──────┘   └────────┬─────────┘   └──────┬───────┘
+       │ no account -> IndexedDB (web only)      │
+       │ signed in                                │
+       └───────────────┬───────────────────────────┘
+                        ▼
+              ┌───────────────────┐
+              │   apps/api         │   Fastify
+              │  ┌───────────────┐ │
+              │  │ Auth           │ │   JWT + OAuth
+              │  │ Articles/      │ │
+              │  │ Highlights/    │ │
+              │  │ Collections    │ │
+              │  │ Kokoro TTS pool│ │   real child processes
+              │  │ OCR (Tesseract)│ │
+              │  │ /api/v1        │ │   tokens + webhooks
+              │  └───────────────┘ │
+              └─────────┬──────────┘
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+   ┌─────────────┐ ┌───────────┐ ┌───────────┐
+   │ PostgreSQL  │ │ Local file│ │  Resend   │
+   │ (via Prisma)│ │  storage  │ │  (email)  │
+   └─────────────┘ └───────────┘ └───────────┘</code></pre>
+
+        <h3 id="request-lifecycle">Anatomy of Saving an Article</h3>
+        <p>
+          Concretely, here's what happens end to end when a signed-in user
+          pastes a URL and clicks Save — a useful worked example of how the
+          pieces above actually fit together:
+        </p>
+        <ol>
+          <li><strong>Client (web app)</strong> — <code>lib/data/articles.ts</code>'s
+            <code>saveArticleByUrl</code> POSTs to <code>/api/extract</code>.</li>
+          <li><strong>API (<code>routes/extract.ts</code>)</strong> — hands
+            off to <code>extraction-service.ts</code>'s <code>fetchAndExtract</code>.</li>
+          <li><strong>SSRF guard</strong> — before fetching anything, the
+            target host is DNS-resolved and checked against private/
+            loopback/link-local ranges, on every redirect hop, not just the
+            first request.</li>
+          <li><strong>Fetch + parse</strong> — the raw HTML is fetched
+            server-side and run through <code>@mozilla/readability</code>
+            (via <code>jsdom</code>) to pull out the actual article content.</li>
+          <li><strong>Image inlining</strong> — every <code>&lt;img&gt;</code>
+            in the extracted HTML is fetched server-side and re-embedded as a
+            base64 <code>data:</code> URI, so the saved copy survives even if
+            the original page (or its images) later disappears.</li>
+          <li><strong>Client (again)</strong> — the extracted content comes
+            back to the browser, which then POSTs it to
+            <code>/api/articles</code> to actually persist the row (a
+            deliberate two-step split: extraction is a stateless, unauthenticated
+            operation shared with local/anonymous mode; only the second step
+            needs a real account).</li>
+          <li><strong>Persistence</strong> — a new <code>Article</code> row
+            is written, duplicate-checked against both the raw URL and its
+            canonicalized form (so a tracking-param or AMP-link variant of
+            something already saved is caught).</li>
+        </ol>
+        <p>
+          The same <code>/api/extract</code> stateless-extraction step is
+          reused, unmodified, by local/anonymous mode — it just skips step 6
+          and writes straight to IndexedDB instead.
+        </p>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-3">
+        <h2><span class="part-label">Part III</span>The Technology Stack</h2>
+        <p>
+          Every major tool this project depends on, and the actual reasoning
+          behind picking it — not just a list of logos.
+        </p>
+
+        <h3 id="tech-typescript">TypeScript, Everywhere</h3>
+        <p>
+          Every line of application code in this repository — API, web app,
+          extension, mobile, shared package — is TypeScript. There is no
+          plain-JavaScript escape hatch anywhere in the product code.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why</span>
+          <p>
+            The most concrete reason is the monorepo itself:
+            <code>packages/shared</code>'s whole purpose is to be a single
+            source of truth for shapes — the <code>Article</code>,
+            <code>Highlight</code>, and <code>HighlightPosition</code> types,
+            the request/response DTOs every route and every client agree on.
+            That only actually works as a <em>guarantee</em> (not just a
+            convention someone has to remember to follow) if the compiler is
+            the one enforcing it. A JSON shape drifting silently between the
+            API and one of four different clients is exactly the class of
+            bug static types exist to catch before it ships.
+          </p>
+        </div>
+        <p>
+          <strong>What "TypeScript" means for a beginner:</strong> JavaScript
+          is the language web browsers (and Node.js) actually execute — it
+          has no concept of a variable's "type" being checked before the
+          code runs. TypeScript is a superset of JavaScript that adds an
+          optional type system on top: you can annotate a function as taking
+          a <code>string</code> and returning a <code>number</code>, and a
+          separate tool (<code>tsc</code>, the TypeScript compiler) checks
+          that every call site actually respects that before compiling it
+          down to plain JavaScript. The types themselves don't exist at
+          runtime — they're erased during compilation — they exist purely to
+          catch mistakes <em>before</em> the code runs, which is exactly what
+          <code>tsc --noEmit</code> (used throughout this project's CI) does:
+          type-check without even producing output, purely as a correctness
+          gate.
+        </p>
+
+        <h3 id="tech-node-fastify">Node.js + Fastify</h3>
+        <p>
+          The API (<code>apps/api</code>) runs on Node.js, using
+          <a href="https://fastify.dev">Fastify</a> as the HTTP framework.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why Fastify over Express</span>
+          <p>
+            Fastify was designed from the ground up around JSON Schema-based
+            request/response validation and a plugin architecture with
+            explicit encapsulation, both of which matter more as an API
+            surface grows past a handful of routes. It's also meaningfully
+            faster in real benchmarks (schema-compiled serialization instead
+            of generic <code>JSON.stringify</code>), though for an app at
+            this project's actual traffic scale, that's a secondary benefit
+            next to the developer-experience one: Fastify's plugin
+            (<code>app.register(...)</code>) model is what makes it natural
+            to compose the exact set of concerns this API needs — CORS,
+            cookies, rate limiting, multipart uploads — each as an isolated,
+            independently reasoned-about piece (see <code>app.ts</code>).
+          </p>
+        </div>
+        <p>
+          Table stakes for the API layer, concretely:
+        </p>
+        <ul>
+          <li><code>@fastify/cors</code> — origin allowlisting (any
+            <code>localhost</code> port in dev, a pinned <code>WEB_ORIGIN</code>
+            in production, plus <code>chrome-extension://</code>/
+            <code>moz-extension://</code> for the browser extension).</li>
+          <li><code>@fastify/cookie</code> — the refresh-token cookie.</li>
+          <li><code>@fastify/rate-limit</code> — an in-memory, per-route
+            configurable limiter (tighter on genuinely expensive routes like
+            <code>/api/tts</code> and <code>/api/auth/*</code> than the
+            general default).</li>
+          <li><code>@fastify/multipart</code> — PDF/EPUB file uploads.</li>
+        </ul>
+
+        <h3 id="tech-postgres-prisma">PostgreSQL + Prisma</h3>
+        <p>
+          The database is PostgreSQL, accessed exclusively through
+          <a href="https://www.prisma.io">Prisma</a> — never a raw SQL query
+          string anywhere in the codebase.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why an ORM at all</span>
+          <p>
+            Prisma's schema file (<code>apps/api/prisma/schema.prisma</code>)
+            is the single source of truth for the data model, and it
+            generates a fully-typed client from it — a query for
+            <code>Article</code> rows is typed against the actual current
+            schema, not a hand-maintained interface that can drift out of
+            sync with the real database. Migrations are generated from schema
+            diffs (<code>prisma migrate dev</code>) rather than hand-written,
+            which matters more the longer a project lives: this schema is
+            already many migrations deep (see <code>apps/api/prisma/migrations/</code>),
+            each one a real, reviewable diff instead of a hand-rolled
+            <code>ALTER TABLE</code> someone has to get exactly right.
+          </p>
+        </div>
+        <p>
+          <strong>What an ORM is, for a beginner:</strong> "Object-Relational
+          Mapping" — a library that lets you query a relational (table-based)
+          database using the target language's own objects/functions instead
+          of writing raw SQL strings by hand. <code>prisma.article.findMany({ where: { userId } })</code>
+          instead of <code>SELECT * FROM "Article" WHERE "userId" = $1</code>.
+          The tradeoff is a layer of abstraction between you and the actual
+          SQL being run — worth it here because of the typed-schema guarantee
+          above, but it's still worth understanding what SQL an ORM call
+          actually compiles to when performance matters (see the query-level
+          <code>omit</code> optimization in <a href="#feat-search">Search</a>
+          for a real example of a performance decision made <em>because</em>
+          the underlying query was understood, not despite the ORM hiding it).
+        </p>
+        <div class="callout">
+          <span class="callout-label">The local dev database: PGlite</span>
+          <p>
+            Running Postgres locally usually means installing it or running
+            Docker. This project ships a zero-install alternative:
+            <a href="https://pglite.dev">PGlite</a>, a WASM-compiled Postgres
+            that runs as a real, Postgres-wire-protocol-speaking server
+            (<code>apps/api/scripts/dev-db.ts</code>) on <code>localhost:5432</code>,
+            persisting to a local data directory. It's genuinely real
+            Postgres underneath (not a mock or a compatible-but-different
+            engine) — the tradeoff is that Prisma's own migration engine
+            doesn't reliably speak to it, so schema changes go through a
+            separate script (<code>migrate:pglite</code>) that applies
+            migrations via the plain <code>pg</code> driver instead.
+          </p>
+        </div>
+
+        <h3 id="tech-nextjs">Next.js + React</h3>
+        <p>
+          The web app is <a href="https://nextjs.org">Next.js</a> (App
+          Router) with React 19.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why Next.js specifically</span>
+          <p>
+            Nearly the entire app is client-rendered in practice — the
+            reader, the library, TTS playback, all of it runs in the
+            browser, often against IndexedDB with no server round-trip at
+            all. What Next.js buys here isn't server-rendering every page;
+            it's the file-based App Router (routes as folders, layouts that
+            compose naturally — see how <code>app/layout.tsx</code> mounts
+            the global TTS player once, at the root, so it survives
+            client-side navigation between pages), first-class TypeScript
+            support, and <code>next/dynamic</code> for code-splitting heavy,
+            conditionally-needed libraries (pdf.js and epub.js are only
+            loaded when a PDF/EPUB reader actually mounts, not on every page
+            load — see the <a href="#part-9">Roads Not Taken</a> entry on
+            this).
+          </p>
+        </div>
+
+        <h3 id="tech-tailwind">Tailwind CSS</h3>
+        <p>
+          Styling is Tailwind CSS v4, utility-first — no CSS-in-JS, no
+          separate stylesheet per component. Theming (light/dark/sepia/
+          Kindle) is layered on top via CSS custom properties defined once in
+          <code>globals.css</code> (<code>--color-paper</code>,
+          <code>--color-accent</code>, etc.), which Tailwind's utilities then
+          reference — so <code>bg-paper</code> or <code>text-ink</code>
+          automatically repaint correctly under every theme without any
+          component needing to know which theme is active.
+        </p>
+
+        <h3 id="tech-pnpm-turbo">pnpm Workspaces + Turborepo</h3>
+        <p>
+          Package management is <a href="https://pnpm.io">pnpm</a>, in
+          workspace mode (<code>pnpm-workspace.yaml</code>) — every app and
+          package in the monorepo shares one <code>node_modules</code>
+          install, with real workspace-local dependencies
+          (<code>@booklet/shared: "workspace:*"</code>) resolving to the
+          actual local source, not a published version.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why pnpm over npm/yarn</span>
+          <p>
+            pnpm's content-addressable store means a dependency installed
+            once on disk is hard-linked into every project that needs it,
+            rather than duplicated per-project the way npm/yarn classic do —
+            meaningfully faster installs and far less disk usage in a
+            multi-app monorepo where every app depends on things like
+            <code>typescript</code> or <code>react</code> independently.
+          </p>
+        </div>
+        <p>
+          <a href="https://turborepo.dev">Turborepo</a> sits on top as a task
+          runner with real caching — <code>turbo.json</code> defines the
+          <code>build</code>/<code>typecheck</code>/<code>lint</code>/<code>test</code>
+          pipeline, with dependency ordering (<code>^build</code> means "this
+          package's own workspace dependencies must build first") and
+          content-hash-based caching, so re-running a check against unchanged
+          code replays the cached result instead of redoing the work.
+        </p>
+        <div class="callout">
+          <span class="callout-label">A real measurement</span>
+          <p>
+            Confirmed by hand: a repeated <code>pnpm typecheck</code> across
+            all five packages with no code changes goes from several seconds
+            (real, from-scratch <code>tsc --noEmit</code> runs) to about 30
+            milliseconds ("<code>FULL TURBO</code>", every package a cache
+            hit). This was added specifically because the monorepo had zero
+            task caching before — every <code>pnpm build</code>/typecheck/
+            test/lint always did full work regardless of what actually
+            changed.
+          </p>
+        </div>
+
+        <h3 id="tech-testing-tools">Vitest + Playwright</h3>
+        <p>
+          Unit and integration tests run on <a href="https://vitest.dev">Vitest</a>
+          (fast, native-ESM, Jest-compatible API). End-to-end tests run on
+          <a href="https://playwright.dev">Playwright</a>, driving a real
+          Chromium browser against the real running app — see
+          <a href="#part-6">Testing Philosophy</a> for how these are actually
+          used, which is more specific than "unit tests for logic, e2e for
+          UI."
+        </p>
+
+        <h3 id="tech-indexeddb">IndexedDB</h3>
+        <p>
+          The local/anonymous mode's storage engine is IndexedDB — the
+          browser's own built-in, transactional, structured-object database
+          (not <code>localStorage</code>, which is synchronous, string-only,
+          and far too small for a whole reading library). Accessed through a
+          thin wrapper (<code>apps/web/src/lib/local/db.ts</code>) that gives
+          the rest of the app the same repository-style interface the
+          server-backed mode uses — see <a href="#offline-first">The
+          Offline-First Model</a>.
+        </p>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-4">
+        <h2><span class="part-label">Part IV</span>The Data Model</h2>
+        <p>
+          The full schema lives in <code>apps/api/prisma/schema.prisma</code>,
+          and — unusually for a schema file — it's already extensively
+          commented with the real reasoning behind nearly every field. What
+          follows is a guided tour, not a duplicate of that file; read the
+          schema itself for the complete, current source of truth.
+        </p>
+
+        <h4>User</h4>
+        <p>
+          The account itself. <code>passwordHash</code> is nullable — an
+          OAuth-only user (Google/GitHub) never gets a random password they'd
+          never know; login-by-password just isn't offered for that account.
+          Holds the resurfacing preferences (<code>resurfaceFrequency</code>,
+          <code>highlightsPerDigest</code>) directly, since they're
+          genuinely account-level settings, not per-device ones.
+        </p>
+
+        <h4>Article</h4>
+        <p>
+          The center of the schema. One row per saved item, regardless of
+          <code>sourceType</code> (<code>HTML</code>/<code>PDF</code>/
+          <code>EPUB</code>/<code>BOOK</code> — <code>BOOK</code> being the
+          special case for a Kindle-clippings import with highlights but no
+          actual content, see <a href="#feat-import-export">Import/Export</a>).
+          Two duplicate-detection fields exist side by side on purpose:
+          <code>url</code> (exactly what was saved) and
+          <code>canonicalUrl</code> (tracking params stripped, host/
+          trailing-slash normalized) — an exact-string check alone would miss
+          a tracking-param or AMP-link variant of something already saved.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why extractedHtml and extractedText are separate columns</span>
+          <p>
+            <code>extractedHtml</code> is HTML-only (what the reader actually
+            renders for an <code>HTML</code>-sourced article).
+            <code>extractedText</code> is populated for every source type
+            (HTML/PDF/EPUB alike) — the plain-text form used for full-text
+            search and the reading-time estimate, and, for PDF/EPUB, the only
+            text representation that exists at all (their real content
+            renders via pdfjs-dist/epub.js directly from the uploaded file,
+            not from this column). Both are large enough to matter: see
+            <a href="#feat-search">Search</a> for the real, measured cost of
+            fetching them for rows that don't need them, and the fix.
+          </p>
+        </div>
+
+        <h4>Highlight</h4>
+        <p>
+          <code>position</code> is a discriminated JSON blob, not a fixed
+          set of columns — its shape depends on the article's source type:
+          a W3C TextQuote+TextPosition-style selector for HTML, page number +
+          rects for PDF, an EPUB CFI (Canonical Fragment Identifier) range
+          for EPUB. See <a href="#feat-reader">The Reader &amp; Highlight
+          Anchoring</a> for what each of those actually means and how
+          they're resolved back to real DOM ranges.
+        </p>
+        <p>
+          The SM-2 fields (<code>easinessFactor</code>, <code>intervalDays</code>,
+          <code>repetitions</code>, <code>nextDueAt</code>) live directly on
+          the highlight row — see <a href="#feat-resurface">Resurfacing</a>
+          for the algorithm itself.
+        </p>
+
+        <h4>Collection</h4>
+        <p>
+          Self-referential (<code>parentId</code>/<code>children</code>) for
+          nested, folder-style organization, with <code>onDelete: SetNull</code>
+          rather than <code>Cascade</code> — deleting a parent collection
+          shouldn't take its children down with it; they just become
+          top-level. A <code>filter</code> JSON column (status/tags/text
+          query) makes a collection <em>smart</em> when set: membership is
+          computed live from <code>Article</code> at read time instead of
+          being a fixed list of <code>ArticleCollection</code> join rows.
+        </p>
+
+        <h4>ApiToken / Webhook / WebhookDelivery</h4>
+        <p>
+          The public-API surface's own tables — see
+          <a href="#feat-api">The Public API</a>. Notably, only
+          <code>tokenHash</code> is ever stored for a personal access token
+          (the same hash-not-plaintext pattern used for refresh tokens and
+          password-reset links elsewhere in the schema) — the raw token is
+          shown exactly once, at creation, and can never be retrieved again.
+        </p>
+
+        <h4>Everything else</h4>
+        <table>
+          <tr><th>Model</th><th>What it's for</th></tr>
+          <tr><td><code>Session</code></td><td>Refresh-token store — the stateful half of an otherwise-stateless JWT auth scheme, so "log out" and per-device revocation actually work.</td></tr>
+          <tr><td><code>OAuthAccount</code></td><td>One row per (provider, external account) linkage, so a Google and a GitHub login with the same verified email link to one User instead of creating two.</td></tr>
+          <tr><td><code>Feed</code></td><td>An RSS subscription — items are fetched live, not persisted, since there's no background worker to poll on a schedule.</td></tr>
+          <tr><td><code>PasswordResetToken</code> / <code>EmailVerificationToken</code></td><td>Single-use, short-lived, hash-stored tokens.</td></tr>
+          <tr><td><code>Digest</code></td><td>A generated resurfacing batch — persisted and reused per the user's frequency setting, not re-rolled on every visit.</td></tr>
+          <tr><td><code>Annotation</code></td><td>An optional note attached to exactly one highlight (1:1, not 1:many).</td></tr>
+        </table>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-5">
+        <h2><span class="part-label">Part V</span>Feature Deep Dives</h2>
+
+        <h3 id="feat-auth">Authentication &amp; Sessions</h3>
+        <p>
+          Auth supports email/password and OAuth (Google + GitHub) — and
+          every single one of those methods, email/password included, is
+          entirely optional. Every route works signed out; OAuth buttons
+          only even appear once a provider's credentials are actually
+          configured in the environment.
+        </p>
+        <p>
+          The token scheme is short-lived JWT access tokens plus a longer-
+          lived, revocable refresh token:
+        </p>
+        <ul>
+          <li><strong>Access token</strong> — a signed JWT, 15-minute
+            lifetime, sent as a bearer token on every authenticated request.
+            Stateless: verifying it is just a signature check, no database
+            round-trip.</li>
+          <li><strong>Refresh token</strong> — a random opaque string, 30-day
+            lifetime, stored in an <code>httpOnly</code> cookie. Only its
+            <em>hash</em> is stored server-side (in <code>Session.refreshTokenHash</code>)
+            — a database read alone is never enough to forge a session.</li>
+        </ul>
+        <div class="callout why">
+          <span class="callout-label">Why this split instead of one long-lived token</span>
+          <p>
+            A single long-lived token would need to be stateless (for
+            performance) <em>or</em> revocable (for security) — it can't
+            cleanly be both. Splitting the two means the access token can
+            stay fast and stateless (no DB hit per request) while the
+            refresh token — the thing that actually matters for "can this
+            device still get in" — is a real, revocable database row. "Log
+            out" and "log out other devices" are just deleting/marking that
+            row, and a stolen access token is only useful for 15 minutes.
+          </p>
+        </div>
+
+        <h3 id="feat-extraction">Article Extraction</h3>
+        <p>
+          Four real input shapes, one unifying idea: extraction is a
+          <em>stateless</em> operation, decoupled from persistence, so the
+          exact same code path serves both signed-in and local/anonymous
+          saves.
+        </p>
+        <table>
+          <tr><th>Source</th><th>Extraction path</th></tr>
+          <tr><td>URL (HTML)</td><td>Server-side fetch (SSRF-hardened) + Mozilla Readability via jsdom.</td></tr>
+          <tr><td>PDF</td><td>pdfjs-dist reads the native text layer; falls back to OCR (Tesseract.js) if it's empty/sparse (a scanned book with no real text layer).</td></tr>
+          <tr><td>EPUB</td><td>jszip + jsdom walk the OPF/spine to extract full book text and metadata.</td></tr>
+          <tr><td>X/Twitter thread</td><td>The syndication endpoint (the normal page is a JS-rendered shell Readability can't see into), reconstructed into the same <code>ExtractedContent</code> shape as everything else.</td></tr>
+        </table>
+
+        <h3 id="feat-reader">The Reader &amp; Highlight Anchoring</h3>
+        <p>
+          Three real renderers, one per source type, each anchoring
+          highlights differently because each source has a fundamentally
+          different notion of "position":
+        </p>
+        <ul>
+          <li><strong>HTML</strong> — rendered as sanitized HTML directly;
+            highlights anchor via a text-offset scheme resolved against the
+            article's own plain-text extraction, with drift-tolerant
+            re-anchoring (a highlight survives minor re-extraction changes
+            by searching nearby, not just an exact offset match).</li>
+          <li><strong>PDF</strong> — rendered via <code>pdfjs-dist</code>:
+            real canvas output for the visible page, plus an invisible,
+            precisely-positioned text layer on top for native text selection.
+            Highlights anchor by page number + rectangles in PDF user-space
+            units — genuinely real coordinates, not a text offset, so they
+            never drift.</li>
+          <li><strong>EPUB</strong> — rendered via <code>epub.js</code>,
+            paginated, each chapter in its own iframe. Highlights anchor by
+            CFI (Canonical Fragment Identifier) range — EPUB's own standard
+            way of pointing at a specific location inside a specific
+            document within the book.</li>
+        </ul>
+        <div class="callout why">
+          <span class="callout-label">Why real rendering instead of just showing extracted text everywhere</span>
+          <p>
+            Flattening a PDF or EPUB to plain text and re-flowing it is
+            simpler to build, but it throws away real information — page
+            numbers a citation might reference, an EPUB's own typography and
+            layout, image placement. Rendering the real thing means
+            highlights can anchor to genuinely stable coordinates (a PDF
+            rect, an EPUB CFI) instead of a text offset that has to survive
+            re-extraction.
+          </p>
+        </div>
+
+        <h3 id="feat-ocr">OCR</h3>
+        <p>
+          A scanned PDF with an empty or near-empty native text layer
+          automatically falls back to <a href="https://github.com/naptha/tesseract.js">Tesseract.js</a>
+          — no toggle, no "try OCR" button, no API key, and no external
+          service: it's a real WASM OCR engine running in-process on the
+          server. Capped at 20 pages (it runs synchronously inside the
+          upload request), and the reader shows a visible "may contain
+          recognition errors" notice, since Tesseract's real-world error
+          rate is meaningfully higher than a native text layer or Readability
+          extraction.
+        </p>
+
+        <h3 id="feat-tts">Text-to-Speech — the Full Story</h3>
+        <p>
+          This is the single most-iterated-on feature in the project's
+          history, and the one with the richest, most concrete record of
+          real measurement driving real architecture changes. It's worth
+          walking through in full, including the parts that got thrown away,
+          because the <em>reasoning</em> at each step is exactly the kind of
+          thing this document exists to preserve.
+        </p>
+
+        <h4>The model: Kokoro</h4>
+        <p>
+          Speech is generated by <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX">Kokoro</a>,
+          an open-weight (Apache-2.0), 82-million-parameter TTS model,
+          via the <code>kokoro-js</code> library on top of ONNX Runtime.
+          The alternative that's always on — needing zero setup, zero model,
+          zero network — is the browser's own native <code>SpeechSynthesis</code>
+          API, kept as a real first-class option in the same voice picker,
+          not just a fallback.
+        </p>
+
+        <h4>Chapter 1 — Client-side WASM (rejected)</h4>
+        <p>
+          The original implementation ran Kokoro entirely in the browser,
+          over WASM (and, briefly, WebGPU where available). It worked — the
+          voice quality was never in question — but per-sentence generation
+          was measured at a genuine 12-18 seconds, and no amount of
+          client-side engineering closed that gap: not Worker-based
+          pipelining, not quantization, not multi-threading. The WASM
+          sandbox's per-token inference cost turned out to be a hard ceiling,
+          not a configuration problem.
+        </p>
+
+        <h4>Chapter 2 — Moving generation server-side</h4>
+        <p>
+          The actual unlock was almost embarrassingly simple once tested
+          directly: <code>kokoro-js</code> auto-detects a real Node.js
+          environment and switches to <code>onnxruntime-node</code> — the
+          native, compiled ONNX Runtime binary — instead of the WASM sandbox
+          <code>onnxruntime-web</code> is stuck with in a browser. Confirmed
+          by hand, same model, same voice, same sentence, same machine:
+          <strong>~4.7 seconds instead of 12-18</strong>. A real 2.5-3.8x
+          improvement from switching where the exact same code runs, not a
+          config tweak.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why this was a deliberate exception to "everything works offline"</span>
+          <p>
+            Moving generation server-side is a genuine departure from this
+            project's default architecture (OCR, extraction, and everything
+            else run entirely client-side/in-process with no server-only
+            dependency). It was accepted explicitly, after the WASM ceiling
+            had been thoroughly explored and confirmed real — not as a
+            first resort.
+          </p>
+        </div>
+
+        <h4>Chapter 3 — The pause between sentences, and the worker-process pool</h4>
+        <p>
+          Server-side generation alone wasn't enough: a single Kokoro
+          generation call regularly took <em>longer</em> than the resulting
+          audio's own playback duration (measured: up to 9.8 seconds to
+          generate 5.95 seconds of audio). Worse, concurrent requests to a
+          single process serialized — two requests at once took roughly
+          twice as long as one, not the same. No amount of client-side
+          prefetching can outrun a server that's slower than real-time on
+          average; the shortfall just compounds, sentence after sentence,
+          into exactly the growing dead air users actually experienced.
+        </p>
+        <p>
+          The fix is a small pool of real child <strong>processes</strong>
+          (<code>apps/api/src/services/tts-pool.ts</code>), each holding its
+          own Kokoro model instance, so multiple chunks generate at
+          genuinely the same wall-clock time. Confirmed by hand: 3 concurrent
+          generations finish in about the same time as 1, not 3x.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">A real, hard-won bug: worker_threads crash</span>
+          <p>
+            The first attempt used Node's built-in <code>worker_threads</code>,
+            not separate processes — cheaper to spawn, no IPC overhead. It
+            crashed the entire Node process the instant <code>generate()</code>
+            ran inside a worker thread, even though <em>loading</em> the
+            model there worked fine. <code>onnxruntime-node</code>'s native
+            binding simply isn't safe to run inside a <code>worker_thread</code>
+            on this platform. Real, separate OS processes sidestep the issue
+            entirely — each is just another independent <code>node</code>
+            invocation, exactly like the main server itself, which already
+            worked.
+          </p>
+        </div>
+        <p>
+          On the client, <code>tts-player-provider.tsx</code> keeps a
+          sliding window of chunks prefetched (matching the pool's size, not
+          just one chunk ahead) so every worker stays busy. The first chunk
+          also gets a much smaller character cap (80 vs. the normal 200)
+          than every chunk after it — nothing can overlap with the very
+          first chunk's generation time, since there's no previous chunk
+          playing yet to hide behind, so only that one pays for a faster
+          start.
+        </p>
+        <div class="callout">
+          <span class="callout-label">The measured result</span>
+          <p>
+            Real inter-chunk gap after all of the above:
+            <strong>1-2 milliseconds</strong>, down from multi-second dead
+            air.
+          </p>
+        </div>
+
+        <h4>Chapter 4 — The global player, and read-along</h4>
+        <p>
+          Playback moved from a per-page hook to a provider mounted once at
+          the root layout (<code>tts-player-provider.tsx</code>), so it
+          survives navigating away from the article — a persistent,
+          Spotify-style "now playing" bar, not a control that dies the
+          moment you leave the page.
+        </p>
+        <p>
+          Read-along highlighting tracks the currently-spoken word, not just
+          the current sentence. Kokoro emits no real per-word timestamps, so
+          this is a deliberate <em>estimate</em>: each word's on-screen
+          moment is computed from its proportional share of the chunk's own
+          character length against live playback position
+          (<code>audioEl.currentTime / audioEl.duration</code>). A real bug
+          in this estimate — the highlight jumping to the chunk's last word
+          on every inter-word gap, due to an <code>Array#find()</code>
+          fallback landing on the wrong index — was found and fixed by
+          actually reasoning through what happens in the gap <em>between</em>
+          two words, not just the estimate's average-case accuracy. See
+          <a href="#part-9">Roads Not Taken</a> for why real per-word timing
+          isn't available at all.
+        </p>
+        <p>
+          A separate, coarser indicator — a left-edge bar on whichever
+          paragraph is currently being read — moves once per chunk rather
+          than per word, giving a steady anchor even while the word cursor
+          is still catching up mid-sentence.
+        </p>
+
+        <h4>Chapter 5 — Voice curation</h4>
+        <p>
+          Kokoro ships 28 voices; the picker originally offered 13 (every
+          voice the model's own bundled quality grades rated C or better).
+          In practice, six of those were American-female voices sitting in
+          the same quality band right next to each other — technically fine
+          individually, but it read as "the same voice, over and over," not
+          real variety. The list was cut to 7: the single strongest, most
+          differentiated voice per real gender/accent/character combination,
+          with labels describing actual character ("Fenrir — deep &amp;
+          gravelly") instead of just accent and gender.
+        </p>
+
+        <h3 id="feat-resurface">Resurfacing (SM-2)</h3>
+        <p>
+          SM-2 (SuperMemo 2, Wozniak 1987) is the actual algorithm, not a
+          from-scratch approximation of one. Every review has a quality
+          score on a 0-5 scale; this app's UI only ever collects a binary
+          "Remembered" / "Forgot," mapped to quality 4 or 2 respectively
+          (<code>feedbackToQuality</code> in <code>packages/shared/src/resurface.ts</code>).
+        </p>
+        <pre><code><span class="cm">// The core update, simplified from resurface.ts:</span>
+<span class="kw">if</span> (quality &lt; 3) {
+  repetitions = 0;
+  intervalDays = 1;                          <span class="cm">// a miss resets the streak</span>
+} <span class="kw">else</span> {
+  <span class="kw">if</span> (repetitions === 0) intervalDays = 1;
+  <span class="kw">else if</span> (repetitions === 1) intervalDays = 6;
+  <span class="kw">else</span> intervalDays = round(intervalDays * easinessFactor);
+  repetitions += 1;
+}
+easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nudge */</span>);</code></pre>
+        <p>
+          A recalled highlight's next-due interval grows (1 day → 6 days →
+          previous interval × its own easiness factor, which itself nudges
+          up or down based on how easy that specific recall felt); a missed
+          one resets to a 1-day interval. This state
+          (<code>easinessFactor</code>/<code>intervalDays</code>/
+          <code>repetitions</code>/<code>nextDueAt</code>) lives directly on
+          the <code>Highlight</code> row.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why real SM-2 instead of a simpler heuristic</span>
+          <p>
+            An earlier version of this feature used weighted-random
+            selection — "show me something plausible." Real SM-2 scheduling
+            replaced it specifically because "resurface" should mean "show
+            me what's actually due for review," a claim only a real
+            spaced-repetition algorithm can back up.
+          </p>
+        </div>
+        <p>
+          Digests (a resurfacing batch) are generated and persisted per the
+          user's DAILY/WEEKLY frequency preference, then reused — not
+          re-rolled on every visit to the page, which would make "what am I
+          reviewing today" a moving target.
+        </p>
+
+        <h3 id="feat-search">Search</h3>
+        <p>
+          Plain, case-insensitive <code>contains</code> matching across
+          title/excerpt/author/site/body-text/tags — deliberately not
+          Postgres <code>tsvector</code>/GIN full-text search, so signed-in
+          and local/anonymous mode behave identically (IndexedDB has no
+          full-text index at all to match against). This is a real,
+          consciously-accepted tradeoff for consistency over raw search
+          quality, revisitable if it stops being true at the scale this
+          project actually operates at (one person's library, not a
+          multi-tenant search product).
+        </p>
+        <div class="callout">
+          <span class="callout-label">A real, measured query-level fix</span>
+          <p>
+            The list/search endpoints originally fetched every matching
+            row's full <code>extractedHtml</code>/<code>extractedText</code>
+            from Postgres, then stripped them out of the response shape a
+            moment later — real, wasted database I/O and serialization cost
+            on every request, scaling with exactly what a large library has
+            the most of. Fixed with Prisma's <code>omit</code> at the query
+            level, so those columns are never fetched for a list view in the
+            first place — not a caching fix, a query-shape fix.
+          </p>
+        </div>
+
+        <h3 id="feat-collections">Collections</h3>
+        <p>
+          Nested (nested via <code>parentId</code>, folder-style) and smart
+          (membership computed live from a stored <code>filter</code> — see
+          <a href="#part-4">the schema</a>). Deliberately never combined in
+          the UI (the app never offers nesting a smart collection under
+          another), though that constraint isn't hard-enforced at the schema
+          level — a conscious scope decision, not an oversight, to keep that
+          migration small.
+        </p>
+
+        <h3 id="feat-import-export">Import / Export</h3>
+        <p>
+          Import: Pocket/Instapaper CSV, browser bookmarks, and a real
+          Kindle <code>My Clippings.txt</code> parse — one <code>BOOK</code>-
+          sourced article per book, with every highlight and note attached,
+          even though there's no actual book content to render (see the
+          schema's <code>SourceType.BOOK</code>). Export: Markdown (for
+          Obsidian/Notion/Logseq) and Anki flashcards.
+        </p>
+
+        <h3 id="feat-api">The Public API</h3>
+        <p>
+          <code>/api/v1</code> is a deliberately separate, versioned surface
+          from the internal routes the web app itself uses — the same
+          integration surface a much bigger product would ship, kept
+          decoupled specifically so a frontend refactor can't silently break
+          someone's external script. Personal access tokens are read- or
+          read+write-scoped, shown once at creation. Webhooks deliver
+          HMAC-SHA256-signed payloads on <code>article.created</code>/
+          <code>highlight.created</code>, with a visible delivery-history log
+          (the last ~20 attempts, status code, success/failure) — a webhook
+          that's silently failing forever is worse than not having the
+          feature at all.
+        </p>
+
+        <h3 id="feat-extension">Browser Extension</h3>
+        <p>
+          Manifest V3, one manifest serving both Chrome and Firefox. Save the
+          current page from the toolbar icon or a right-click context menu;
+          the "Open in Booklet" flow lets highlighting happen on the live web
+          page itself, with the article and its highlights sent to Booklet
+          together.
+        </p>
+
+        <h3 id="feat-mobile">Mobile App</h3>
+        <p>
+          Expo / React Native, local-first the same way the web app is
+          (AsyncStorage instead of IndexedDB, behind the same repository-
+          pattern seam). Highlighting is a toggled select-then-highlight
+          flow rather than a live text selection — React Native has no
+          single component that both reports a text selection and renders
+          per-range styling the way a browser's own selection API does.
+          PDF/EPUB upload works as extracted text only; real page/CFI
+          rendering would need a WebView bridge to reuse the web app's
+          pdfjs-dist/epub.js code, or a native renderer — real future work,
+          not a scaffold-stage gap.
+        </p>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-6">
+        <h2><span class="part-label">Part VI</span>Testing Philosophy</h2>
+        <p>
+          Three layers, each answering a different question:
+        </p>
+        <ul>
+          <li><strong>Unit (Vitest, <code>packages/shared</code>)</strong> —
+            pure logic with no I/O: the SM-2 algorithm, highlight-anchor
+            resolution, URL canonicalization, collection filters, Kindle-
+            clippings parsing. Fast, deterministic, no database.</li>
+          <li><strong>Integration (Vitest, <code>apps/api</code>)</strong> —
+            the full API surface exercised through Fastify's own
+            <code>.inject()</code> — real route handlers, real Prisma
+            queries against a real (test) Postgres, no HTTP server actually
+            listening on a socket.</li>
+          <li><strong>End-to-end (Playwright, <code>apps/web</code>)</strong> —
+            a real Chromium browser driving the real running app: real PDF
+            canvas rendering, real EPUB iframe pagination, real cross-iframe
+            text selection, real Kokoro model generation (not mocked) for
+            the TTS suite.</li>
+        </ul>
+        <div class="callout why">
+          <span class="callout-label">Why real generation instead of mocking TTS in e2e tests</span>
+          <p>
+            A mocked TTS response can't catch the class of bug this feature
+            has actually had — real generation timing, a real chunking edge
+            case that exploded one article into 2,283 requests, a real
+            WebGPU-adapter-detection failure. The e2e suite accepts a
+            genuinely longer timeout for these tests specifically because
+            what they're verifying only exists if the real thing runs.
+          </p>
+        </div>
+        <p>
+          A recurring pattern throughout this project's real debugging
+          history, worth naming explicitly: when a test fails in a way
+          that's hard to explain, the discipline has consistently been to
+          <strong>reproduce it in isolation with a minimal script</strong> —
+          a raw Node <code>http</code> client bypassing the browser's
+          <code>fetch()</code> entirely, a patched <code>Audio</code>
+          constructor to trace real playback events, a git-stash-isolated
+          re-run to prove a failure predates a specific change — rather than
+          guessing from the failure message alone.
+        </p>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-7">
+        <h2><span class="part-label">Part VII</span>CI/CD &amp; Deployment</h2>
+        <p>
+          <code>.github/workflows/ci.yml</code> runs on every push/PR:
+          typecheck + lint for every package, the shared/api/web test suites
+          (API and web e2e against a real Postgres service container), the
+          extension's e2e suite under <code>xvfb</code> (a virtual display,
+          since a real browser extension needs a real browser window even in
+          headless CI), and a <code>docker-build</code> job that builds both
+          production images and smoke-tests the API image against a real
+          Postgres container.
+        </p>
+        <p>
+          Deployment itself (see <code>DEPLOYMENT.md</code>) is
+          Docker-based — a <code>Dockerfile</code> per app, verified by CI's
+          own build-and-smoke-test, but not yet pointed at a real production
+          host (no cloud account exists in this project's own development
+          environment). <code>TTS_POOL_SIZE</code> (default 3) is the one
+          real production-sizing knob the TTS architecture introduced — each
+          worker process holds a real model instance in memory for its whole
+          lifetime, a genuine memory/CPU tradeoff to size against the actual
+          host's headroom.
+        </p>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-8">
+        <h2><span class="part-label">Part VIII</span>Glossary</h2>
+        <dl class="glossary">
+          <dt>Monorepo</dt>
+          <dd>One version-controlled repository containing multiple, separately-deployable projects (here: an API, a web app, a browser extension, a mobile app, and a shared library) — as opposed to each living in its own repository ("polyrepo").</dd>
+
+          <dt>ORM (Object-Relational Mapping)</dt>
+          <dd>A library that lets you query a relational database using the host language's own objects/functions instead of hand-written SQL strings. This project's ORM is Prisma.</dd>
+
+          <dt>JWT (JSON Web Token)</dt>
+          <dd>A compact, cryptographically-signed token format for representing claims (like "this is user X, issued at time Y, expires at time Z"). Verifying one is just a signature check — no database lookup required, which is what "stateless" means here.</dd>
+
+          <dt>SSR / CSR</dt>
+          <dd>Server-Side Rendering (HTML generated on the server per request) vs. Client-Side Rendering (an empty shell shipped to the browser, which then builds the page via JavaScript). This app is overwhelmingly client-rendered in practice, even though it's built on a framework (Next.js) capable of both.</dd>
+
+          <dt>CFI (Canonical Fragment Identifier)</dt>
+          <dd>The EPUB standard's own way of pointing at a precise location inside a specific document within a book — the EPUB equivalent of a URL fragment, and what this app anchors EPUB highlights to.</dd>
+
+          <dt>Spaced repetition</dt>
+          <dd>A learning technique where review intervals grow over time for things you consistently recall correctly, and shrink (reset) for things you don't — the idea behind flashcard apps like Anki, and the model this app's "resurfacing" feature is built on via the real SM-2 algorithm.</dd>
+
+          <dt>WASM (WebAssembly)</dt>
+          <dd>A binary instruction format that runs in browsers (and standalone runtimes) at near-native speed, used here for in-browser OCR (Tesseract.js) and as the fallback execution path for TTS inference before it moved server-side.</dd>
+
+          <dt>ONNX Runtime</dt>
+          <dd>A cross-platform engine for running trained ML models. <code>onnxruntime-web</code> runs inside a WASM sandbox in the browser; <code>onnxruntime-node</code> runs as real native code in Node.js — the latter is measurably faster, which is the entire reason Kokoro TTS generation moved server-side.</dd>
+
+          <dt>Worker thread vs. child process</dt>
+          <dd>Both let Node.js run code concurrently. A worker thread shares the same OS process (cheaper, but shares certain native-binding constraints); a child process is a fully separate, independent process (more overhead, but fully isolated) — this project uses real child processes for TTS generation specifically because a native binding (<code>onnxruntime-node</code>) was confirmed to crash inside a worker thread.</dd>
+
+          <dt>SM-2</dt>
+          <dd>SuperMemo 2, a 1987 spaced-repetition scheduling algorithm by Piotr Wozniak — see <a href="#feat-resurface">Resurfacing</a>.</dd>
+        </dl>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-9">
+        <h2><span class="part-label">Part IX</span>Roads Not Taken</h2>
+        <p>
+          A dedicated index of real ideas that were tried, measured, and
+          deliberately reversed or rejected — preserved here specifically so
+          the same dead end doesn't get walked into twice.
+        </p>
+
+        <div class="callout rejected">
+          <span class="callout-label">Client-side WASM/WebGPU TTS</span>
+          <p>
+            Zero server cost, but a hard ~12-18s-per-sentence ceiling that
+            Worker-based pipelining, quantization, and multi-threading all
+            failed to close. Replaced by server-side generation once the
+            real, measured speedup (onnxruntime-node vs. onnxruntime-web)
+            was confirmed. See <a href="#feat-tts">the full TTS story</a>.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label"><code>worker_threads</code> for the TTS pool</span>
+          <p>
+            Cheaper than real child processes, and the obvious first choice
+            — but <code>onnxruntime-node</code>'s native binding crashes the
+            whole Node process the instant <code>generate()</code> runs
+            inside one, confirmed by hand. Real, separate OS processes
+            sidestep the issue entirely.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">Redis</span>
+          <p>
+            Explored directly in response to a real question ("would this
+            fix our latency issues?"). It wouldn't have: every reported
+            slowness was either real model-generation latency or an actual
+            logic bug in a specific code path, not a caching-shaped problem.
+            Adding it would have meant real infrastructure complexity — and
+            a real philosophical departure from this app's "nothing external
+            required" architecture — for no concrete win. Revisit if the API
+            ever needs to scale horizontally (Redis-backed rate limiting) or
+            if literally-repeated TTS requests become common enough to be
+            worth caching.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">Real per-word TTS timestamps</span>
+          <p>
+            Would be strictly better than the character-proportional
+            estimate the read-along feature actually uses — but confirmed by
+            reading kokoro-js's own type definitions: <code>generate()</code>
+            returns only raw audio samples, and even its streaming API
+            exposes phonemes as an untimed string, not per-word timing data.
+            Not available from this model/library without a substantially
+            bigger undertaking (a separate forced-alignment pass against the
+            generated audio), which wasn't judged worth the cost against the
+            estimate's real accuracy once its own logic bug — see
+            <a href="#feat-tts">Chapter 4</a> — was fixed.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">Postgres full-text search (tsvector/GIN)</span>
+          <p>
+            Would give relevance-ranked results, real stemming, etc. — not
+            used because local/anonymous mode has no equivalent full-text
+            index over IndexedDB, and giving signed-in users meaningfully
+            better search than signed-out users contradicts this app's
+            "everything behaves the same either way" principle. Revisit if
+            that principle is ever consciously relaxed, or at a scale where
+            plain <code>contains</code> matching genuinely stops being
+            adequate.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">epub.js spread mode (side-by-side pages)</span>
+          <p>
+            epub.js's default "auto" spread pairs two spine items side by
+            side above its own width threshold — a real, physical-book-style
+            feature, but this reader has no two-page visual layout at any
+            width to begin with, and the pairing behavior at a book's very
+            first spine item (the cover, with nothing yet to pair it with)
+            turned out to be the actual cause of a real "cover shows up
+            twice" bug. Forced off (<code>spread: "none"</code>) entirely.
+          </p>
+        </div>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-10">
+        <h2><span class="part-label">Part X</span>Changelog of This Document</h2>
+        <table>
+          <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-05</td>
+            <td>
+              v1 — first version. Covers the big picture, architecture, the
+              full technology stack, the data model, and deep dives on every
+              major feature, with the text-to-speech section written in the
+              most detail given how extensively that feature's real history
+              (WASM → server-side → worker pool → read-along) was documented
+              during its own development. Sections on individual apps
+              (extension, mobile) and some deployment specifics are
+              deliberately concise <span class="tag">stub</span> — real,
+              accurate, but a first pass, not the final depth this document
+              is meant to reach.
+            </td>
+          </tr>
+        </table>
+        <p>
+          <strong>Notes for the next editing pass</strong> — things worth
+          expanding when this document is next revisited: a walked-through
+          example of the highlight-anchoring algorithm's actual drift-
+          tolerant re-search logic; the extension's manifest/permission model
+          in more depth; a real deployment runbook once this project actually
+          has a production host; more of the extraction pipeline's edge
+          cases (SSRF hardening specifics, image-inlining limits).
+        </p>
+      </section>
+
+      <footer class="doc-footer">
+        <p>
+          Booklet — Technical Documentation, v1. Written collaboratively by
+          the project's owner and Claude (Anthropic), grounded in the real
+          implementation and real development history rather than written
+          from scratch after the fact. Keep it that way: when this file is
+          next edited, prefer describing what's actually true of the code
+          over what would merely be nice to claim.
+        </p>
+      </footer>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  (function () {
+    var toggle = document.getElementById('themeToggle');
+    var root = document.documentElement;
+    toggle.addEventListener('click', function () {
+      var current = root.getAttribute('data-theme');
+      var next = current === 'dark' ? 'light' : (current === 'light' ? null : 'dark');
+      if (next) root.setAttribute('data-theme', next);
+      else root.removeAttribute('data-theme');
+    });
+    var mobileToggle = document.getElementById('mobileTocToggle');
+    var toc = document.getElementById('toc');
+    if (mobileToggle) {
+      mobileToggle.addEventListener('click', function () {
+        toc.classList.toggle('open');
+      });
+    }
+  })();
+</script>
+
+</body>
+</html>
