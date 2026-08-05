@@ -25,13 +25,22 @@ export interface TtsVoiceOption {
  * descriptions (in the labels below) come from Kokoro's own community-
  * documented voice character notes, not something independently verified
  * by ear in this environment -- worth a real listening pass before taking
- * them as gospel if a voice ever sounds off from its label. */
+ * them as gospel if a voice ever sounds off from its label. Later grew
+ * from 7 to 11 by adding back one more distinct voice per existing
+ * gender/accent bucket (e.g. a second, softer American-female option
+ * alongside Heart) once the trimmed set had proven the "each one earns
+ * its place" bar works -- more variety without reintroducing the
+ * original wall of near-identical options. */
 export const KOKORO_VOICES: TtsVoiceOption[] = [
   { id: "af_heart", label: "Heart — warm & clear (US female)" },
   { id: "af_bella", label: "Bella — bright & confident (US female)" },
+  { id: "af_nicole", label: "Nicole — soft & intimate (US female)" },
+  { id: "af_sarah", label: "Sarah — calm & measured (US female)" },
   { id: "am_fenrir", label: "Fenrir — deep & gravelly (US male)" },
   { id: "am_puck", label: "Puck — playful & energetic (US male)" },
+  { id: "am_michael", label: "Michael — clear & professional (US male)" },
   { id: "bf_emma", label: "Emma — crisp & proper (British female)" },
+  { id: "bf_isabella", label: "Isabella — gentle & sophisticated (British female)" },
   { id: "bm_george", label: "George — deep & classic (British male)" },
   { id: "bm_fable", label: "Fable — warm & storytelling (British male)" },
 ];

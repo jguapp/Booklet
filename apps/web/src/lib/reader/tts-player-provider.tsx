@@ -168,16 +168,46 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       // apps/api's tts-pool.ts), so keeping several requests in flight at
       // once is what actually uses that concurrency -- one-ahead prefetch
       // just meant this client was never the bottleneck, but a *single*
-      // server process still was. PREFETCH_DEPTH matches the pool's own
-      // default size (3) so the window keeps every worker busy without
-      // queuing more than the server can actually run at once.
-      const PREFETCH_DEPTH = 3;
+      // server process still was.
+      //
+      // The window only ever *advances* once per loop iteration below, and
+      // each iteration only starts once the *previous* chunk's audio has
+      // fully finished playing -- so the window's real-world lead time over
+      // the currently playing chunk is bounded by how long nearby chunks
+      // take to *play back*, not by how much pool capacity is actually
+      // free. Measured by hand with real server-side dispatch/response
+      // timestamps: two short chunks (66-67 chars, a few seconds of audio
+      // each) played back quickly enough that a ~190-char chunk right after
+      // them -- needing ~15s to generate -- only got ~9s of head start
+      // before it was needed, a ~6s shortfall that showed up as a real,
+      // audible pause, even though the pool had free workers the whole
+      // time. A depth of 3 (matching pool size) has no slack for that kind
+      // of variance; widening it to 6 means the very first burst of
+      // requests (fired before any playback has happened at all, so
+      // nothing is gating them yet) already covers several chunks past the
+      // typical trouble spot, and every later step inherits the same wider
+      // buffer. Doesn't meaningfully change the sustained request rate over
+      // a long article (still one request per chunk, same total count) --
+      // only front-loads a few more of them, which is what actually fixes
+      // this.
+      const PREFETCH_DEPTH = 6;
       const inFlight = new Map<number, Promise<Blob>>();
+      // Cursor-based, not a `!inFlight.has(i)` rescan from 0: each consumed
+      // chunk is deleted from `inFlight` right after it's awaited below, so
+      // a rescan from 0 would see it as "never requested" and re-fire a
+      // brand-new generation for audio that already played and will never
+      // be used again -- wasting real pool worker slots on every single
+      // subsequent transition, and worse the further into the article you
+      // get. A monotonic cursor guarantees each index is only ever
+      // requested once, no matter how many times this is called.
+      let nextToPrefetch = 0;
       const ensurePrefetched = (uptoIndexInclusive: number) => {
-        for (let i = 0; i <= uptoIndexInclusive && i < chunks.length; i++) {
-          if (!inFlight.has(i)) {
-            inFlight.set(i, generateKokoroChunk(chunks[i], readerRef.current.ttsVoice, readerRef.current.ttsRate));
-          }
+        while (nextToPrefetch <= uptoIndexInclusive && nextToPrefetch < chunks.length) {
+          inFlight.set(
+            nextToPrefetch,
+            generateKokoroChunk(chunks[nextToPrefetch], readerRef.current.ttsVoice, readerRef.current.ttsRate),
+          );
+          nextToPrefetch++;
         }
       };
 
