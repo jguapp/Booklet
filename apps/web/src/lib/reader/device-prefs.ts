@@ -19,6 +19,10 @@ export interface ReaderPrefs {
   ttsRate: number;
   /** NATIVE_VOICE_ID (the device's own SpeechSynthesis) or a Kokoro voice id. */
   ttsVoice: string;
+  /** 0-1, applied to the <audio> element's own volume (native SpeechSynthesis
+   * has no per-utterance volume knob wired up here -- it always plays at the
+   * system's own output level). */
+  ttsVolume: number;
   /** Which colors show up in the highlight picker, and in what order --
    * see packages/shared highlight-colors.ts. */
   highlightBarColors: string[];
@@ -37,6 +41,7 @@ const DEFAULT_PREFS: ReaderPrefs = {
   size: "md",
   ttsRate: 1,
   ttsVoice: NATIVE_VOICE_ID,
+  ttsVolume: 1,
   highlightBarColors: DEFAULT_HIGHLIGHT_BAR_COLORS,
   showProgressBar: true,
   pdfReadingMode: "paginate",
@@ -57,6 +62,10 @@ export function loadReaderPrefs(): ReaderPrefs {
       ttsVoice: typeof parsed.ttsVoice === "string" && VALID_VOICES.has(parsed.ttsVoice)
         ? parsed.ttsVoice
         : DEFAULT_PREFS.ttsVoice,
+      ttsVolume:
+        typeof parsed.ttsVolume === "number" && parsed.ttsVolume >= 0 && parsed.ttsVolume <= 1
+          ? parsed.ttsVolume
+          : DEFAULT_PREFS.ttsVolume,
       highlightBarColors: sanitizeHighlightBarColors(parsed.highlightBarColors),
       showProgressBar: typeof parsed.showProgressBar === "boolean" ? parsed.showProgressBar : DEFAULT_PREFS.showProgressBar,
       pdfReadingMode: parsed.pdfReadingMode === "scroll" ? "scroll" : DEFAULT_PREFS.pdfReadingMode,

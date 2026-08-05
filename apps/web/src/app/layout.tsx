@@ -4,6 +4,8 @@ import { ThemeProvider } from "@/lib/theme/theme-provider";
 import { AuthProvider } from "@/lib/auth/auth-provider";
 import { ToastProvider } from "@/lib/toast/toast-provider";
 import { DevicePrefsProvider } from "@/lib/data/device-prefs-provider";
+import { TtsPlayerProvider } from "@/lib/reader/tts-player-provider";
+import { TtsPlayerBar } from "@/components/reader/tts-player-bar";
 import { ErrorMonitoringInit } from "@/lib/error-monitoring-init";
 import "./globals.css";
 
@@ -66,7 +68,12 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthProvider>
             <ToastProvider>
-              <DevicePrefsProvider>{children}</DevicePrefsProvider>
+              <DevicePrefsProvider>
+                <TtsPlayerProvider>
+                  {children}
+                  <TtsPlayerBar />
+                </TtsPlayerProvider>
+              </DevicePrefsProvider>
             </ToastProvider>
           </AuthProvider>
         </ThemeProvider>

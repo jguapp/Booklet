@@ -1,243 +1,99 @@
 /**
- * Open-source, zero-cost TTS: Kokoro (Apache-2.0, 82M params) running
- * entirely client-side via kokoro-js (built on @huggingface/transformers --
- * WASM; WebGPU is deliberately not used, see kokoro.worker.ts). No server,
- * no API key, no per-request cost -- the ~90MB quantized model downloads
- * once from Hugging Face's CDN on first use and is cached by the browser
- * (transformers.js's own model cache) after that.
+ * Open-source TTS: Kokoro (Apache-2.0, 82M params), now generated
+ * server-side (apps/api's POST /api/tts, via kokoro-js + onnxruntime-node)
+ * rather than in-browser over WASM. This module is a thin API client --
+ * see apps/api/src/services/tts-service.ts for why this moved server-side
+ * (WASM's real per-chunk cost, ~12-18s, never came down no matter what was
+ * tried client-side: Worker-based pipelining, quantization, threading;
+ * native Node execution measured at ~4.7s for the same sentence on the
+ * same machine, a real ~2.5-3.8x improvement, not a config tweak).
  *
- * The actual model loading and generation happens in a dedicated Worker
- * (kokoro.worker.ts), not here -- this module is the main-thread client
- * that talks to it. See use-text-to-speech.ts for how this plugs into the
- * existing play/pause/resume/stop reader controls, falling back to the
- * native SpeechSynthesis engine when a voice isn't selected or this fails
- * to load (unsupported browser, network hiccup on first download).
+ * Chunking still happens here, client-side, before sending each chunk as
+ * its own request -- same reasoning as the old WASM-era chunker (a whole
+ * article in one call means no audio until the whole thing finishes), plus
+ * it keeps each request small and bounded (see tts.ts's MAX_TEXT_LENGTH).
  */
-import { TextSplitterStream, type KokoroTTS } from "kokoro-js";
+import { KOKORO_VOICES, NATIVE_VOICE_ID, isKokoroVoice, type TtsVoiceOption } from "@booklet/shared";
+import { apiFetchBlob } from "@/lib/api/client";
 
-/** kokoro-js types `generate()`'s voice option as a literal union of its
- * exact voice ids (not exported directly), derived here from the method's
- * own signature so callers can cast a validated string into it without
- * hand-duplicating that union. See use-text-to-speech.ts. */
-export type KokoroVoiceId = NonNullable<Parameters<KokoroTTS["generate"]>[1]>["voice"];
+export type { TtsVoiceOption as KokoroVoiceOption };
+export { KOKORO_VOICES, NATIVE_VOICE_ID, isKokoroVoice };
 
-export interface KokoroVoiceOption {
-  id: string;
-  label: string;
+/** Generates one chunk of speech via the server and returns it as a
+ * playable WAV Blob. Each call is a real, independent HTTP request -- see
+ * use-tts-player.ts for how chunks are requested one ahead of playback
+ * (simple fetch-ahead pipelining; unlike the old WASM Worker, a network
+ * request doesn't block anything locally, so no Worker is needed to
+ * achieve overlap this time). No auth needed -- same as the route itself,
+ * see tts.ts. */
+export function generateKokoroChunk(text: string, voice: string, speed: number): Promise<Blob> {
+  return apiFetchBlob("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, voice, speed }),
+    auth: false,
+  });
 }
 
-/** Kokoro ships 28 voices (see tts.list_voices() for the full set, or
- * kokoro-js's own bundled quality metadata -- each voice has a
- * `targetQuality`/`overallGrade`). This is every voice graded C or better,
- * spanning both genders and American/British English -- the D-and-below
- * voices are real but audibly rougher, so they're left out rather than
- * padding the picker with options that sound worse than the system voice. */
-export const KOKORO_VOICES: KokoroVoiceOption[] = [
-  { id: "af_heart", label: "Heart (American, female)" },
-  { id: "af_bella", label: "Bella (American, female)" },
-  { id: "af_nicole", label: "Nicole (American, female)" },
-  { id: "af_aoede", label: "Aoede (American, female)" },
-  { id: "af_kore", label: "Kore (American, female)" },
-  { id: "af_sarah", label: "Sarah (American, female)" },
-  { id: "am_michael", label: "Michael (American, male)" },
-  { id: "am_fenrir", label: "Fenrir (American, male)" },
-  { id: "am_puck", label: "Puck (American, male)" },
-  { id: "bf_emma", label: "Emma (British, female)" },
-  { id: "bf_isabella", label: "Isabella (British, female)" },
-  { id: "bm_george", label: "George (British, male)" },
-  { id: "bm_fable", label: "Fable (British, male)" },
-];
+// The server caps a single request at 1000 characters (tts.ts's
+// MAX_TEXT_LENGTH), but this is deliberately much smaller -- confirmed by
+// hand that generation time scales with chunk length (roughly linear:
+// ~4.7s for a ~100-char sentence in isolation, ~20s+ for a full 500-char
+// chunk), and the FIRST chunk's generation time is exactly what "time to
+// first audio" is. A larger chunk means fewer total requests, but with
+// fetch-ahead pipelining already covering the overlap between chunks (see
+// tts-player-provider.tsx), that saving matters far less than a fast
+// start does -- especially since the user has to wait for chunk one
+// specifically before hearing anything at all.
+const MAX_CHUNK_CHARS = 200;
 
-/** The device's own SpeechSynthesis voice -- the default, since it needs no
- * download at all. Kept as a real option (not just "off") in the same
- * picker as the Kokoro voices. */
-export const NATIVE_VOICE_ID = "system";
+// Accumulates across paragraph/newline boundaries, not just within one --
+// confirmed by hand this matters a lot: a real Wikipedia article's
+// extracted text includes infobox/taxonomy content (species classification
+// tables, geological-period abbreviations, citation lists) as hundreds of
+// newline-separated one-to-few-character fragments with no real sentence
+// punctuation. Resetting the accumulator at every paragraph boundary (an
+// earlier version of this function did) turned each of those into its own
+// chunk -- 2283 chunks, most under 20 characters, for one article -- which
+// meant 2283 separate HTTP round trips before "read aloud" finished a
+// single Wikipedia page. Treating the whole text as one continuous stream
+// of sentences and only flushing a chunk once it's actually close to
+// MAX_CHUNK_CHARS fixes this: those fragments just get grouped together
+// into normally-sized chunks instead of each paying its own request.
+export function toSafeTextChunks(text: string): string[] {
+  const chunks: string[] = [];
+  const sentences = text.replace(/\n+/g, " ").match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) ?? [text];
 
-export function isKokoroVoice(voiceId: string): boolean {
-  return voiceId !== NATIVE_VOICE_ID;
-}
-
-interface WorkerResponse {
-  type: string;
-  data?: unknown;
-}
-
-let worker: Worker | null = null;
-
-function getWorker(): Worker {
-  if (!worker) {
-    worker = new Worker(new URL("../../workers/kokoro.worker.ts", import.meta.url), { type: "module" });
-  }
-  return worker;
-}
-
-let loadPromise: Promise<void> | null = null;
-
-/** Loaded once per page session and reused for every voice/article after
- * that -- the model itself doesn't depend on which voice is picked (voices
- * are small per-voice style vectors applied at generation time, not
- * separate models).
- *
- * Generation is genuinely slow regardless of threading -- confirmed by
- * hand, isolated from all app/chunking overhead: a single realistic
- * ~20-word sentence takes 12-18s via this model's own generate() call.
- * next.config.ts sets Cross-Origin-Opener-Policy/Cross-Origin-Embedder-
- * Policy on /reader/* (lets SharedArrayBuffer exist there, which
- * onnxruntime-web's WASM backend needs for multi-threading) but confirmed
- * this doesn't move the needle here -- the bottleneck is this 82M-param
- * model's raw per-token WASM inference cost, not thread count. Left as
- * real, correct config (harmless, free on a hard navigation) but nothing
- * in the app forces one just for this. */
-export function loadKokoro(): Promise<void> {
-  if (!loadPromise) {
-    loadPromise = new Promise<void>((resolve, reject) => {
-      const w = getWorker();
-      const onMessage = (e: MessageEvent<WorkerResponse>) => {
-        if (e.data.type === "load:complete") {
-          w.removeEventListener("message", onMessage);
-          resolve();
-        } else if (e.data.type === "error") {
-          w.removeEventListener("message", onMessage);
-          reject(new Error((e.data.data as { message: string }).message));
-        }
-      };
-      w.addEventListener("message", onMessage);
-      w.postMessage({ type: "load" });
-    }).catch((err: unknown) => {
-      loadPromise = null; // don't cache a permanent failure -- allow retry on the next play()
-      throw err;
-    });
-  }
-  return loadPromise;
-}
-
-/** A minimal async producer/consumer queue -- bridges the worker's
- * "message" events (push-based) to an async generator (pull-based) that
- * use-text-to-speech.ts can `for await` over, the same shape it already
- * consumed kokoro-js's own tts.stream() in. */
-class AsyncQueue<T> {
-  private items: T[] = [];
-  private resolvers: ((result: IteratorResult<T>) => void)[] = [];
-  private ended = false;
-  private error: Error | null = null;
-
-  push(item: T): void {
-    const resolve = this.resolvers.shift();
-    if (resolve) resolve({ value: item, done: false });
-    else this.items.push(item);
-  }
-
-  end(): void {
-    this.ended = true;
-    while (this.resolvers.length) this.resolvers.shift()!({ value: undefined, done: true });
-  }
-
-  fail(err: Error): void {
-    this.error = err;
-    this.end();
-  }
-
-  next(): Promise<IteratorResult<T>> {
-    if (this.items.length) return Promise.resolve({ value: this.items.shift()!, done: false });
-    if (this.error) return Promise.reject(this.error);
-    if (this.ended) return Promise.resolve({ value: undefined, done: true });
-    return new Promise((resolve) => this.resolvers.push(resolve));
-  }
-}
-
-/** Streams generated audio chunks from the worker as they're produced --
- * genuinely concurrently with whatever the caller does with each chunk
- * (e.g. play it), since generation now runs on its own thread instead of
- * the one also driving playback. See the module doc comment and
- * kokoro.worker.ts for why that distinction is the whole point of this
- * file existing. Abandoning the loop early (a `break`/`return` in the
- * caller's `for await`, e.g. use-text-to-speech.ts's stop()) sends the
- * worker a "cancel" so it stops generating further chunks for a playback
- * nobody wants anymore, instead of grinding through the rest of an
- * article's text for nothing. */
-export function streamKokoro(text: string, options: { voice: KokoroVoiceId; speed: number }): AsyncGenerator<Blob> {
-  const queue = new AsyncQueue<Blob>();
-  const w = getWorker();
-
-  const onMessage = (e: MessageEvent<WorkerResponse>) => {
-    const { type, data } = e.data;
-    if (type === "chunk") queue.push((data as { blob: Blob }).blob);
-    else if (type === "generate:complete") queue.end();
-    else if (type === "error") queue.fail(new Error((data as { message: string }).message));
+  let piece = "";
+  const flush = () => {
+    const trimmed = piece.trim();
+    if (trimmed) chunks.push(trimmed);
+    piece = "";
   };
-  w.addEventListener("message", onMessage);
-  w.postMessage({ type: "generate", data: { text, voice: options.voice, speed: options.speed } });
 
-  return (async function* () {
-    try {
-      while (true) {
-        const { value, done } = await queue.next();
-        if (done) return;
-        yield value;
+  for (const raw of sentences) {
+    const sentence = raw.trim();
+    if (!sentence) continue;
+
+    if (sentence.length > MAX_CHUNK_CHARS) {
+      // A single sentence too long on its own (rare, but e.g. text with no
+      // punctuation at all) -- flush whatever's accumulated, then hard-wrap
+      // this one at word boundaries so no single request ever exceeds the
+      // cap.
+      flush();
+      const words = sentence.match(/\S+\s*/g) ?? [sentence];
+      for (const word of words) {
+        if (piece.length + word.length > MAX_CHUNK_CHARS && piece) flush();
+        piece += word;
       }
-    } finally {
-      w.removeEventListener("message", onMessage);
-      w.postMessage({ type: "cancel" }); // harmless no-op if generation already finished on its own
-    }
-  })();
-}
-
-// kokoro-js's own sentence splitter (TextSplitterStream) has a real bug:
-// handed one huge single blob of text in a single push() call -- a whole
-// multi-thousand-word article, not one sentence -- it can hang forever
-// (confirmed by hand: fed a real 51KB Wikipedia article's extracted text,
-// TextSplitterStream.push() never returned, even isolated from the rest of
-// this app in a plain Node script with no browser/WASM/GPU involved at
-// all). This is what "TTS says loading forever, then the tab crashes"
-// actually was -- not a WebGPU issue, not a memory issue (though the dev
-// server *had* also ballooned to 9.6GB after this many hours in one
-// session, which didn't help but wasn't the real bug). Feeding it in much
-// smaller pieces sidesteps the hang entirely: confirmed the same real
-// article's text completes in ~60ms when pre-split into paragraph-sized
-// pieces first (its own sentence-boundary logic still runs correctly
-// across each incremental push -- it glues a sentence split mid-piece
-// back together using the next piece on its own, so this pre-chunking
-// doesn't need to land on exact sentence boundaries, just keep every
-// individual push() small). Used inside kokoro.worker.ts, not here -- kept
-// in this shared module since it's a plain text utility, not anything
-// worker-specific.
-const MAX_SAFE_CHUNK_CHARS = 500;
-
-function pushSafely(stream: TextSplitterStream, text: string): void {
-  const trimmed = text.trim();
-  if (!trimmed) return;
-  if (trimmed.length <= MAX_SAFE_CHUNK_CHARS) {
-    stream.push(trimmed);
-    return;
-  }
-  // A single paragraph can still be too large on its own (e.g. text with no
-  // line breaks at all, like some PDF extractions) -- fall back to sentence
-  // boundaries, and as a last resort hard word-wrapping, so no single
-  // push() call ever sees more than MAX_SAFE_CHUNK_CHARS.
-  const sentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) ?? [trimmed];
-  for (const sentence of sentences) {
-    if (sentence.length <= MAX_SAFE_CHUNK_CHARS) {
-      stream.push(sentence);
+      flush();
       continue;
     }
-    const words = sentence.match(new RegExp(`\\S+\\s*`, "g")) ?? [sentence];
-    let piece = "";
-    for (const word of words) {
-      if (piece.length + word.length > MAX_SAFE_CHUNK_CHARS && piece) {
-        stream.push(piece);
-        piece = "";
-      }
-      piece += word;
-    }
-    if (piece) stream.push(piece);
-  }
-}
 
-export function toSafeTextStream(text: string): TextSplitterStream {
-  const stream = new TextSplitterStream();
-  for (const paragraph of text.split(/\n+/)) {
-    pushSafely(stream, paragraph);
+    if (piece.length + sentence.length + 1 > MAX_CHUNK_CHARS && piece) flush();
+    piece += (piece ? " " : "") + sentence;
   }
-  stream.close();
-  return stream;
+  flush();
+
+  return chunks;
 }
