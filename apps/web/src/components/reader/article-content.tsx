@@ -62,6 +62,12 @@ interface ArticleContentProps {
   onDeleteHighlight: (highlightId: string) => void;
   onSaveNote: (highlightId: string, noteText: string) => void;
   onDeleteNote: (highlightId: string) => void;
+  /** The exact text of the TTS chunk currently playing (see
+   * tts-player-provider.tsx), or null when nothing's playing / a non-HTML
+   * reader has the article open. Read-along: highlighted and scrolled into
+   * view below, using the same offset-mapping primitives the real
+   * highlight-rendering pass above already relies on. */
+  readingChunkText?: string | null;
 }
 
 export function ArticleContent({
@@ -72,6 +78,7 @@ export function ArticleContent({
   onDeleteHighlight,
   onSaveNote,
   onDeleteNote,
+  readingChunkText = null,
 }: ArticleContentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingSelection | null>(null);
@@ -160,6 +167,85 @@ export function ArticleContent({
       marks[marks.length - 1].after(pill);
     }
   }, [highlights, html]);
+
+  // Read-along: a separate effect from the highlight-marks pass above --
+  // this fires far more often (every TTS chunk, every few seconds) and
+  // has nothing to do with the highlight list, so tying it to that effect
+  // would mean needlessly re-resolving every real highlight's position on
+  // every single sentence read aloud.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    container.querySelectorAll("[data-reading-position]").forEach((el) => {
+      const parent = el.parentNode;
+      if (!parent) return;
+      while (el.firstChild) parent.insertBefore(el.firstChild, el);
+      parent.removeChild(el);
+      parent.normalize();
+    });
+
+    if (!readingChunkText) return;
+
+    const fullText = plainTextOf(container);
+    // Chunks are built by toSafeTextChunks (kokoro-tts.ts), which
+    // deliberately collapses newlines/runs of whitespace into single
+    // spaces while accumulating sentences into a chunk -- necessary there
+    // (real article text, especially infobox/taxonomy content, has tons of
+    // short newline-separated fragments that need gluing into normal-sized
+    // chunks, see that function's own comment), but it means a plain exact
+    // substring match against this container's real, un-normalized
+    // plainTextOf() often fails on whitespace alone even though the actual
+    // words match. Searching in a whitespace-normalized copy of both
+    // strings and mapping the found offset back to the real string's
+    // offsets (via `map`, built alongside the normalization) fixes that
+    // without needing to touch the DOM text itself.
+    let normalized = "";
+    const map: number[] = []; // map[i] = fullText's real offset of normalized[i]
+    let lastWasSpace = true; // treat leading whitespace as already "collapsed"
+    for (let i = 0; i < fullText.length; i++) {
+      const isSpace = /\s/.test(fullText[i]);
+      if (isSpace) {
+        if (lastWasSpace) continue;
+        normalized += " ";
+        map.push(i);
+        lastWasSpace = true;
+      } else {
+        normalized += fullText[i];
+        map.push(i);
+        lastWasSpace = false;
+      }
+    }
+    const normalizedChunk = readingChunkText.replace(/\s+/g, " ").trim();
+
+    const normalizedStart = normalized.indexOf(normalizedChunk);
+    if (normalizedStart === -1) return;
+    const start = map[normalizedStart];
+    // map[] only has entries up to normalized.length - 1 -- the end offset
+    // is exclusive, so it needs the *next* character's real position, one
+    // past the last matched normalized character.
+    const normalizedEnd = normalizedStart + normalizedChunk.length;
+    const end = normalizedEnd < map.length ? map[normalizedEnd] : fullText.length;
+
+    const pointFor = createOffsetPointFinder(container);
+    const startPoint = pointFor(start);
+    const endPoint = pointFor(end);
+    if (!startPoint || !endPoint) return;
+
+    const range = document.createRange();
+    range.setStart(startPoint.node, startPoint.offset);
+    range.setEnd(endPoint.node, endPoint.offset);
+
+    const marks = wrapRangeInElements(container, range, () => {
+      const mark = document.createElement("mark");
+      mark.dataset.readingPosition = "true";
+      mark.className = "reading-position rounded-[3px] text-inherit";
+      (mark.style as CSSStyleDeclaration & { boxDecorationBreak?: string }).boxDecorationBreak = "clone";
+      mark.style.setProperty("-webkit-box-decoration-break", "clone");
+      return mark;
+    });
+    marks[0]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [readingChunkText]);
 
   function handleMouseUp() {
     const selection = window.getSelection();

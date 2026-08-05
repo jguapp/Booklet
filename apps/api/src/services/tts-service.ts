@@ -1,0 +1,96 @@
+/**
+ * Server-side Kokoro TTS (Apache-2.0, 82M params) via kokoro-js. This used
+ * to run entirely client-side in the browser over onnxruntime-web's WASM
+ * backend -- correct for "zero server cost", but genuinely slow: ~12-18s
+ * per sentence, confirmed by hand, unaffected by threading or pipelining
+ * (a WASM sandbox's per-token inference cost, not a config issue). Moved
+ * here specifically for real speed: kokoro-js auto-detects a Node.js
+ * environment and uses onnxruntime-node (real native execution, not a WASM
+ * sandbox) automatically -- confirmed by hand, same model/voice/sentence,
+ * same machine: ~4.7s per sentence, a real ~2.5-3.8x improvement over the
+ * WASM baseline, not a config tweak.
+ *
+ * This is a real, deliberate trade against this app's "everything works
+ * offline, zero server cost" principle everywhere else (OCR, extraction,
+ * etc.) -- accepted explicitly for this feature because genuine speed
+ * turned out to require it; WASM's ceiling was already explored at length
+ * (Worker-based pipelining, quantization, threading) and none of it closed
+ * the gap.
+ */
+import { KokoroTTS } from "kokoro-js";
+
+const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
+
+/** kokoro-js types `generate()`'s voice option as a literal union of its
+ * exact voice ids (not exported directly), derived here from the method's
+ * own signature so the route's already-validated string can be cast
+ * without hand-duplicating that union. */
+type KokoroVoiceId = NonNullable<Parameters<KokoroTTS["generate"]>[1]>["voice"];
+
+// ONNX Runtime logs a harmless perf-advisory notice at session-creation
+// time via console.error -- see the identical comment this was copied from
+// in the (now-removed) client-side kokoro-tts.ts for why there's no real
+// API lever to suppress it instead.
+const ORT_BENIGN_NOISE = /VerifyEachNodeIsAssignedToAnEp|Rerunning with verbose output/;
+
+async function withOrtNoiseSuppressed<T>(fn: () => Promise<T>): Promise<T> {
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    if (typeof args[0] === "string" && ORT_BENIGN_NOISE.test(args[0])) return;
+    originalConsoleError(...args);
+  };
+  try {
+    return await fn();
+  } finally {
+    console.error = originalConsoleError;
+  }
+}
+
+// Loaded once for the life of the process, not per-request -- same
+// reasoning as ocr-service.ts's shared OcrWorkerPool: the expensive part
+// (loading the model) is a one-time cost that should never be paid inside
+// a request. Real, measured cold-start cost the first time (2-5s normally;
+// occasionally much longer against a rate-limited CDN -- see
+// copy-onnx-wasm.mjs-era session notes -- but that's a deploy/startup
+// concern, not something a request should ever wait on).
+let ttsPromise: Promise<KokoroTTS> | null = null;
+
+function loadModel(): Promise<KokoroTTS> {
+  if (!ttsPromise) {
+    ttsPromise = withOrtNoiseSuppressed(() => KokoroTTS.from_pretrained(MODEL_ID, { dtype: "q8" })).catch(
+      (err: unknown) => {
+        ttsPromise = null; // don't cache a permanent failure -- allow retry on the next call
+        throw err;
+      },
+    );
+  }
+  return ttsPromise;
+}
+
+/** Warms the model on server startup rather than the first request paying
+ * for it -- see app.ts. Failures here are logged, not thrown: TTS being
+ * temporarily unavailable shouldn't take the whole API down. */
+export async function warmTtsModel(): Promise<void> {
+  try {
+    await loadModel();
+  } catch (err) {
+    console.error("[tts] failed to warm the model at startup:", err);
+  }
+}
+
+export class TtsGenerationError extends Error {}
+
+export async function generateSpeech(text: string, voice: string, speed: number): Promise<Buffer> {
+  const tts = await loadModel();
+  let audio;
+  try {
+    // Cast is safe: the route validates `voice` against KOKORO_VOICE_IDS
+    // (@booklet/shared) before calling this, which is exactly kokoro-js's
+    // own set of real voice ids -- it just doesn't export that literal
+    // union for callers to type against directly.
+    audio = await tts.generate(text, { voice: voice as KokoroVoiceId, speed });
+  } catch (err) {
+    throw new TtsGenerationError(err instanceof Error ? err.message : String(err));
+  }
+  return Buffer.from(audio.toWav());
+}

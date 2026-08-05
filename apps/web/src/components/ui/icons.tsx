@@ -287,3 +287,29 @@ export function IconEyeOff(props: IconProps) {
     </svg>
   );
 }
+
+export function IconVolume(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 7.5h2.8L11 4v12l-4.2-3.5H4z" strokeLinejoin="round" />
+      <path d="M13.5 7c.9.85 1.4 1.9 1.4 3s-.5 2.15-1.4 3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function IconVolumeMute(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 7.5h2.8L11 4v12l-4.2-3.5H4z" strokeLinejoin="round" />
+      <path d="m14 8 4 4M18 8l-4 4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function IconChevronDown(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="m5 7.5 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}

@@ -37,6 +37,7 @@ interface DevicePrefsContextValue extends DevicePrefsState {
   setReaderSize: (size: ReaderSize) => void;
   setTtsRate: (rate: number) => void;
   setTtsVoice: (voice: string) => void;
+  setTtsVolume: (volume: number) => void;
   setHighlightBarColors: (colors: string[]) => void;
   setShowProgressBar: (enabled: boolean) => void;
   setPdfReadingMode: (mode: "paginate" | "scroll") => void;
@@ -58,6 +59,7 @@ const SERVER_DEFAULTS: DevicePrefsState = {
     size: "md",
     ttsRate: 1,
     ttsVoice: NATIVE_VOICE_ID,
+    ttsVolume: 1,
     highlightBarColors: DEFAULT_HIGHLIGHT_BAR_COLORS,
     showProgressBar: true,
     pdfReadingMode: "paginate",
@@ -105,6 +107,14 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
   const setTtsVoice = useCallback((voice: string) => {
     setState((prev) => {
       const next = { ...prev.reader, ttsVoice: voice };
+      saveReaderPrefs(next);
+      return { ...prev, reader: next };
+    });
+  }, []);
+
+  const setTtsVolume = useCallback((volume: number) => {
+    setState((prev) => {
+      const next = { ...prev.reader, ttsVolume: volume };
       saveReaderPrefs(next);
       return { ...prev, reader: next };
     });
@@ -166,6 +176,7 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
         setReaderSize,
         setTtsRate,
         setTtsVoice,
+        setTtsVolume,
         setHighlightBarColors,
         setShowProgressBar,
         setPdfReadingMode,

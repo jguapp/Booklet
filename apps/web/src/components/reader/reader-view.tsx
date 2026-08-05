@@ -27,7 +27,7 @@ import { ArticleContent } from "./article-content";
 import { PdfReader } from "./pdf-reader";
 import { EpubReader } from "./epub-reader";
 import { TtsControls } from "./tts-controls";
-import { useTextToSpeech } from "@/lib/reader/use-text-to-speech";
+import { useTtsPlayer } from "@/lib/reader/tts-player-provider";
 import { TagEditor } from "@/components/library/tag-editor";
 import { SourceIcon } from "@/components/library/source-icon";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
@@ -75,8 +75,9 @@ export function ReaderView({ articleId }: { articleId: string }) {
   // load) falls back to the extracted-text-through-the-HTML-highlighter
   // path. Computed once, up here (not after the !article early return
   // below), since it's needed both by hooks that must run unconditionally
-  // (the scroll-progress listener right below, and useTextToSpeech further
-  // down) and by the render logic at the bottom of this component.
+  // (the scroll-progress listener right below) and by `readableText`
+  // (what "read aloud" sends to the global TtsPlayerProvider, see below)
+  // and the render logic at the bottom of this component.
   const usesPdfReader = article?.sourceType === "PDF" && fileBlob !== null;
   const usesEpubReader = article?.sourceType === "EPUB" && fileBlob !== null;
   // True for the gap between "we know this is a PDF/EPUB" and "the real
@@ -307,7 +308,20 @@ export function ReaderView({ articleId }: { articleId: string }) {
     : usesEpubReader
       ? epubSectionText
       : (article?.extractedText ?? "");
-  const tts = useTextToSpeech(readableText);
+  const ttsPlayer = useTtsPlayer();
+  // The persistent player is global -- "playing" only means *this*
+  // article's controls should show as active if it's actually this
+  // article's audio playing, not whatever's playing app-wide (e.g. left
+  // running from a different article after navigating here).
+  const ttsIsThisArticle = article !== undefined && article !== null && ttsPlayer.articleId === article.id;
+  const tts = {
+    status: ttsIsThisArticle ? ttsPlayer.status : ("idle" as const),
+    supported: ttsPlayer.supported,
+    play: () => article && ttsPlayer.play(article.id, article.title ?? "Untitled", readableText),
+    pause: ttsPlayer.pause,
+    resume: ttsPlayer.resume,
+    stop: ttsPlayer.stop,
+  };
 
   async function handleCreateHighlight(
     selectedText: string,
@@ -587,6 +601,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
             onDeleteHighlight={handleDeleteHighlight}
             onSaveNote={handleSaveNote}
             onDeleteNote={handleDeleteNote}
+            readingChunkText={ttsIsThisArticle && !usesPdfReader && !usesEpubReader ? ttsPlayer.currentChunkText : null}
           />
         ) : article.sourceType === "BOOK" ? (
           // No url, no uploaded file -- a Kindle-imported book has nothing
