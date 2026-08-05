@@ -7,17 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:e2e": "playwright test",
-    "postinstall": "node scripts/copy-onnx-wasm.mjs"
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@booklet/shared": "workspace:*",
-    "@mintplex-labs/piper-tts-web": "^1.0.4",
     "@sentry/browser": "^10.68.0",
     "epubjs": "^0.3.93",
     "jszip": "^3.10.1",
+    "kokoro-js": "^1.2.1",
     "next": "16.2.11",
-    "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
     "pdfjs-dist": "^6.1.200",
     "react": "19.2.4",
     "react-dom": "19.2.4"

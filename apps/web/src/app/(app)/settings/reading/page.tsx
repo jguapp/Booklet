@@ -3,7 +3,7 @@
 import { useTheme, type Theme } from "@/lib/theme/theme-provider";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
-import { PIPER_VOICES, NATIVE_VOICE_ID } from "@/lib/reader/piper-tts";
+import { KOKORO_VOICES, NATIVE_VOICE_ID } from "@/lib/reader/kokoro-tts";
 import { HighlightColorPicker } from "@/components/settings/highlight-color-picker";
 import { cn } from "@/lib/cn";
 
@@ -153,8 +153,8 @@ export default function ReadingSettingsPage() {
             Read-aloud voice
           </h3>
           <p className="font-sans text-xs text-ink-faint">
-            Piper voices are open-source and run entirely on this device (no account, no per-use cost) --
-            the first play downloads that voice&rsquo;s model once (about 60MB), then it&rsquo;s cached for next time.
+            Kokoro voices are open-source and run entirely on this device (no account, no per-use cost) --
+            the first play downloads the voice model once (about 90MB), then it&rsquo;s cached for next time.
           </p>
           <select
             aria-label="Read-aloud voice"
@@ -163,7 +163,7 @@ export default function ReadingSettingsPage() {
             className="w-full max-w-xs rounded-sm border border-border bg-surface px-3 py-2 font-sans text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <option value={NATIVE_VOICE_ID}>System voice (this device&rsquo;s own, instant)</option>
-            {PIPER_VOICES.map((v) => (
+            {KOKORO_VOICES.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.label}
               </option>

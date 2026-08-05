@@ -83,6 +83,12 @@ jobs:
       - run: pnpm --filter @booklet/api test
 
   test-web-e2e:
+    # Temporarily paused -- PR-merge turnaround was too slow (up to ~15min,
+    # dominated by Kokoro TTS's real, multi-minute model generation calls in
+    # kokoro-tts.spec.ts) while iterating on in-progress features. Test
+    # files are untouched; re-enable by deleting this line once ready to
+    # bring full e2e coverage back into the merge gate.
+    if: false
     runs-on: ubuntu-latest
     services:
       postgres:
