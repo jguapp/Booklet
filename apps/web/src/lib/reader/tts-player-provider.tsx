@@ -34,6 +34,9 @@ interface TtsPlayerContextValue {
   pause: () => void;
   resume: () => void;
   stop: () => void;
+  /** Speculatively starts generating just the article's first chunk before
+   * the user has pressed play at all -- see its own comment below for why. */
+  prewarmFirstChunk: (articleId: string, text: string) => void;
 }
 
 const TtsPlayerContext = createContext<TtsPlayerContextValue | null>(null);
@@ -96,6 +99,25 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   const generationRef = useRef(0);
   const resolveCurrentChunkRef = useRef<(() => void) | null>(null);
 
+  // Real, measured first-chunk generation time is the whole "TTS feels slow
+  // to start" complaint -- several seconds on CPU, unavoidable without
+  // dedicated inference hardware (see tts-service.ts's own doc comment).
+  // What *is* avoidable: making the user's own play click be what starts
+  // that clock. The article's text and TTS voice are both known well
+  // before anyone presses play -- as soon as the reader page has them (see
+  // reader-view.tsx), this fires the exact same first-chunk request
+  // playKokoro would make anyway, just several seconds earlier. play()
+  // below reuses it instead of firing a duplicate if it's still the right
+  // one by the time the user actually clicks; if they never click, it's
+  // one wasted request, not a growing cost.
+  const prewarmedRef = useRef<{
+    articleId: string;
+    chunkText: string;
+    voice: string;
+    rate: number;
+    promise: Promise<Blob>;
+  } | null>(null);
+
   useEffect(() => {
     if (!supported || !("speechSynthesis" in window)) return;
     function refreshVoice() {
@@ -119,6 +141,37 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       objectUrlRef.current = null;
     }
   }, []);
+
+  const prewarmFirstChunk = useCallback(
+    (articleId: string, text: string) => {
+      if (!supported || !isKokoroVoice(reader.ttsVoice) || !text.trim()) return;
+      const chunkText = toSafeTextChunks(text)[0];
+      if (!chunkText) return;
+      const existing = prewarmedRef.current;
+      // Reader-view calls this reactively on every relevant render, most of
+      // which change nothing that actually matters here -- skip re-issuing
+      // an identical request rather than firing a new one (and abandoning
+      // the still-in-flight old one) every time.
+      if (
+        existing &&
+        existing.articleId === articleId &&
+        existing.chunkText === chunkText &&
+        existing.voice === reader.ttsVoice &&
+        existing.rate === reader.ttsRate
+      ) {
+        return;
+      }
+      const promise = generateKokoroChunk(chunkText, reader.ttsVoice, reader.ttsRate);
+      // A failed prewarm (network hiccup, the user closing the tab before
+      // it resolves) shouldn't surface as an unhandled rejection just
+      // because nothing ever consumed it -- attaching this no-op catch
+      // marks the promise as handled without changing what the *original*
+      // promise resolves/rejects to for whoever does still await it below.
+      promise.catch(() => {});
+      prewarmedRef.current = { articleId, chunkText, voice: reader.ttsVoice, rate: reader.ttsRate, promise };
+    },
+    [supported, reader.ttsVoice, reader.ttsRate],
+  );
 
   const stop = useCallback(() => {
     generationRef.current++; // abandon any in-flight chunk loop
@@ -156,7 +209,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const playKokoro = useCallback(
-    async (text: string) => {
+    async (articleId: string, text: string) => {
       const myGeneration = ++generationRef.current;
       setStatus("loading");
 
@@ -201,6 +254,27 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       // get. A monotonic cursor guarantees each index is only ever
       // requested once, no matter how many times this is called.
       let nextToPrefetch = 0;
+
+      // Reuse prewarmFirstChunk's head start if it's still the right one --
+      // same article, same first chunk's text, same voice/rate -- instead
+      // of firing a redundant duplicate request for index 0 and discarding
+      // however many seconds of generation the prewarm already has behind
+      // it. One-shot: consumed here (matched or not, still cleared) so a
+      // later play() call for a different article can't accidentally pick
+      // up a stale one.
+      const warm = prewarmedRef.current;
+      prewarmedRef.current = null;
+      if (
+        warm &&
+        warm.articleId === articleId &&
+        warm.chunkText === chunks[0] &&
+        warm.voice === readerRef.current.ttsVoice &&
+        warm.rate === readerRef.current.ttsRate
+      ) {
+        inFlight.set(0, warm.promise);
+        nextToPrefetch = 1;
+      }
+
       const ensurePrefetched = (uptoIndexInclusive: number) => {
         while (nextToPrefetch <= uptoIndexInclusive && nextToPrefetch < chunks.length) {
           inFlight.set(
@@ -316,7 +390,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       setArticleId(newArticleId);
       setArticleTitle(newArticleTitle);
       if (isKokoroVoice(reader.ttsVoice)) {
-        playKokoro(text);
+        playKokoro(newArticleId, text);
       } else {
         playNative(text);
       }
@@ -359,6 +433,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
         pause,
         resume,
         stop,
+        prewarmFirstChunk,
       }}
     >
       {children}
