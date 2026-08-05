@@ -14,7 +14,8 @@ import { ExtractionError, fetchAndExtract } from "../services/extraction-service
 import { EpubExtractionError, extractEpubText } from "../services/epub-extraction.js";
 import { PdfExtractionError, extractPdfText } from "../services/pdf-extraction.js";
 import { isWeakBookTitle, lookupBookMetadata } from "../services/open-library.js";
-import { deleteStoredFile, readStoredFile, saveFile } from "../services/storage-service.js";
+import { deleteStoredFile, saveFile, streamStoredFile } from "../services/storage-service.js";
+import { isAllowedOrigin } from "../lib/cors.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
 import { sendEmail } from "../services/email-service.js";
 
@@ -76,9 +77,44 @@ async function purgeExpiredTrash(userId: string): Promise<void> {
   );
 }
 
-export function toSummary(row: ArticleRow): ArticleSummary {
-  const { extractedHtml: _html, extractedText: _text, ...rest } = toArticle(row);
-  return rest;
+/** Takes a row that never had extractedHtml/extractedText selected in the
+ * first place (see the list query's own `omit`) -- fetching either just to
+ * immediately discard it, for every row of a paginated list, wastes real
+ * DB I/O and serialization cost at a scale that grows with exactly what a
+ * big library has the most of. Field-for-field with toArticle rather than
+ * calling it and stripping the result, since toArticle's own row type
+ * requires those two fields to genuinely be present. */
+export function toSummary(row: Omit<ArticleRow, "extractedHtml" | "extractedText">): ArticleSummary {
+  return {
+    id: row.id,
+    userId: row.userId,
+    url: row.url,
+    canonicalUrl: row.canonicalUrl,
+    title: row.title,
+    author: row.author,
+    siteName: row.siteName,
+    excerpt: row.excerpt,
+    sourceType: row.sourceType,
+    extractionStatus: row.extractionStatus,
+    extractionError: row.extractionError,
+    textSource: row.textSource as "NATIVE" | "OCR" | null,
+    fileStorageKey: row.fileStorageKey,
+    originalFilename: row.originalFilename,
+    coverImageUrl: row.coverImageUrl,
+    readingTimeEstimate: row.readingTimeEstimate,
+    skippedImageCount: row.skippedImageCount,
+    progressFraction: row.progressFraction,
+    activeReadingSeconds: row.activeReadingSeconds,
+    tags: row.tags,
+    status: row.status,
+    savedAt: row.savedAt.toISOString(),
+    readAt: row.readAt?.toISOString() ?? null,
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    favorited: row.favorited,
+    deletedAt: row.deletedAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 export async function registerArticleRoutes(app: FastifyInstance): Promise<void> {
@@ -274,19 +310,45 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
         return reply.code(404).send({ error: "not_found", message: "No file for this article." });
       }
 
-      const buffer = await readStoredFile(article.fileStorageKey);
       const contentType = article.sourceType === "PDF" ? "application/pdf" : "application/epub+zip";
-      reply.header("Content-Type", contentType);
-      reply.header(
-        "Content-Disposition",
-        `inline; filename="${(article.originalFilename ?? "download").replace(/"/g, "")}"`,
-      );
-      // fileStorageKey is set once at upload and never replaced in place
-      // (only deleted, on the article's own deletion) -- safe to tell the
-      // browser this response never needs revalidating, so re-opening the
-      // same PDF/EPUB doesn't re-download it every time.
-      reply.header("Cache-Control", "private, max-age=31536000, immutable");
-      return reply.send(buffer);
+
+      // reply.hijack() + piping straight to reply.raw, not reply.send(stream)
+      // -- confirmed by hand that reply.send() with a plain fs ReadStream
+      // payload here just hangs forever (never errors, never completes;
+      // the request never even reaches "request completed" in the access
+      // log), reproducible independent of any explicit Content-Length.
+      // This is Fastify's own documented pattern for taking full manual
+      // control of a response -- hijack() tells Fastify not to touch the
+      // reply any further (no double-send, no interference from whatever
+      // was causing reply.send() to hang), and the stream is piped
+      // directly into the underlying Node http.ServerResponse. The real
+      // cost: @fastify/cors's own onSend hook never runs for a hijacked
+      // reply either, so its headers have to be set by hand here too (see
+      // lib/cors.ts) -- without this, the browser's own fetch() in
+      // apiFetchBlob silently fails the response with a CORS error despite
+      // the server having served it successfully.
+      const origin = request.headers.origin;
+      const corsHeaders: Record<string, string> = {};
+      if (origin && isAllowedOrigin(origin)) {
+        corsHeaders["Access-Control-Allow-Origin"] = origin;
+        corsHeaders["Access-Control-Allow-Credentials"] = "true";
+        corsHeaders["Vary"] = "Origin";
+      }
+
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        ...corsHeaders,
+        "Content-Type": contentType,
+        "Content-Disposition": `inline; filename="${(article.originalFilename ?? "download").replace(/"/g, "")}"`,
+        // fileStorageKey is set once at upload and never replaced in place
+        // (only deleted, on the article's own deletion) -- safe to tell the
+        // browser this response never needs revalidating, so re-opening
+        // the same PDF/EPUB doesn't re-download it every time.
+        "Cache-Control": "private, max-age=31536000, immutable",
+      });
+      const stream = streamStoredFile(article.fileStorageKey);
+      stream.on("error", () => reply.raw.destroy());
+      stream.pipe(reply.raw);
     },
   );
 
@@ -310,6 +372,15 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
     if (trashed) await purgeExpiredTrash(request.userId!);
 
     const rows = await prisma.article.findMany({
+      // toSummary() below already strips these from the response, but
+      // that happens *after* Postgres has already sent every row's full
+      // extractedHtml/extractedText across the wire and Prisma has
+      // deserialized it -- real, wasted cost per row, and it scales with
+      // exactly what a big library has the most of: saved article
+      // content. omit at the query level means the library list (a
+      // paginated GET, not a one-off) never fetches bytes it's about to
+      // throw away.
+      omit: { extractedHtml: true, extractedText: true },
       where: {
         userId: request.userId!,
         // Trash is excluded from every normal query regardless of other

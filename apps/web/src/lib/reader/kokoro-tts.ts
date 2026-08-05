@@ -47,6 +47,16 @@ export function generateKokoroChunk(text: string, voice: string, speed: number):
 // specifically before hearing anything at all.
 const MAX_CHUNK_CHARS = 200;
 
+// Readability keeps figure captions and photo-credit lines as ordinary
+// body text (there's no structural marker left once an article's HTML has
+// been flattened to plain text) -- fine to *see* next to the image, but
+// read aloud they're a short, out-of-context non-sequitur that interrupts
+// the actual article ("Image credit: Getty Images" mid-sentence-flow).
+// Matched by their distinctive leading "Label: " / "Label by " shape,
+// which real prose essentially never starts a sentence with.
+const CAPTION_LINE_PATTERN =
+  /^(image|photo|photograph|illustration|screenshot|graphic|credit|credits|courtesy|source|caption)s?\s*(:|-|—|by)\s+/i;
+
 // Accumulates across paragraph/newline boundaries, not just within one --
 // confirmed by hand this matters a lot: a real Wikipedia article's
 // extracted text includes infobox/taxonomy content (species classification
@@ -86,7 +96,7 @@ export function toSafeTextChunks(text: string): string[] {
 
   for (const raw of sentences) {
     const sentence = raw.trim();
-    if (!sentence) continue;
+    if (!sentence || CAPTION_LINE_PATTERN.test(sentence)) continue;
 
     if (sentence.length > MAX_CHUNK_CHARS) {
       // A single sentence too long on its own (rare, but e.g. text with no

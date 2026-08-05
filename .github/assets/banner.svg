@@ -1,0 +1,33 @@
+<svg width="1280" height="320" viewBox="0 0 1280 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Booklet">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14181A"/>
+      <stop offset="100%" stop-color="#1C2124"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#55C4B8" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#55C4B8" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="320" fill="url(#bg)"/>
+  <rect width="620" height="320" fill="url(#glow)"/>
+
+  <!-- open-book mark -->
+  <g transform="translate(96, 108)" stroke="#55C4B8" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M52 8C40 1 22 1 8 8v84c14-7 32-7 44 0" />
+    <path d="M52 8c12-7 30-7 44 0v84c-14-7-32-7-44 0" />
+    <path d="M52 8v84" />
+    <path d="M20 32c8-3 17-3 24 1" stroke-opacity="0.55"/>
+    <path d="M20 50c8-3 17-3 24 1" stroke-opacity="0.55"/>
+    <path d="M20 68c8-3 17-3 24 1" stroke-opacity="0.55"/>
+  </g>
+  <!-- highlight swoosh accent -->
+  <rect x="18" y="86" width="58" height="10" rx="5" fill="#55C4B8" opacity="0.55" transform="translate(96,108)"/>
+
+  <text x="216" y="176" font-family="Georgia, 'Times New Roman', serif" font-size="76" fill="#E8E4DA" font-weight="700">Booklet</text>
+  <text x="219" y="216" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" fill="#A6A093" letter-spacing="0.3">Save what you find. Keep what you highlight.</text>
+
+  <line x1="96" y1="252" x2="900" y2="252" stroke="#2D3336" stroke-width="1.5"/>
+  <text x="96" y="286" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" fill="#767065">Read-it-later, annotation, and spaced-repetition resurfacing — offline-first, account optional</text>
+</svg>
