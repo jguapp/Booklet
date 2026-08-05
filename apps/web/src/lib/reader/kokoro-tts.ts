@@ -47,15 +47,40 @@ export function generateKokoroChunk(text: string, voice: string, speed: number):
 // specifically before hearing anything at all.
 const MAX_CHUNK_CHARS = 200;
 
+// The very first chunk gets a smaller cap than the rest -- generation time
+// scales with chunk length, and the first chunk's generation time IS
+// "time to first audio" in the most literal sense: there's no previous
+// chunk playing yet for the server's worker pool (tts-pool.ts) to work
+// ahead of, so nothing hides that wait. Every chunk after the first
+// already benefits from the pool plus the client's prefetch window (see
+// tts-player-provider.tsx) covering its generation time with the previous
+// chunk's playback -- there's no equivalent latency cost to keeping those
+// at the normal, more request-efficient size, so only chunk one pays for
+// a faster start.
+const FIRST_CHUNK_MAX_CHARS = 80;
+
 // Readability keeps figure captions and photo-credit lines as ordinary
 // body text (there's no structural marker left once an article's HTML has
 // been flattened to plain text) -- fine to *see* next to the image, but
 // read aloud they're a short, out-of-context non-sequitur that interrupts
 // the actual article ("Image credit: Getty Images" mid-sentence-flow).
-// Matched by their distinctive leading "Label: " / "Label by " shape,
-// which real prose essentially never starts a sentence with.
+// Matched by their distinctive leading "Label: " / "Label by " shape --
+// optionally a two-word label ("Image credit:", "Photo courtesy:"), since
+// that's an extremely common real caption shape a single-word check
+// misses entirely -- which real prose essentially never starts a sentence
+// with. Deliberately *not* matching a bare hyphen/em-dash after the label
+// word, and deliberately *not* matching "courtesy of" (only "courtesy:"):
+// both were confirmed by hand to be real bugs, not just theoretical --
+// real article prose routinely opens a sentence with one of these words
+// used as an ordinary noun followed by an em-dash aside ("Illustration --
+// a favorite technique of the era -- was used extensively...") or a
+// "courtesy of" construction ("Courtesy of decades of research, the
+// theory was eventually confirmed"), and matching either silently dropped
+// the entire sentence -- occasionally an entire paragraph, since this
+// runs per-sentence over the whole article -- from what got read aloud at
+// all. A colon or "by" has no equivalent normal-prose false-positive shape.
 const CAPTION_LINE_PATTERN =
-  /^(image|photo|photograph|illustration|screenshot|graphic|credit|credits|courtesy|source|caption)s?\s*(:|-|—|by)\s+/i;
+  /^(image|photo|photograph|illustration|screenshot|graphic|credit|credits|courtesy|source|caption)s?(\s+(credit|credits|courtesy|caption)s?)?\s*(:|by)\s+/i;
 
 // Accumulates across paragraph/newline boundaries, not just within one --
 // confirmed by hand this matters a lot: a real Wikipedia article's
@@ -93,12 +118,16 @@ export function toSafeTextChunks(text: string): string[] {
     if (trimmed) chunks.push(trimmed);
     piece = "";
   };
+  // chunks is still empty exactly until the first flush() actually pushes
+  // something -- a direct, always-correct way to know whether the piece
+  // being accumulated right now is destined to become chunk one.
+  const currentCap = () => (chunks.length === 0 ? FIRST_CHUNK_MAX_CHARS : MAX_CHUNK_CHARS);
 
   for (const raw of sentences) {
     const sentence = raw.trim();
     if (!sentence || CAPTION_LINE_PATTERN.test(sentence)) continue;
 
-    if (sentence.length > MAX_CHUNK_CHARS) {
+    if (sentence.length > currentCap()) {
       // A single sentence too long on its own (rare, but e.g. text with no
       // punctuation at all) -- flush whatever's accumulated, then hard-wrap
       // this one at word boundaries so no single request ever exceeds the
@@ -106,14 +135,14 @@ export function toSafeTextChunks(text: string): string[] {
       flush();
       const words = sentence.match(/\S+\s*/g) ?? [sentence];
       for (const word of words) {
-        if (piece.length + word.length > MAX_CHUNK_CHARS && piece) flush();
+        if (piece.length + word.length > currentCap() && piece) flush();
         piece += word;
       }
       flush();
       continue;
     }
 
-    if (piece.length + sentence.length + 1 > MAX_CHUNK_CHARS && piece) flush();
+    if (piece.length + sentence.length + 1 > currentCap() && piece) flush();
     piece += (piece ? " " : "") + sentence;
   }
   flush();
