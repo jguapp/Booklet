@@ -57,24 +57,63 @@ const SECTION_SELECTOR = "p, li, blockquote, h1, h2, h3, h4, h5, h6, figcaption,
 // `container` itself is a <div>, and SECTION_SELECTOR matches "div" --
 // Node#contains() is self-inclusive, so for content with no wrapping
 // element nearer than the container (flat markup with no <p> tags at
-// all, text sitting directly in the article root), closest() matches
-// *the container itself* and the old `container.contains(specific)`
-// check let that through. Highlighting the whole container looks like
-// the entire article is "the current section" -- confirmed by hand this
-// is a real regression from adding "div" to the selector above, not a
-// rare shape. Both paths below explicitly refuse to return `container`:
-// there's no meaningful sub-section to point at in genuinely flat
-// content, so no indicator is the honest answer, not the whole page.
+// all, text sitting directly in the article root), closest() matched
+// *the container itself*, and excluding just that one specific element
+// (an earlier version of this fix) turned out not to be enough: real
+// extracted HTML routinely has a *different*, non-container wrapper div
+// that's nearly as broad -- e.g. Readability output where most of the
+// article is <p>-wrapped but some loose text (a caption, a trailing
+// byline) sits directly in the div that also contains every paragraph,
+// so that div is the "nearest match" for that one chunk even though it
+// spans virtually the whole article. Excluding a specific element can't
+// generalize to every such shape.
+//
+// A size/character-count heuristic was tried here first (reject if the
+// matched element's own text is too large a share of the whole
+// article) and confirmed by hand *not* to generalize either: it needs
+// an absolute-size escape hatch so a short article's one legitimately
+// long paragraph isn't rejected, and that escape hatch trivially passes
+// *anything* in a short-to-medium article (well under a few thousand
+// characters total, a completely ordinary article length), silently
+// disabling the whole guard exactly when it's needed. The actual
+// structural signal that generalizes: closest() finds the *nearest*
+// matching ancestor, so the only way that match still *contains other*
+// SECTION_SELECTOR elements is if the starting point is loose text
+// sitting outside all of them -- i.e. the match is a wrapper around
+// multiple real sections, not a section itself. No size numbers to
+// tune, and it's correct at every article length.
+function isReasonablyScoped(el: HTMLElement): boolean {
+  return el.querySelector(SECTION_SELECTOR) === null;
+}
+
+// Real extracted article HTML -- Wikipedia's infobox/taxonomy markup
+// especially -- routinely has real text sitting directly in a <div> or
+// other container closest() above doesn't match, with no <p>/<li> wrapper
+// at all. closest() finding nothing used to mean this simply returned
+// null, and the caller had nothing to fall back to -- confirmed by hand
+// this is why the section bar would intermittently vanish mid-read rather
+// than just moving less precisely: not a rare edge case, a real, common
+// shape of real content. Walking up to the nearest direct child of the
+// container itself as a last resort guarantees *some* element is always
+// picked, as long as the point is inside the container at all -- but
+// every candidate this function considers, on either path, has to clear
+// isReasonablyScoped before it's trusted: there's no meaningful
+// sub-section to point at when the "nearest" match is actually a
+// wrapper around several real sections, so no indicator is the honest
+// answer, not the whole page.
 function nearestSectionEl(node: Node, container: HTMLElement): HTMLElement | null {
   const el = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
   if (!el || el === container) return null;
   const specific = el.closest<HTMLElement>(SECTION_SELECTOR);
-  if (specific && specific !== container && container.contains(specific)) return specific;
+  if (specific && specific !== container && container.contains(specific)) {
+    return isReasonablyScoped(specific) ? specific : null;
+  }
   let current: HTMLElement | null = el;
   while (current && current.parentElement !== container) {
     current = current.parentElement;
   }
-  return current === container ? null : current;
+  if (!current || current === container) return null;
+  return isReasonablyScoped(current) ? current : null;
 }
 
 interface WordRect {
