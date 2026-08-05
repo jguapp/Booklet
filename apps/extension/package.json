@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node build.mjs",
     "dev": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
     "icons": "node icons/render.mjs",
     "test:e2e": "playwright test",
     "lint:firefox": "web-ext lint --source-dir=dist",
