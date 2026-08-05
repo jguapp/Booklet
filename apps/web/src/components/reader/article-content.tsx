@@ -6,6 +6,7 @@ import { computeTextPosition, highlightColorHex, isLegacyHighlightColor, resolve
 import {
   createOffsetPointFinder,
   plainTextOf,
+  rangeForTextOffsets,
   textOffsetsForRange,
   wrapRangeInElements,
 } from "@/lib/reader/dom-range";
@@ -33,6 +34,25 @@ function applyHighlightColor(el: HTMLElement, color: string): void {
   } else {
     el.style.backgroundColor = highlightColorHex(color);
   }
+}
+
+// Readwise-style "which paragraph is the TTS bot on" indicator -- a left
+// border on the nearest block ancestor, not the word-level highlight below
+// (that one moves several times a second; this one moves every few
+// seconds, one section at a time, and stays legible from a glance instead
+// of needing to track exact position).
+const SECTION_SELECTOR = "p, li, blockquote, h1, h2, h3, h4, h5, h6, figcaption, pre, td, dd, dt";
+
+function nearestSectionEl(node: Node): HTMLElement | null {
+  const el = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
+  return el?.closest<HTMLElement>(SECTION_SELECTOR) ?? null;
+}
+
+interface WordRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
 }
 
 const SIZE_STYLE: Record<ReaderSize, { fontSize: string; lineHeight: string }> = {
@@ -64,10 +84,17 @@ interface ArticleContentProps {
   onDeleteNote: (highlightId: string) => void;
   /** The exact text of the TTS chunk currently playing (see
    * tts-player-provider.tsx), or null when nothing's playing / a non-HTML
-   * reader has the article open. Read-along: highlighted and scrolled into
-   * view below, using the same offset-mapping primitives the real
-   * highlight-rendering pass above already relies on. */
+   * reader has the article open. Used to locate the chunk in the DOM once
+   * per chunk (scroll-into-view + the section left-bar), and as the
+   * coordinate space readingWordRange's offsets are relative to. */
   readingChunkText?: string | null;
+  /** Character offsets of the word currently being spoken, relative to the
+   * start of readingChunkText -- estimated, see tts-player-provider.tsx's
+   * playKokoro. Re-rendered several times a second while playing, so
+   * unlike readingChunkText this drives a read-only geometry overlay
+   * (Range#getClientRects(), below) rather than actually wrapping/
+   * unwrapping DOM nodes on every update. */
+  readingWordRange?: { start: number; end: number } | null;
 }
 
 export function ArticleContent({
@@ -79,10 +106,19 @@ export function ArticleContent({
   onSaveNote,
   onDeleteNote,
   readingChunkText = null,
+  readingWordRange = null,
 }: ArticleContentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [managing, setManaging] = useState<ManagingHighlight | null>(null);
+  const [wordRects, setWordRects] = useState<WordRect[]>([]);
+  // Set once per chunk (effect below) so the much-more-frequent word-level
+  // effect can translate readingWordRange's chunk-relative offsets into
+  // real fullText offsets in O(1), instead of re-running the whitespace-
+  // normalized search (a full pass over the article's text) on every word.
+  const chunkOffsetMapRef = useRef<{ map: number[]; normalizedChunkStart: number } | null>(null);
+  const activeSectionElRef = useRef<HTMLElement | null>(null);
 
   // Re-apply highlight marks whenever the highlight list or underlying html changes.
   // This is the same resolveTextPosition() from packages/shared, so
@@ -168,22 +204,24 @@ export function ArticleContent({
     }
   }, [highlights, html]);
 
-  // Read-along: a separate effect from the highlight-marks pass above --
-  // this fires far more often (every TTS chunk, every few seconds) and
-  // has nothing to do with the highlight list, so tying it to that effect
-  // would mean needlessly re-resolving every real highlight's position on
-  // every single sentence read aloud.
+  // Read-along, chunk-level: a separate effect from the highlight-marks
+  // pass above -- this fires far more often (every TTS chunk, every few
+  // seconds) and has nothing to do with the highlight list, so tying it to
+  // that effect would mean needlessly re-resolving every real highlight's
+  // position on every single sentence read aloud. Only locates the chunk
+  // and moves the section left-bar + scroll -- word-level highlighting
+  // itself is the effect below, since it needs to run much more often than
+  // this one does and shouldn't pay this effect's whole-document search
+  // cost every time.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    container.querySelectorAll("[data-reading-position]").forEach((el) => {
-      const parent = el.parentNode;
-      if (!parent) return;
-      while (el.firstChild) parent.insertBefore(el.firstChild, el);
-      parent.removeChild(el);
-      parent.normalize();
-    });
+    if (activeSectionElRef.current) {
+      activeSectionElRef.current.classList.remove("reading-section-active");
+      activeSectionElRef.current = null;
+    }
+    chunkOffsetMapRef.current = null;
 
     if (!readingChunkText) return;
 
@@ -199,7 +237,11 @@ export function ArticleContent({
     // words match. Searching in a whitespace-normalized copy of both
     // strings and mapping the found offset back to the real string's
     // offsets (via `map`, built alongside the normalization) fixes that
-    // without needing to touch the DOM text itself.
+    // without needing to touch the DOM text itself -- and doubles as the
+    // word-level effect's own O(1) offset translation (readingWordRange's
+    // offsets are relative to readingChunkText, which is itself already
+    // whitespace-normalized by the chunker, i.e. the same coordinate space
+    // as `normalized` here).
     let normalized = "";
     const map: number[] = []; // map[i] = fullText's real offset of normalized[i]
     let lastWasSpace = true; // treat leading whitespace as already "collapsed"
@@ -227,25 +269,66 @@ export function ArticleContent({
     const normalizedEnd = normalizedStart + normalizedChunk.length;
     const end = normalizedEnd < map.length ? map[normalizedEnd] : fullText.length;
 
+    chunkOffsetMapRef.current = { map, normalizedChunkStart: normalizedStart };
+
     const pointFor = createOffsetPointFinder(container);
     const startPoint = pointFor(start);
     const endPoint = pointFor(end);
     if (!startPoint || !endPoint) return;
 
-    const range = document.createRange();
-    range.setStart(startPoint.node, startPoint.offset);
-    range.setEnd(endPoint.node, endPoint.offset);
-
-    const marks = wrapRangeInElements(container, range, () => {
-      const mark = document.createElement("mark");
-      mark.dataset.readingPosition = "true";
-      mark.className = "reading-position rounded-[3px] text-inherit";
-      (mark.style as CSSStyleDeclaration & { boxDecorationBreak?: string }).boxDecorationBreak = "clone";
-      mark.style.setProperty("-webkit-box-decoration-break", "clone");
-      return mark;
-    });
-    marks[0]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const sectionEl = nearestSectionEl(startPoint.node);
+    if (sectionEl) {
+      sectionEl.classList.add("reading-section-active");
+      activeSectionElRef.current = sectionEl;
+      sectionEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
   }, [readingChunkText]);
+
+  // Read-along, word-level: fires several times a second while playing
+  // (driven by the audio element's own timeupdate, see
+  // tts-player-provider.tsx), so unlike the chunk-level effect above this
+  // never touches the DOM's actual text nodes -- wrapping/unwrapping a
+  // <mark> that often risks fighting itself (removing the previous word's
+  // wrapper calls Node#normalize(), which can merge/detach text nodes a
+  // fresh lookup then can't find). Range#getClientRects() is read-only:
+  // it's used purely to compute where to draw a separate, absolutely-
+  // positioned overlay box, never to mutate the article's own markup.
+  useEffect(() => {
+    const container = containerRef.current;
+    const wrapper = wrapperRef.current;
+    const chunkInfo = chunkOffsetMapRef.current;
+    if (!container || !wrapper || !chunkInfo || !readingWordRange) {
+      setWordRects([]);
+      return;
+    }
+
+    const { map, normalizedChunkStart } = chunkInfo;
+    const normalizedStart = normalizedChunkStart + readingWordRange.start;
+    const normalizedEnd = normalizedChunkStart + readingWordRange.end;
+    if (normalizedStart < 0 || normalizedStart >= map.length) {
+      setWordRects([]);
+      return;
+    }
+    const realStart = map[normalizedStart];
+    const realEnd = normalizedEnd < map.length ? map[normalizedEnd] : (map[map.length - 1] ?? realStart) + 1;
+
+    const range = rangeForTextOffsets(container, realStart, realEnd);
+    if (!range) {
+      setWordRects([]);
+      return;
+    }
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const rects = Array.from(range.getClientRects())
+      .filter((r) => r.width > 0 && r.height > 0)
+      .map((r) => ({
+        top: r.top - wrapperRect.top,
+        left: r.left - wrapperRect.left,
+        width: r.width,
+        height: r.height,
+      }));
+    setWordRects(rects);
+  }, [readingWordRange]);
 
   function handleMouseUp() {
     const selection = window.getSelection();
@@ -295,7 +378,7 @@ export function ArticleContent({
   const dangerousHtml = useMemo(() => ({ __html: html }), [html]);
 
   return (
-    <div className="relative">
+    <div ref={wrapperRef} className="relative">
       <div
         ref={containerRef}
         data-article-content
@@ -305,6 +388,18 @@ export function ArticleContent({
         style={{ fontSize, lineHeight }}
         dangerouslySetInnerHTML={dangerousHtml}
       />
+      {/* Read-along word cursor -- a read-only overlay (see the word-level
+          effect above for why this doesn't wrap the text itself), not part
+          of the reading flow, so it's inert to selection/clicks. */}
+      {wordRects.map((r, i) => (
+        <div
+          key={i}
+          data-reading-word
+          aria-hidden="true"
+          className="reading-word pointer-events-none absolute rounded-[3px]"
+          style={{ top: r.top, left: r.left, width: r.width, height: r.height }}
+        />
+      ))}
       {pending && (
         <HighlightPopover
           anchorRect={pending.rect}
