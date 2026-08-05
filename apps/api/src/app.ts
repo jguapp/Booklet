@@ -17,6 +17,7 @@ import { registerFeedRoutes } from "./routes/feeds.js";
 import { registerApiTokenRoutes } from "./routes/api-tokens.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerV1Routes } from "./routes/v1.js";
+import { registerTtsRoute } from "./routes/tts.js";
 import { captureException, initErrorMonitoring } from "./lib/error-monitoring.js";
 
 /**
@@ -107,6 +108,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerApiTokenRoutes(app);
   await registerWebhookRoutes(app);
   await registerV1Routes(app);
+  await registerTtsRoute(app);
 
   return app;
 }

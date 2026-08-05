@@ -153,8 +153,8 @@ export default function ReadingSettingsPage() {
             Read-aloud voice
           </h3>
           <p className="font-sans text-xs text-ink-faint">
-            Kokoro voices are open-source and run entirely on this device (no account, no per-use cost) --
-            the first play downloads the voice model once (about 90MB), then it&rsquo;s cached for next time.
+            Kokoro voices are open-source and generated on save -- no account needed, but each one needs a
+            moment of real generation time and an internet connection, unlike the system voice below.
           </p>
           <select
             aria-label="Read-aloud voice"

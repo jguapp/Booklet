@@ -176,3 +176,25 @@ body {
 ::selection {
   background: var(--color-highlight-yellow);
 }
+
+/* Read-along: the TTS chunk currently playing (article-content.tsx). Reuses
+   --color-accent (already theme-aware, already means "the app is drawing
+   your attention to this" everywhere else -- active nav items, focus rings)
+   at low opacity rather than introducing a dedicated highlight color that'd
+   need its own light/dark/sepia/Kindle variants. A soft pulse, not a static
+   block, since this one moves every few seconds as playback advances --
+   a hard cut is easy to lose track of; motion draws the eye to where it
+   just landed. */
+.reading-position {
+  background-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  animation: reading-position-pulse 1.6s ease-out 1;
+}
+
+@keyframes reading-position-pulse {
+  0% {
+    background-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  }
+  100% {
+    background-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  }
+}
