@@ -24,6 +24,12 @@ interface TtsPlayerContextValue {
   currentChunkText: string | null;
   currentChunkIndex: number;
   totalChunks: number;
+  /** Character offsets of the word currently being spoken, relative to the
+   * start of currentChunkText -- estimated from audio playback position
+   * (Kokoro doesn't emit real per-word timestamps), see playKokoro's own
+   * comment. null whenever currentChunkText is, plus briefly at the very
+   * start of each chunk before the first timeupdate fires. */
+  currentWordRange: { start: number; end: number } | null;
   play: (articleId: string, articleTitle: string, text: string) => void;
   pause: () => void;
   resume: () => void;
@@ -31,6 +37,18 @@ interface TtsPlayerContextValue {
 }
 
 const TtsPlayerContext = createContext<TtsPlayerContextValue | null>(null);
+
+/** Non-whitespace runs in `text`, as character-offset spans -- the units
+ * playKokoro's timing estimate assigns playback time to. */
+function wordSpansOf(text: string): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = [];
+  const re = /\S+/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    spans.push({ start: match.index, end: match.index + match[0].length });
+  }
+  return spans;
+}
 
 /**
  * Global, app-shell-level TTS playback -- mounted once in the root layout
@@ -58,6 +76,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   const [currentChunkText, setCurrentChunkText] = useState<string | null>(null);
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [totalChunks, setTotalChunks] = useState(0);
+  const [currentWordRange, setCurrentWordRange] = useState<{ start: number; end: number } | null>(null);
 
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
@@ -116,6 +135,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
     setCurrentChunkText(null);
     setCurrentChunkIndex(0);
     setTotalChunks(0);
+    setCurrentWordRange(null);
   }, [supported, revokeObjectUrl]);
 
   const playNative = useCallback((text: string) => {
@@ -143,33 +163,44 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       const chunks = toSafeTextChunks(text);
       setTotalChunks(chunks.length);
 
-      // Fetch-ahead pipelining: chunk i+1's request is already in flight by
-      // the time chunk i starts playing, so by the time chunk i's playback
-      // finishes, chunk i+1 is usually already sitting ready. A plain
-      // network request, not a Worker -- see the module doc comment for
-      // why that's enough this time.
-      let nextChunkPromise = chunks.length > 0 ? generateKokoroChunk(chunks[0], readerRef.current.ttsVoice, readerRef.current.ttsRate) : null;
+      // Sliding-window prefetch, not just one chunk ahead: the server runs
+      // a small pool of real concurrent generation processes now (see
+      // apps/api's tts-pool.ts), so keeping several requests in flight at
+      // once is what actually uses that concurrency -- one-ahead prefetch
+      // just meant this client was never the bottleneck, but a *single*
+      // server process still was. PREFETCH_DEPTH matches the pool's own
+      // default size (3) so the window keeps every worker busy without
+      // queuing more than the server can actually run at once.
+      const PREFETCH_DEPTH = 3;
+      const inFlight = new Map<number, Promise<Blob>>();
+      const ensurePrefetched = (uptoIndexInclusive: number) => {
+        for (let i = 0; i <= uptoIndexInclusive && i < chunks.length; i++) {
+          if (!inFlight.has(i)) {
+            inFlight.set(i, generateKokoroChunk(chunks[i], readerRef.current.ttsVoice, readerRef.current.ttsRate));
+          }
+        }
+      };
 
       let firstChunkStarted = false;
       try {
         for (let i = 0; i < chunks.length; i++) {
           if (generationRef.current !== myGeneration) return;
-          if (!nextChunkPromise) break;
+          ensurePrefetched(i + PREFETCH_DEPTH - 1);
 
           let blob: Blob;
           try {
-            blob = await nextChunkPromise;
+            blob = await inFlight.get(i)!;
           } catch {
             if (generationRef.current === myGeneration) setStatus("idle");
             return;
           }
+          inFlight.delete(i);
           if (generationRef.current !== myGeneration) return;
 
-          nextChunkPromise =
-            i + 1 < chunks.length ? generateKokoroChunk(chunks[i + 1], readerRef.current.ttsVoice, readerRef.current.ttsRate) : null;
-
-          setCurrentChunkText(chunks[i]);
+          const chunkText = chunks[i];
+          setCurrentChunkText(chunkText);
           setCurrentChunkIndex(i);
+          setCurrentWordRange(null);
 
           const url = URL.createObjectURL(blob);
           revokeObjectUrl();
@@ -178,6 +209,26 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
           const audioEl = new Audio(url);
           audioEl.volume = readerRef.current.ttsVolume;
           audioElRef.current = audioEl;
+
+          // Word-level read-along: Kokoro doesn't emit real per-word
+          // timestamps, so this estimates each word's on-screen moment by
+          // treating its share of the chunk's own character length as its
+          // share of the chunk's playback duration -- not exact (real
+          // speech doesn't pace perfectly evenly), but close enough to
+          // track along by by eye, and it needs zero extra data from the
+          // server. Using the *full* chunk length as the denominator
+          // (not just the words' own lengths) naturally leaves the
+          // in-between-word gaps their proportional share of time too,
+          // instead of words running together back-to-back.
+          const wordSpans = wordSpansOf(chunkText);
+          const handleTimeUpdate = () => {
+            const duration = audioEl.duration;
+            if (!duration || !Number.isFinite(duration) || wordSpans.length === 0) return;
+            const charPos = (audioEl.currentTime / duration) * chunkText.length;
+            const word = wordSpans.find((w) => charPos >= w.start && charPos < w.end) ?? wordSpans[wordSpans.length - 1];
+            setCurrentWordRange(word);
+          };
+          audioEl.addEventListener("timeupdate", handleTimeUpdate);
 
           await new Promise<void>((resolve) => {
             resolveCurrentChunkRef.current = resolve;
@@ -192,6 +243,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
               })
               .catch(() => resolve());
           });
+          audioEl.removeEventListener("timeupdate", handleTimeUpdate);
           resolveCurrentChunkRef.current = null;
 
           if (generationRef.current !== myGeneration) return;
@@ -202,6 +254,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
           setArticleId(null);
           setArticleTitle(null);
           setCurrentChunkText(null);
+          setCurrentWordRange(null);
         }
       }
     },
@@ -253,6 +306,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
         currentChunkText,
         currentChunkIndex,
         totalChunks,
+        currentWordRange,
         play,
         pause,
         resume,

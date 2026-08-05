@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { KOKORO_VOICE_IDS } from "@booklet/shared";
-import { generateSpeech, TtsGenerationError } from "../services/tts-service.js";
+import { generateSpeechPooled } from "../services/tts-pool.js";
 
 /**
  * Public (no auth) -- same reasoning as /api/extract: TTS doesn't persist
@@ -49,10 +49,10 @@ export async function registerTtsRoute(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const wav = await generateSpeech(text, voice, speed);
+      const wav = await generateSpeechPooled(text, voice, speed);
       return reply.header("Cache-Control", "no-store").type("audio/wav").send(wav);
     } catch (err) {
-      const message = err instanceof TtsGenerationError ? err.message : "Speech generation failed.";
+      const message = err instanceof Error ? err.message : "Speech generation failed.";
       return reply.code(500).send({ error: "generation_failed", message });
     }
   });

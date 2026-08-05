@@ -602,6 +602,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
             onSaveNote={handleSaveNote}
             onDeleteNote={handleDeleteNote}
             readingChunkText={ttsIsThisArticle && !usesPdfReader && !usesEpubReader ? ttsPlayer.currentChunkText : null}
+            readingWordRange={ttsIsThisArticle && !usesPdfReader && !usesEpubReader ? ttsPlayer.currentWordRange : null}
           />
         ) : article.sourceType === "BOOK" ? (
           // No url, no uploaded file -- a Kindle-imported book has nothing
