@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pickBestVoice } from "./tts-voice";
-import { isKokoroVoice, loadKokoro, toSafeTextStream, type KokoroVoiceId } from "./kokoro-tts";
+import { isKokoroVoice, loadKokoro, streamKokoro, type KokoroVoiceId } from "./kokoro-tts";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 
 export type TtsStatus = "idle" | "loading" | "playing" | "paused";
@@ -21,13 +21,13 @@ interface UseTextToSpeechResult {
  * (zero cost, zero setup, works offline, but voice quality is whatever's
  * installed on the OS) and Kokoro (kokoro-tts.ts -- also zero cost, but a
  * genuinely natural-sounding open-source model running client-side via
- * WASM/WebGPU). Which one plays is decided per-call by `reader.ttsVoice`
- * (device-prefs.ts), not baked into the hook -- so switching voices in
- * Settings takes effect on the next play() with no reader-view.tsx changes
- * needed. `text` is read fresh from the start whenever play() is called;
- * changing `text` while already playing (e.g. the reader turned a page)
- * stops the current playback rather than trying to splice speech mid-
- * sentence.
+ * WASM, in a dedicated Worker). Which one plays is decided per-call by
+ * `reader.ttsVoice` (device-prefs.ts), not baked into the hook -- so
+ * switching voices in Settings takes effect on the next play() with no
+ * reader-view.tsx changes needed. `text` is read fresh from the start
+ * whenever play() is called; changing `text` while already playing (e.g.
+ * the reader turned a page) stops the current playback rather than trying
+ * to splice speech mid-sentence.
  */
 export function useTextToSpeech(text: string): UseTextToSpeechResult {
   const [status, setStatus] = useState<TtsStatus>("idle");
@@ -94,30 +94,31 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
     setStatus("playing");
   }, [text, reader.ttsRate]);
 
-  // Generates and plays one sentence-grouped chunk at a time (kokoro-js's
-  // own tts.stream(), not a hand-rolled splitter) -- a whole multi-thousand-
-  // word article in one generate() call would be slow to start and memory-
-  // heavy client-side. Each chunk is generated only once the previous one
-  // has finished playing -- NOT pipelined ahead of playback, despite that
-  // sounding like a free win: confirmed by hand that it isn't. kokoro-js's
-  // WASM inference runs on the main thread (no Worker), and a monolithic
-  // WASM forward-pass call doesn't yield back to the event loop
-  // cooperatively while it runs -- so kicking off the next chunk's
-  // generation before the current chunk's audioEl.play() has actually
-  // started blocks that same main thread the audio element needs to fire
-  // its own play()/'canplay' events on. In testing this didn't shrink the
-  // gap, it starved playback of the first chunk entirely (the "playing"
-  // status never appeared within a 150s test timeout). A real fix would
-  // need generation moved to a Worker (raw PCM handed back to the main
-  // thread for playback, not a WASM call sharing the UI thread) -- out of
-  // scope for this pass.
+  // Generates and plays one sentence-grouped chunk at a time. Generation
+  // now runs in a Worker (kokoro.worker.ts) on its own thread, genuinely
+  // concurrently with playback here -- streamKokoro() buffers chunks as
+  // the worker produces them, so by the time one chunk finishes playing,
+  // the next is usually already sitting ready instead of only starting to
+  // generate at that point. This shrinks the gap between chunks; it does
+  // NOT shrink each chunk's own generation time (12-18s, confirmed to be
+  // this model's real per-chunk WASM inference cost, unaffected by
+  // threading -- see kokoro-tts.ts), so a chunk whose generation takes
+  // longer than the previous chunk's playback still leaves some wait.
+  //
+  // An earlier attempt pipelined generation ahead of playback on the MAIN
+  // thread instead (no Worker) and made things worse: a monolithic WASM
+  // forward-pass call doesn't yield back to the event loop while it runs,
+  // so starting the next chunk's generation before the current chunk's
+  // audioEl.play() had actually started starved that playback of the
+  // thread it needed entirely (confirmed: "playing" never appeared within
+  // a 150s test budget). Moving generation to a Worker is what actually
+  // fixes that -- genuinely separate threads, not just reordered awaits.
   const playKokoro = useCallback(async () => {
     const myGeneration = ++generationRef.current;
     setStatus("loading");
 
-    let tts;
     try {
-      tts = await loadKokoro();
+      await loadKokoro();
     } catch {
       if (generationRef.current === myGeneration) setStatus("idle");
       return;
@@ -137,10 +138,10 @@ export function useTextToSpeech(text: string): UseTextToSpeechResult {
       // already ruled out NATIVE_VOICE_ID -- kokoro-js just doesn't export
       // that exact literal union for callers to type against directly.
       const voice = reader.ttsVoice as KokoroVoiceId;
-      for await (const { audio } of tts.stream(toSafeTextStream(text), { voice, speed: reader.ttsRate })) {
+      for await (const blob of streamKokoro(text, { voice, speed: reader.ttsRate })) {
         if (generationRef.current !== myGeneration) return; // stopped mid-stream
 
-        const url = URL.createObjectURL(audio.toBlob());
+        const url = URL.createObjectURL(blob);
         revokeObjectUrl();
         objectUrlRef.current = url;
 
