@@ -45,7 +45,21 @@ export function generateKokoroChunk(text: string, voice: string, speed: number):
 // tts-player-provider.tsx), that saving matters far less than a fast
 // start does -- especially since the user has to wait for chunk one
 // specifically before hearing anything at all.
-const MAX_CHUNK_CHARS = 200;
+//
+// Also caps how bad a *later* pause can get: the server's worker pool
+// (tts-pool.ts) only runs a few real concurrent generation processes, so a
+// chunk can't start generating until one of them actually frees up --
+// prefetching earlier reserves a queue slot sooner but can't make a busy
+// worker finish faster. Measured by hand: a short run of quick sentences
+// (little playback time to hide behind) followed immediately by a chunk
+// sitting at this cap took noticeably longer to generate than the short
+// ones took to *play*, producing a real, audible pause even with prefetch
+// working correctly. Was 200; lowered to 140 specifically to shrink that
+// worst case -- a smaller cap can't make the mismatch impossible (a run of
+// very short chunks can still outpace it), but it directly bounds how long
+// any single chunk is allowed to take, at the cost of somewhat more total
+// requests for the same amount of text.
+const MAX_CHUNK_CHARS = 140;
 
 // The very first chunk gets a smaller cap than the rest -- generation time
 // scales with chunk length, and the first chunk's generation time IS
