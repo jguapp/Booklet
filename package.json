@@ -6,6 +6,12 @@
     "dev:db": "pnpm --filter @booklet/api dev:db",
     "dev:api": "pnpm --filter @booklet/api dev",
     "dev:web": "pnpm --filter @booklet/web dev",
-    "build": "pnpm --filter @booklet/shared build && pnpm --filter @booklet/api build && pnpm --filter @booklet/web build"
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.10.8"
   }
 }

@@ -4,6 +4,7 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "start": "cross-env EXPO_OFFLINE=1 expo start",
     "web": "cross-env EXPO_OFFLINE=1 expo start --web",
     "android": "cross-env EXPO_OFFLINE=1 expo start --android",
