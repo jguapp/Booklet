@@ -19,6 +19,7 @@ import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerV1Routes } from "./routes/v1.js";
 import { registerTtsRoute } from "./routes/tts.js";
 import { captureException, initErrorMonitoring } from "./lib/error-monitoring.js";
+import { isAllowedOrigin } from "./lib/cors.js";
 
 /**
  * Builds a fully-configured Fastify instance without binding a port -- the
@@ -41,8 +42,6 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
   });
 
-  const isDev = process.env.NODE_ENV !== "production";
-
   // Next.js picks the next free port (3001, 3002, ...) when 3000 is taken, so a
   // fixed origin string is brittle in dev. Any localhost port is fine locally;
   // production still pins to the one configured WEB_ORIGIN. `credentials: true`
@@ -53,14 +52,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   // both, and neither origin scheme is an http(s) URL CORS can pin the way
   // WEB_ORIGIN pins the web app; the actual security boundary is the auth
   // token/session, same as the localhost-any-port allowance below already
-  // relies on.
+  // relies on. isAllowedOrigin lives in lib/cors.ts, not inline here, since
+  // articles.ts's /file route needs the exact same logic (see its own
+  // comment for why).
   await app.register(cors, {
     origin: (origin, callback) => {
       if (!origin) return callback(null, true); // same-origin / non-browser requests (e.g. curl)
-      if (/^(chrome|moz)-extension:\/\//.test(origin)) return callback(null, true);
-      if (isDev && /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return callback(null, true);
-      if (!isDev && process.env.WEB_ORIGIN && origin === process.env.WEB_ORIGIN) return callback(null, true);
-      callback(null, false);
+      callback(null, isAllowedOrigin(origin));
     },
     // Default (this @fastify/cors version) preflight-allows only GET/HEAD/
     // POST -- silently breaking every authenticated PATCH/PUT/DELETE
