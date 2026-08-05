@@ -4,9 +4,11 @@
  * means replacing this module's three functions, not any of their callers.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ReadStream } from "node:fs";
 
 const STORAGE_ROOT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,8 +34,15 @@ export async function saveFile(userId: string, originalFilename: string, data: B
   return storageKey;
 }
 
-export async function readStoredFile(storageKey: string): Promise<Buffer> {
-  return readFile(keyToPath(storageKey));
+/** A live read stream, not a fully-buffered read -- for a large upload (a
+ * scanned book can easily be tens of MB), reading the whole thing into one
+ * Buffer first holds the *entire* file in memory before the route sends a
+ * single byte back, meaning the client's download can't even start until
+ * disk I/O for the whole file finishes server-side. Streaming instead lets
+ * bytes start reaching the client (and, for a PDF being opened via pdf.js,
+ * start being parsed) as soon as they're off disk, not after. */
+export function streamStoredFile(storageKey: string): ReadStream {
+  return createReadStream(keyToPath(storageKey));
 }
 
 export async function deleteStoredFile(storageKey: string): Promise<void> {

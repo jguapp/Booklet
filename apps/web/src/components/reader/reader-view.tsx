@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Article, ArticleStatus, Highlight, HighlightColor, HighlightPosition } from "@booklet/shared";
 import { computeRelatedArticles } from "@booklet/shared";
@@ -24,8 +25,23 @@ import { ReaderToolbar } from "./reader-toolbar";
 import { ReaderProgressBar } from "./reader-progress-bar";
 import { NotebookPanel } from "./notebook-panel";
 import { ArticleContent } from "./article-content";
-import { PdfReader } from "./pdf-reader";
-import { EpubReader } from "./epub-reader";
+
+// pdf.js and epub.js are both real weight (canvas rendering, a full zip/
+// EPUB parser) that only the minority of reader views opening a PDF/EPUB
+// ever need -- a plain static import bundled both into every reader page
+// load regardless of sourceType, including the common HTML-article case
+// that never touches either. next/dynamic + ssr:false (both rely on
+// browser-only APIs -- Canvas, DOM -- so there's no server-rendered
+// version to lose) defers actually loading each one's JS until a reader
+// of that specific kind is about to mount.
+const PdfReader = dynamic(() => import("./pdf-reader").then((m) => m.PdfReader), {
+  ssr: false,
+  loading: () => <p className="py-8 text-center font-sans text-sm text-ink-faint">Loading PDF…</p>,
+});
+const EpubReader = dynamic(() => import("./epub-reader").then((m) => m.EpubReader), {
+  ssr: false,
+  loading: () => <p className="py-8 text-center font-sans text-sm text-ink-faint">Loading EPUB…</p>,
+});
 import { TtsControls } from "./tts-controls";
 import { useTtsPlayer } from "@/lib/reader/tts-player-provider";
 import { TagEditor } from "@/components/library/tag-editor";
@@ -117,28 +133,53 @@ export function ReaderView({ articleId }: { articleId: string }) {
   // doc-loading effect (keyed on `fileBlob`), which resets back to page 1 /
   // the first location. loadedFileKeyRef skips the refetch (and the
   // resulting reset) unless the file identity actually changed.
+  // Keyed on articleId (a prop, known synchronously from the route) and
+  // isAuthenticated -- deliberately *not* on the `article` metadata object,
+  // even though this file only actually matters for a PDF/EPUB article.
+  // Waiting for metadata to resolve first before even starting the file
+  // request turned "open a PDF" into a real waterfall: fetch metadata,
+  // wait for that round trip, *then* start fetching the (often much
+  // bigger) file -- a full extra RTT of dead time before a large file even
+  // starts downloading, on top of its own transfer time. Firing both
+  // requests together instead means the file is already partway
+  // downloaded (or done, for a small one) by the time metadata confirms
+  // this is even a PDF/EPUB. The cost: every *non*-PDF/EPUB article now
+  // also fires one throwaway request here -- cheap and harmless, since the
+  // server 404s it off a plain existence check with no file I/O (see
+  // articles.ts's /file route), and isFileLoadPending/usesPdfReader below
+  // are already gated on article.sourceType, so a "failed" status from
+  // that 404 never surfaces as a PDF/EPUB load error for an HTML article.
   const loadedFileKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    let cancelled = false;
     let objectUrl: string | null = null;
 
     async function loadFile() {
-      if (!article || (article.sourceType !== "PDF" && article.sourceType !== "EPUB")) {
-        loadedFileKeyRef.current = null;
-        if (!cancelled) {
-          setFileBlob(null);
-          setFileLoadStatus("idle");
-          setDownloadUrl(null);
-        }
-        return;
-      }
-      const key = `${article.id}:${article.sourceType}:${isAuthenticated}`;
+      const key = `${articleId}:${isAuthenticated}`;
       if (key === loadedFileKeyRef.current) return;
       loadedFileKeyRef.current = key;
       setFileLoadStatus("loading");
-      const blob = await loadArticleFile(article.id, isAuthenticated).catch(() => null);
-      if (cancelled) return;
+      const blob = await loadArticleFile(articleId, isAuthenticated).catch(() => null);
+      // Checked against the ref, not a boolean flipped by this closure's
+      // own cleanup -- isAuthenticated can genuinely settle through more
+      // than one value right after sign-up/sign-in, which re-runs this
+      // effect more than once even though it lands back on the same real
+      // key. A plain "cancelled on any re-run" flag discarded an
+      // already-successful fetch on that second, same-key run with
+      // nothing left to replace it -- confirmed by hand this is exactly
+      // what got a freshly-opened PDF/EPUB stuck on "loading the original
+      // file..." forever, with the file already sitting in the browser's
+      // memory the whole time. Comparing against the ref instead only
+      // discards a result once something *actually newer* (a real
+      // articleId/isAuthenticated change) has superseded it.
+      if (loadedFileKeyRef.current !== key) return;
       if (!blob) {
+        // Also clears any previous article's blob -- SPA navigation
+        // between two reader pages reuses this same component instance
+        // (see the file header comment), so without this a PDF's blob
+        // would otherwise linger in state after navigating to an HTML
+        // article that has no file of its own.
+        setFileBlob(null);
+        setDownloadUrl(null);
         setFileLoadStatus("failed");
         return;
       }
@@ -150,10 +191,9 @@ export function ReaderView({ articleId }: { articleId: string }) {
 
     loadFile();
     return () => {
-      cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [article, isAuthenticated]);
+  }, [articleId, isAuthenticated]);
 
   // latestProgressRef is the single feed for all three reader kinds (HTML
   // scroll fraction, PDF page/numPages, EPUB book.locations percentage) --

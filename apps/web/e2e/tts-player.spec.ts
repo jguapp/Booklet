@@ -47,7 +47,9 @@ test("selecting a Kokoro voice and pressing play actually generates and plays re
   const playerBar = page.getByRole("region", { name: "Read-aloud player" });
   await expect(playerBar).toBeVisible();
   await expect(playerBar).toContainText("Dog");
-  await expect(playerBar).toContainText(/Sentence \d+ of \d+/);
+  // Spotify-style progress bar, not "Sentence X of Y" text -- see
+  // tts-player-bar.tsx's own comment on the progressbar's data-* attrs.
+  await expect(page.getByRole("progressbar", { name: "Reading progress" })).toBeVisible();
 
   // Read-along: the word currently being spoken should be highlighted in
   // the actual rendered article -- a positioned overlay (article-content.tsx's
@@ -119,10 +121,13 @@ test("a real, full-length article with dense infobox/citation content doesn't bl
   await expect(page.getByTitle("Pause reading aloud")).toBeVisible({ timeout: 60_000 });
 
   const playerBar = page.getByRole("region", { name: "Read-aloud player" });
-  const barText = await playerBar.textContent();
-  const match = barText?.match(/Sentence \d+ of (\d+)/);
-  expect(match).not.toBeNull();
-  const totalChunks = Number(match?.[1]);
+  // "Sentence X of Y" text was replaced by a visual progress bar (see
+  // tts-player-bar.tsx) -- the chunk count itself still lives in a data-*
+  // attribute on that same element specifically so this regression guard
+  // doesn't need visible text back just to stay testable.
+  const totalChunksAttr = await page.getByRole("progressbar", { name: "Reading progress" }).getAttribute("data-total-chunks");
+  expect(totalChunksAttr).not.toBeNull();
+  const totalChunks = Number(totalChunksAttr);
   // A real, heavily-cited Wikipedia article legitimately has a few hundred
   // sentence-sized chunks -- the regression this guards against was
   // thousands, from one-character fragments never getting grouped at all.

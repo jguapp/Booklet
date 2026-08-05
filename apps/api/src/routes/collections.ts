@@ -169,7 +169,12 @@ export async function registerCollectionRoutes(app: FastifyInstance): Promise<vo
       if (!collection) return reply.code(404).send({ error: "not_found", message: "Collection not found." });
 
       if (collection.filter) {
+        // toArticleSummary strips extractedHtml/extractedText from every
+        // result anyway (see its own comment in articles.ts) -- omitting
+        // them here means Postgres never sends them for a match in the
+        // first place.
         const articles = await prisma.article.findMany({
+          omit: { extractedHtml: true, extractedText: true },
           where: filterToArticleWhere(request.userId!, collection.filter as CollectionFilter),
           orderBy: [{ savedAt: "desc" }, { id: "desc" }],
         });
@@ -178,7 +183,7 @@ export async function registerCollectionRoutes(app: FastifyInstance): Promise<vo
 
       const links = await prisma.articleCollection.findMany({
         where: { collectionId: collection.id },
-        include: { article: true },
+        include: { article: { omit: { extractedHtml: true, extractedText: true } } },
         orderBy: { addedAt: "desc" },
       });
       return reply.send(links.map((l) => toArticleSummary(l.article)));
