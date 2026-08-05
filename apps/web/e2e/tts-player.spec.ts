@@ -49,9 +49,18 @@ test("selecting a Kokoro voice and pressing play actually generates and plays re
   await expect(playerBar).toContainText("Dog");
   await expect(playerBar).toContainText(/Sentence \d+ of \d+/);
 
-  // Read-along: the currently-playing chunk should be highlighted in the
-  // actual rendered article (article-content.tsx's reading-position marks).
-  await expect(page.locator("mark[data-reading-position]").first()).toBeVisible();
+  // Read-along: the word currently being spoken should be highlighted in
+  // the actual rendered article -- a positioned overlay (article-content.tsx's
+  // reading-word divs), not a wrapped <mark>, see that file's own comment
+  // for why (it updates several times a second, driven by audio playback
+  // position, so it can't risk repeatedly mutating the article's own DOM
+  // text nodes the way the old sentence-level highlight did).
+  await expect(page.locator("[data-reading-word]").first()).toBeVisible({ timeout: 15_000 });
+
+  // Readwise-style: a left-edge bar on whichever paragraph the TTS bot is
+  // currently on (article-content.tsx's nearestSectionEl), a coarser,
+  // steadier anchor than the word cursor above.
+  await expect(page.locator(".reading-section-active").first()).toBeVisible();
 
   // The player must survive real (SPA) navigation away from the article --
   // the entire point of it living in the root layout instead of the reader

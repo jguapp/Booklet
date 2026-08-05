@@ -26,14 +26,27 @@ const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url),
 // inlined, not externalized.
 const external = Object.keys(pkg.dependencies ?? {}).filter((name) => name !== "@booklet/shared");
 
-await build({
-  entryPoints: ["src/index.ts"],
+const shared = {
   bundle: true,
   platform: "node",
   format: "esm",
   target: "node20",
-  outfile: "dist/index.js",
   external,
   sourcemap: true,
   logLevel: "info",
+};
+
+await build({ ...shared, entryPoints: ["src/index.ts"], outfile: "dist/index.js" });
+
+// A second, standalone bundle -- tts-pool.ts forks this as its own OS
+// process (see that file's own comment for why: a worker_thread crashes
+// on onnxruntime-node's native binding). Deliberately built as its own
+// entry point rather than left for index.ts's bundle to inline, and
+// deliberately placed flat in dist/ (not nested under dist/services/) so
+// tts-pool.ts can point at it with the same path expression in both dev
+// (forks the TS source directly via tsx) and here.
+await build({
+  ...shared,
+  entryPoints: ["src/services/tts-worker-process.ts"],
+  outfile: "dist/tts-worker-process.js",
 });

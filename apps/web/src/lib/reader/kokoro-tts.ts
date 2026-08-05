@@ -62,7 +62,20 @@ const MAX_CHUNK_CHARS = 200;
 // into normally-sized chunks instead of each paying its own request.
 export function toSafeTextChunks(text: string): string[] {
   const chunks: string[] = [];
-  const sentences = text.replace(/\n+/g, " ").match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) ?? [text];
+  // Collapses *every* whitespace run (not just newlines) before splitting
+  // into sentences -- article-content.tsx's read-along re-derives this
+  // same "\s+ -> single space" normalization independently when locating a
+  // chunk in the DOM (see its own comment), on the assumption that doing
+  // so to an already-emitted chunk is a no-op. It wasn't always: a chunk
+  // built from source text with a stray multi-space or tab run (common in
+  // real extracted infobox/table content) kept that run verbatim, so
+  // article-content.tsx's *independent* re-collapsing of the same text
+  // shortened it by however many characters that run had -- silently
+  // shifting every offset after that point out of alignment with
+  // readingWordRange (computed against *this* function's raw, uncollapsed
+  // output in tts-player-provider.tsx). Collapsing here, once, at the
+  // source, means both sides are always looking at the identical string.
+  const sentences = text.replace(/\s+/g, " ").match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) ?? [text];
 
   let piece = "";
   const flush = () => {

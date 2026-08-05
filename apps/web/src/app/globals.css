@@ -19,6 +19,16 @@
   --color-highlight-pink: #EFCCDA;
   --color-highlight-orange: #F1CB9E;
 
+  /* Read-along (article-content.tsx) -- a dedicated color, not reused from
+     --color-accent (an earlier version did; at the opacity needed to read
+     as a highlight at all, that read as too dark and close enough to the
+     Teal/Green/Blue highlight-color hues to be mistaken for a real
+     user-placed highlight -- see the word-cursor/section-bar rules below
+     for how this is actually used). A clear blue that isn't in the default
+     five highlight colors, so "the TTS bot is here" stays visually
+     distinct from "the user highlighted this" even at a glance. */
+  --color-tts: #3B82F6;
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
@@ -43,6 +53,8 @@
     --color-highlight-blue: #25415A;
     --color-highlight-pink: #482C3A;
     --color-highlight-orange: #4E3620;
+
+    --color-tts: #60A5FA;
   }
 }
 :root[data-theme="dark"] {
@@ -62,6 +74,8 @@
   --color-highlight-blue: #25415A;
   --color-highlight-pink: #482C3A;
   --color-highlight-orange: #4E3620;
+
+  --color-tts: #60A5FA;
 }
 :root[data-theme="light"] {
   --color-paper: #EDEBE2;
@@ -80,6 +94,8 @@
   --color-highlight-blue: #BBD6E8;
   --color-highlight-pink: #EFCCDA;
   --color-highlight-orange: #F1CB9E;
+
+  --color-tts: #3B82F6;
 }
 /* ---- Lamp (sepia) ---- */
 :root[data-theme="sepia"] {
@@ -99,6 +115,8 @@
   --color-highlight-blue: #A9C4D1;
   --color-highlight-pink: #DDB8C3;
   --color-highlight-orange: #DEAC76;
+
+  --color-tts: #3B7DD8;
 }
 /* ---- Kindle (e-ink black & white) -- no hue anywhere, including
    highlights (distinguished by gray value instead of color) ---- */
@@ -119,6 +137,12 @@
   --color-highlight-blue: #ACACAC;
   --color-highlight-pink: #929292;
   --color-highlight-orange: #787878;
+
+  /* Neutralized by this theme's own blanket grayscale(1) filter below
+     regardless of the hex here (unlike the highlight colors above, this
+     never needs to render outside the filtered DOM -- no canvas/EPUB-iframe
+     fill uses it), so no need to hand-pick a distinct gray value. */
+  --color-tts: #3B82F6;
 }
 
 @theme inline {
@@ -138,6 +162,7 @@
   --color-highlight-blue: var(--color-highlight-blue);
   --color-highlight-pink: var(--color-highlight-pink);
   --color-highlight-orange: var(--color-highlight-orange);
+  --color-tts: var(--color-tts);
 
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
@@ -177,24 +202,32 @@ body {
   background: var(--color-highlight-yellow);
 }
 
-/* Read-along: the TTS chunk currently playing (article-content.tsx). Reuses
-   --color-accent (already theme-aware, already means "the app is drawing
-   your attention to this" everywhere else -- active nav items, focus rings)
-   at low opacity rather than introducing a dedicated highlight color that'd
-   need its own light/dark/sepia/Kindle variants. A soft pulse, not a static
-   block, since this one moves every few seconds as playback advances --
-   a hard cut is easy to lose track of; motion draws the eye to where it
-   just landed. */
-.reading-position {
-  background-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
-  animation: reading-position-pulse 1.6s ease-out 1;
+/* Read-along word cursor (article-content.tsx) -- deliberately much
+   lighter and more transparent than a real highlight: highlightColorHex()
+   renders those as a solid pastel fill, so even a fairly low opacity here
+   would still read as "a highlight" if it used one of that same pastel
+   family. --color-tts is a distinct blue outside the default five
+   specifically so this reads as "the TTS bot is here right now" rather
+   than "the user highlighted this". Positioned via Range#getClientRects()
+   as an absolutely-placed overlay, not a wrapped <mark> -- it moves
+   several times a second as playback advances through each word, and
+   re-wrapping DOM text nodes that often risks fighting itself (see the
+   word-level effect's own comment). No animation for the same reason: a
+   pulse tuned for "a new sentence every few seconds" reads as frantic
+   flicker at word-to-word speed. */
+.reading-word {
+  background-color: color-mix(in srgb, var(--color-tts) 22%, transparent);
 }
 
-@keyframes reading-position-pulse {
-  0% {
-    background-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  }
-  100% {
-    background-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
-  }
+/* Readwise-style "which paragraph is the TTS bot on" -- a persistent left
+   edge bar on the active block (nearestSectionEl in article-content.tsx),
+   moving once per chunk rather than per word, so it stays a reliable
+   coarse anchor even while the word cursor above is mid-sentence. Negative
+   margin + matching padding keeps the paragraph's own text from shifting
+   right the instant the bar appears. */
+.reading-section-active {
+  border-left: 3px solid var(--color-tts);
+  margin-left: -13px;
+  padding-left: 10px;
+  transition: border-color 200ms ease;
 }
