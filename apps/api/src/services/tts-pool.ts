@@ -42,6 +42,10 @@ const workerEntry = path.join(dir, isDev ? "tts-worker-process.ts" : "tts-worker
 interface PoolWorker {
   proc: ChildProcess;
   busy: boolean;
+  /** The request currently assigned to this worker, if any -- needed so a
+   * crash (see the "exit" handler below) can reject *that specific*
+   * caller instead of leaving its promise hanging forever. */
+  currentRequestId: number | null;
 }
 
 interface QueuedTask {
@@ -71,6 +75,7 @@ function pump(): void {
     worker.busy = true;
     const id = nextRequestId++;
     inFlight.set(id, task);
+    worker.currentRequestId = id;
     worker.proc.send({ id, text: task.text, voice: task.voice, speed: task.speed });
   }
 }
@@ -80,7 +85,7 @@ function spawnWorker(): PoolWorker {
     ? fork(require.resolve("tsx/cli"), [workerEntry], { serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"] })
     : fork(workerEntry, { serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"] });
 
-  const worker: PoolWorker = { proc, busy: false };
+  const worker: PoolWorker = { proc, busy: false, currentRequestId: null };
 
   proc.on("message", (msg: WorkerMessage) => {
     const task = inFlight.get(msg.id);
@@ -89,15 +94,27 @@ function spawnWorker(): PoolWorker {
     if (msg.error) task.reject(new Error(msg.error));
     else if (msg.buffer) task.resolve(Buffer.from(msg.buffer));
     worker.busy = false;
+    worker.currentRequestId = null;
     pump();
   });
 
   // A worker dying mid-generation (native crash, OOM) shouldn't take the
   // rest of the pool down with it -- replace it and let whatever request
   // it was holding fail; the client's own chunk loop already tolerates one
-  // chunk failing without aborting the whole article.
+  // chunk failing without aborting the whole article. That request's
+  // caller still needs to actually be told it failed, though: without this,
+  // a crash left its entry sitting in `inFlight` forever (nothing else was
+  // ever going to resolve or reject it), which meant the client's fetch
+  // just hung with no error and no timeout -- confirmed by hand this is
+  // strictly worse than a slow chunk, since a slow chunk at least
+  // eventually finishes.
   proc.on("exit", (code) => {
     console.error(`[tts-pool] worker exited unexpectedly (code ${code}), respawning`);
+    if (worker.currentRequestId !== null) {
+      const task = inFlight.get(worker.currentRequestId);
+      inFlight.delete(worker.currentRequestId);
+      task?.reject(new Error("TTS worker process exited unexpectedly."));
+    }
     workers = workers.filter((w) => w !== worker);
     workers.push(spawnWorker());
     pump();

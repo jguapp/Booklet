@@ -41,11 +41,28 @@ function applyHighlightColor(el: HTMLElement, color: string): void {
 // (that one moves several times a second; this one moves every few
 // seconds, one section at a time, and stays legible from a glance instead
 // of needing to track exact position).
-const SECTION_SELECTOR = "p, li, blockquote, h1, h2, h3, h4, h5, h6, figcaption, pre, td, dd, dt";
+const SECTION_SELECTOR = "p, li, blockquote, h1, h2, h3, h4, h5, h6, figcaption, pre, td, th, dd, dt, div, section, article";
 
-function nearestSectionEl(node: Node): HTMLElement | null {
+// Real extracted article HTML -- Wikipedia's infobox/taxonomy markup
+// especially -- routinely has real text sitting directly in a <div> or
+// other container closest() above doesn't match, with no <p>/<li> wrapper
+// at all. closest() finding nothing used to mean this simply returned
+// null, and the caller had nothing to fall back to -- confirmed by hand
+// this is why the section bar would intermittently vanish mid-read rather
+// than just moving less precisely: not a rare edge case, a real, common
+// shape of real content. Walking up to the nearest direct child of the
+// container itself as a last resort guarantees *some* element is always
+// picked, as long as the point is inside the container at all.
+function nearestSectionEl(node: Node, container: HTMLElement): HTMLElement | null {
   const el = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
-  return el?.closest<HTMLElement>(SECTION_SELECTOR) ?? null;
+  if (!el) return null;
+  const specific = el.closest<HTMLElement>(SECTION_SELECTOR);
+  if (specific && container.contains(specific)) return specific;
+  let current: HTMLElement | null = el;
+  while (current && current.parentElement !== container) {
+    current = current.parentElement;
+  }
+  return current;
 }
 
 interface WordRect {
@@ -237,13 +254,26 @@ export function ArticleContent({
     const container = containerRef.current;
     if (!container) return;
 
-    if (activeSectionElRef.current) {
-      activeSectionElRef.current.classList.remove("reading-section-active");
-      activeSectionElRef.current = null;
+    // Only a real stop (readingChunkText itself going null -- playback
+    // ended or was stopped) clears the bar outright. A failed lookup below
+    // (the chunk's whitespace-normalized text not found verbatim in the
+    // DOM, or an offset that doesn't resolve to a real point) used to clear
+    // it here unconditionally too, before ever finding out whether a
+    // replacement existed -- confirmed by hand this was the other real
+    // cause of the bar intermittently vanishing mid-read: a rare, one-off
+    // lookup miss doesn't mean there's nothing to show, it means this
+    // particular chunk's position couldn't be freshly determined. Leaving
+    // the previous section highlighted through a miss like that is a
+    // strictly better outcome than the bar disappearing -- a slightly
+    // stale indicator instead of no indicator at all.
+    if (!readingChunkText) {
+      if (activeSectionElRef.current) {
+        activeSectionElRef.current.classList.remove("reading-section-active");
+        activeSectionElRef.current = null;
+      }
+      chunkOffsetMapRef.current = null;
+      return;
     }
-    chunkOffsetMapRef.current = null;
-
-    if (!readingChunkText) return;
 
     const fullText = plainTextOf(container);
     // Chunks are built by toSafeTextChunks (kokoro-tts.ts), which
@@ -296,8 +326,15 @@ export function ArticleContent({
     const endPoint = pointFor(end);
     if (!startPoint || !endPoint) return;
 
-    const sectionEl = nearestSectionEl(startPoint.node);
-    if (sectionEl) {
+    // nearestSectionEl now always resolves to *something* as long as the
+    // point is inside the container (see its own comment) -- the missing
+    // case worth guarding is a new chunk landing back in the *same*
+    // section an earlier chunk already highlighted (common for a longer
+    // paragraph spanning several chunks), where re-adding the class and
+    // re-triggering scrollIntoView would just be a redundant, jumpy no-op.
+    const sectionEl = nearestSectionEl(startPoint.node, container);
+    if (sectionEl && sectionEl !== activeSectionElRef.current) {
+      activeSectionElRef.current?.classList.remove("reading-section-active");
       sectionEl.classList.add("reading-section-active");
       activeSectionElRef.current = sectionEl;
       sectionEl.scrollIntoView({ behavior: "smooth", block: "center" });
