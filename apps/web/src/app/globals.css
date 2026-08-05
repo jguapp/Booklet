@@ -231,3 +231,20 @@ body {
   padding-left: 10px;
   transition: border-color 200ms ease;
 }
+
+/* Player-bar progress, native-voice case (tts-player-bar.tsx): the
+   browser's own SpeechSynthesis reports no word/sentence boundaries, so
+   there's no real fraction to render a filled-width bar from -- a sliding
+   segment (same idea as a spinner: "actively working, duration unknown")
+   instead of a bar stuck at 0% that reads as broken. */
+@keyframes tts-progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+.tts-progress-indeterminate {
+  animation: tts-progress-indeterminate 1.4s ease-in-out infinite;
+}

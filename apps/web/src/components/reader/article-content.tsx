@@ -120,6 +120,26 @@ export function ArticleContent({
   const chunkOffsetMapRef = useRef<{ map: number[]; normalizedChunkStart: number } | null>(null);
   const activeSectionElRef = useRef<HTMLElement | null>(null);
 
+  // Inlined article images are real (up to a few MB) base64 data: URIs
+  // (see apps/api's extraction-service.ts) -- decoding several of those
+  // synchronously on first paint is real main-thread work, and it's been
+  // implicated in occasional stalls during read-along specifically (the
+  // word-tracking effect below calls Range#getClientRects(), which forces
+  // a synchronous layout -- landing right as a big nearby image is mid-
+  // decode turns that into a real, audible hitch, not just a dropped
+  // frame). `loading="lazy"` defers offscreen images' decode until they're
+  // actually about to scroll into view instead of paying for all of them
+  // upfront; `decoding="async"` keeps whichever ones do decode off the
+  // main thread's critical path.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.querySelectorAll("img").forEach((img) => {
+      img.loading = "lazy";
+      img.decoding = "async";
+    });
+  }, [html]);
+
   // Re-apply highlight marks whenever the highlight list or underlying html changes.
   // This is the same resolveTextPosition() from packages/shared, so
   // drift-tolerant re-anchoring is exercised for real, not simulated.

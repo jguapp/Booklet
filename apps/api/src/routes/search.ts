@@ -30,6 +30,13 @@ export async function registerSearchRoute(app: FastifyInstance): Promise<void> {
 
     const [articleRows, highlightRows] = await Promise.all([
       prisma.article.findMany({
+        // extractedText is filtered *on* below (matching search results
+        // against full article body text), never returned -- toSummary
+        // strips it anyway, so there's no reason to have Postgres send it
+        // (or extractedHtml, never referenced here at all) across the wire
+        // for every match first. Same reasoning as the plain library-list
+        // query in articles.ts.
+        omit: { extractedHtml: true, extractedText: true },
         where: {
           userId,
           deletedAt: null,
