@@ -161,7 +161,20 @@ export function EpubReader({
       try {
         const data = await fileBlob.arrayBuffer();
         const book = ePub(data);
-        const r = book.renderTo(viewerRef.current!, { width: "100%", height: "100%", flow: "paginated" });
+        // spread: "none" -- without it, epub.js's default "auto" spread
+        // pairs two spine items side by side above its own width threshold
+        // (a physical-book-style two-page spread), which on a typical
+        // desktop-width reading pane is basically always. Confirmed by hand
+        // this is the real cause of a cover "showing up twice": with no
+        // second item to pair the very first spine item (the cover) with
+        // yet, the spread manager renders it into *both* the left and right
+        // slots -- two separate iframes, both showing the same cover image,
+        // simultaneously in the DOM (not sequential pages). This reader is
+        // one continuous column at any width already (no visual two-page
+        // layout exists for it to begin with), so spread mode was never
+        // actually wanted here -- always-single-page removes both the
+        // duplicate-cover bug and any other spine item pairing surprise.
+        const r = book.renderTo(viewerRef.current!, { width: "100%", height: "100%", flow: "paginated", spread: "none" });
         await r.display();
         if (cancelled) {
           r.destroy();

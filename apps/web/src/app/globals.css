@@ -222,12 +222,16 @@ body {
 /* Readwise-style "which paragraph is the TTS bot on" -- a persistent left
    edge bar on the active block (nearestSectionEl in article-content.tsx),
    moving once per chunk rather than per word, so it stays a reliable
-   coarse anchor even while the word cursor above is mid-sentence. Negative
-   margin + matching padding keeps the paragraph's own text from shifting
-   right the instant the bar appears. */
+   coarse anchor even while the word cursor above is mid-sentence. A fully
+   opaque 3px bar (the original version) read as too heavy/distracting --
+   thinner and translucent instead, same idea as .reading-word's own low
+   opacity: a glance-able tracking anchor, not something that visually
+   competes with the text next to it. Negative margin + matching padding
+   keeps the paragraph's own text from shifting right the instant the bar
+   appears. */
 .reading-section-active {
-  border-left: 3px solid var(--color-tts);
-  margin-left: -13px;
+  border-left: 2px solid color-mix(in srgb, var(--color-tts) 55%, transparent);
+  margin-left: -12px;
   padding-left: 10px;
   transition: border-color 200ms ease;
 }
