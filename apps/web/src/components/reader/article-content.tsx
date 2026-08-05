@@ -53,16 +53,28 @@ const SECTION_SELECTOR = "p, li, blockquote, h1, h2, h3, h4, h5, h6, figcaption,
 // shape of real content. Walking up to the nearest direct child of the
 // container itself as a last resort guarantees *some* element is always
 // picked, as long as the point is inside the container at all.
+//
+// `container` itself is a <div>, and SECTION_SELECTOR matches "div" --
+// Node#contains() is self-inclusive, so for content with no wrapping
+// element nearer than the container (flat markup with no <p> tags at
+// all, text sitting directly in the article root), closest() matches
+// *the container itself* and the old `container.contains(specific)`
+// check let that through. Highlighting the whole container looks like
+// the entire article is "the current section" -- confirmed by hand this
+// is a real regression from adding "div" to the selector above, not a
+// rare shape. Both paths below explicitly refuse to return `container`:
+// there's no meaningful sub-section to point at in genuinely flat
+// content, so no indicator is the honest answer, not the whole page.
 function nearestSectionEl(node: Node, container: HTMLElement): HTMLElement | null {
   const el = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
-  if (!el) return null;
+  if (!el || el === container) return null;
   const specific = el.closest<HTMLElement>(SECTION_SELECTOR);
-  if (specific && container.contains(specific)) return specific;
+  if (specific && specific !== container && container.contains(specific)) return specific;
   let current: HTMLElement | null = el;
   while (current && current.parentElement !== container) {
     current = current.parentElement;
   }
-  return current;
+  return current === container ? null : current;
 }
 
 interface WordRect {
