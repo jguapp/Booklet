@@ -1,53 +1,19 @@
 /**
  * Open-source, zero-cost TTS: Kokoro (Apache-2.0, 82M params) running
  * entirely client-side via kokoro-js (built on @huggingface/transformers --
- * WASM + ONNX Runtime Web; WebGPU is deliberately not used, see DEVICE
- * below). No server, no API key, no per-request cost -- the ~90MB
- * quantized model downloads once from Hugging Face's CDN on first use and
- * is cached by the browser (transformers.js's own model cache) after that.
- * See use-text-to-speech.ts for how this plugs into the existing
- * play/pause/resume/stop reader controls, falling back to the native
- * SpeechSynthesis engine when a voice isn't selected or this fails to load
- * (unsupported browser, network hiccup on first download).
+ * WASM; WebGPU is deliberately not used, see kokoro.worker.ts). No server,
+ * no API key, no per-request cost -- the ~90MB quantized model downloads
+ * once from Hugging Face's CDN on first use and is cached by the browser
+ * (transformers.js's own model cache) after that.
+ *
+ * The actual model loading and generation happens in a dedicated Worker
+ * (kokoro.worker.ts), not here -- this module is the main-thread client
+ * that talks to it. See use-text-to-speech.ts for how this plugs into the
+ * existing play/pause/resume/stop reader controls, falling back to the
+ * native SpeechSynthesis engine when a voice isn't selected or this fails
+ * to load (unsupported browser, network hiccup on first download).
  */
-import { KokoroTTS, TextSplitterStream } from "kokoro-js";
-
-// ONNX Runtime Web logs a harmless perf-advisory notice at session-creation
-// time ("some nodes were not assigned to the preferred execution
-// provider") via console.error, at "warning" severity -- alarming for
-// something that isn't actually a failure (audio still generates and
-// plays correctly regardless). The obvious fix -- env.backends.onnx.
-// logLevel -- doesn't reach it: that JS-side setting is a different knob
-// from the WASM session's own internal logSeverityLevel (which is what
-// actually gates this message, defaulting to "warning" inside
-// onnxruntime-web itself, independent of env.logLevel). The *real* lever,
-// passing `session_options: { logSeverityLevel: 3 }` into
-// KokoroTTS.from_pretrained(), doesn't work either: kokoro-js's own
-// from_pretrained() wrapper destructures only { dtype, device,
-// progress_callback } out of its options and silently drops anything
-// else, so there's no way to reach the underlying session options through
-// its public API at all. Confirmed by hand -- the previous attempt with
-// env.backends.onnx.logLevel = "error" still let the exact same
-// console.error lines through in a real browser. With no real API lever
-// available, filtering the message at the console level, scoped tightly
-// to just the model-load call (not installed globally for the app's
-// lifetime), is what's actually left.
-const ORT_BENIGN_NOISE = /VerifyEachNodeIsAssignedToAnEp|Rerunning with verbose output/;
-
-async function withOrtNoiseSuppressed<T>(fn: () => Promise<T>): Promise<T> {
-  const originalConsoleError = console.error;
-  console.error = (...args: unknown[]) => {
-    if (typeof args[0] === "string" && ORT_BENIGN_NOISE.test(args[0])) return;
-    originalConsoleError(...args);
-  };
-  try {
-    return await fn();
-  } finally {
-    console.error = originalConsoleError;
-  }
-}
-
-const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
+import { TextSplitterStream, type KokoroTTS } from "kokoro-js";
 
 /** kokoro-js types `generate()`'s voice option as a literal union of its
  * exact voice ids (not exported directly), derived here from the method's
@@ -91,20 +57,21 @@ export function isKokoroVoice(voiceId: string): boolean {
   return voiceId !== NATIVE_VOICE_ID;
 }
 
-// WebGPU is deliberately never used, even when available -- confirmed by
-// hand (raw sample inspection, not just "it sounds off") that
-// onnxruntime-web's WebGPU backend produces numerically-corrupted output
-// for this model on real Windows Chromium: generated samples came back
-// with |value| up to ~10^26 (valid audio is within [-1, 1]), regardless of
-// dtype (reproduced with both "q8" and "fp32" -- the fp32 device="webgpu"
-// combination the kokoro-js README itself recommends). Encoded into a WAV
-// and played, that's exactly what "loads forever, then a burst of static"
-// is -- not a WASM/WebGPU speed tradeoff, a genuine correctness bug in the
-// WebGPU execution path for this model/environment. WASM has none of this
-// (confirmed: sample magnitudes stay within [-1, 1], real speech).
-const DEVICE = "wasm";
+interface WorkerResponse {
+  type: string;
+  data?: unknown;
+}
 
-let ttsPromise: Promise<KokoroTTS> | null = null;
+let worker: Worker | null = null;
+
+function getWorker(): Worker {
+  if (!worker) {
+    worker = new Worker(new URL("../../workers/kokoro.worker.ts", import.meta.url), { type: "module" });
+  }
+  return worker;
+}
+
+let loadPromise: Promise<void> | null = null;
 
 /** Loaded once per page session and reused for every voice/article after
  * that -- the model itself doesn't depend on which voice is picked (voices
@@ -121,16 +88,98 @@ let ttsPromise: Promise<KokoroTTS> | null = null;
  * model's raw per-token WASM inference cost, not thread count. Left as
  * real, correct config (harmless, free on a hard navigation) but nothing
  * in the app forces one just for this. */
-export function loadKokoro(): Promise<KokoroTTS> {
-  if (!ttsPromise) {
-    ttsPromise = withOrtNoiseSuppressed(() => KokoroTTS.from_pretrained(MODEL_ID, { dtype: "q8", device: DEVICE })).catch(
-      (err: unknown) => {
-        ttsPromise = null; // don't cache a permanent failure -- allow retry on the next play()
-        throw err;
-      },
-    );
+export function loadKokoro(): Promise<void> {
+  if (!loadPromise) {
+    loadPromise = new Promise<void>((resolve, reject) => {
+      const w = getWorker();
+      const onMessage = (e: MessageEvent<WorkerResponse>) => {
+        if (e.data.type === "load:complete") {
+          w.removeEventListener("message", onMessage);
+          resolve();
+        } else if (e.data.type === "error") {
+          w.removeEventListener("message", onMessage);
+          reject(new Error((e.data.data as { message: string }).message));
+        }
+      };
+      w.addEventListener("message", onMessage);
+      w.postMessage({ type: "load" });
+    }).catch((err: unknown) => {
+      loadPromise = null; // don't cache a permanent failure -- allow retry on the next play()
+      throw err;
+    });
   }
-  return ttsPromise;
+  return loadPromise;
+}
+
+/** A minimal async producer/consumer queue -- bridges the worker's
+ * "message" events (push-based) to an async generator (pull-based) that
+ * use-text-to-speech.ts can `for await` over, the same shape it already
+ * consumed kokoro-js's own tts.stream() in. */
+class AsyncQueue<T> {
+  private items: T[] = [];
+  private resolvers: ((result: IteratorResult<T>) => void)[] = [];
+  private ended = false;
+  private error: Error | null = null;
+
+  push(item: T): void {
+    const resolve = this.resolvers.shift();
+    if (resolve) resolve({ value: item, done: false });
+    else this.items.push(item);
+  }
+
+  end(): void {
+    this.ended = true;
+    while (this.resolvers.length) this.resolvers.shift()!({ value: undefined, done: true });
+  }
+
+  fail(err: Error): void {
+    this.error = err;
+    this.end();
+  }
+
+  next(): Promise<IteratorResult<T>> {
+    if (this.items.length) return Promise.resolve({ value: this.items.shift()!, done: false });
+    if (this.error) return Promise.reject(this.error);
+    if (this.ended) return Promise.resolve({ value: undefined, done: true });
+    return new Promise((resolve) => this.resolvers.push(resolve));
+  }
+}
+
+/** Streams generated audio chunks from the worker as they're produced --
+ * genuinely concurrently with whatever the caller does with each chunk
+ * (e.g. play it), since generation now runs on its own thread instead of
+ * the one also driving playback. See the module doc comment and
+ * kokoro.worker.ts for why that distinction is the whole point of this
+ * file existing. Abandoning the loop early (a `break`/`return` in the
+ * caller's `for await`, e.g. use-text-to-speech.ts's stop()) sends the
+ * worker a "cancel" so it stops generating further chunks for a playback
+ * nobody wants anymore, instead of grinding through the rest of an
+ * article's text for nothing. */
+export function streamKokoro(text: string, options: { voice: KokoroVoiceId; speed: number }): AsyncGenerator<Blob> {
+  const queue = new AsyncQueue<Blob>();
+  const w = getWorker();
+
+  const onMessage = (e: MessageEvent<WorkerResponse>) => {
+    const { type, data } = e.data;
+    if (type === "chunk") queue.push((data as { blob: Blob }).blob);
+    else if (type === "generate:complete") queue.end();
+    else if (type === "error") queue.fail(new Error((data as { message: string }).message));
+  };
+  w.addEventListener("message", onMessage);
+  w.postMessage({ type: "generate", data: { text, voice: options.voice, speed: options.speed } });
+
+  return (async function* () {
+    try {
+      while (true) {
+        const { value, done } = await queue.next();
+        if (done) return;
+        yield value;
+      }
+    } finally {
+      w.removeEventListener("message", onMessage);
+      w.postMessage({ type: "cancel" }); // harmless no-op if generation already finished on its own
+    }
+  })();
 }
 
 // kokoro-js's own sentence splitter (TextSplitterStream) has a real bug:
@@ -149,7 +198,9 @@ export function loadKokoro(): Promise<KokoroTTS> {
 // across each incremental push -- it glues a sentence split mid-piece
 // back together using the next piece on its own, so this pre-chunking
 // doesn't need to land on exact sentence boundaries, just keep every
-// individual push() small).
+// individual push() small). Used inside kokoro.worker.ts, not here -- kept
+// in this shared module since it's a plain text utility, not anything
+// worker-specific.
 const MAX_SAFE_CHUNK_CHARS = 500;
 
 function pushSafely(stream: TextSplitterStream, text: string): void {
