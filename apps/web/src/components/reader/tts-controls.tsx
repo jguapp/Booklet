@@ -19,17 +19,17 @@ const BUTTON_CLASS =
 
 export function TtsControls({ status, supported, hasText, onPlay, onPause, onResume, onStop }: TtsControlsProps) {
   // Not every browser ships SpeechSynthesis (older/embedded webviews) --
-  // rather than a dead button, just don't offer it there. Piper voices
-  // don't need this check (WASM, not SpeechSynthesis), but "system" is the
-  // default voice, so this guard still applies most of the time.
+  // rather than a dead button, just don't offer it there. Kokoro voices
+  // don't need this check (WASM/WebGPU, not SpeechSynthesis), but "system"
+  // is the default voice, so this guard still applies most of the time.
   if (!supported) return null;
 
   return (
     <div className="flex items-center gap-1">
       {status === "loading" ? (
-        // The Piper voice model downloads (~60MB, once per voice, cached
-        // after) and loads before anything can play -- a spinner here beats
-        // a play button that looks broken for however long that takes.
+        // The Kokoro voice model downloads (~90MB, once, cached after) and
+        // loads before anything can play -- a spinner here beats a play
+        // button that looks broken for however long that takes.
         <div className={cn(BUTTON_CLASS, "cursor-default")} title="Loading voice…">
           <svg viewBox="0 0 16 16" className="h-4 w-4 animate-spin" fill="none">
             <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeOpacity="0.25" />

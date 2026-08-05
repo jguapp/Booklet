@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import type { ReaderSize } from "@/components/reader/reader-toolbar";
 import { DEFAULT_HIGHLIGHT_BAR_COLORS } from "@booklet/shared";
 import { loadReaderPrefs, saveReaderPrefs, type ReaderPrefs } from "@/lib/reader/device-prefs";
-import { NATIVE_VOICE_ID } from "@/lib/reader/piper-tts";
+import { NATIVE_VOICE_ID } from "@/lib/reader/kokoro-tts";
 import { loadHoardingPrefs, saveHoardingPrefs, type HoardingPrefs } from "./hoarding-prefs";
 import { loadShowReadingStats, saveShowReadingStats } from "./stats-prefs";
 import { loadAutoDeletePrefs, saveAutoDeletePrefs, type AutoDeletePrefs } from "./auto-delete-prefs";
