@@ -24,7 +24,7 @@ test("selecting a Kokoro voice and pressing play actually generates and plays re
   test.setTimeout(120_000);
 
   await page.goto("/settings/reading");
-  await page.getByRole("combobox", { name: "Read-aloud voice" }).selectOption({ label: "Heart (American, female)" });
+  await page.getByRole("combobox", { name: "Read-aloud voice" }).selectOption({ value: "af_heart" });
 
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
@@ -106,7 +106,7 @@ test("a real, full-length article with dense infobox/citation content doesn't bl
   // reported chunk count is sane, not the exact number (real extracted
   // text length can shift over time as the source page is edited).
   await page.goto("/settings/reading");
-  await page.getByRole("combobox", { name: "Read-aloud voice" }).selectOption({ label: "Heart (American, female)" });
+  await page.getByRole("combobox", { name: "Read-aloud voice" }).selectOption({ value: "af_heart" });
 
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();

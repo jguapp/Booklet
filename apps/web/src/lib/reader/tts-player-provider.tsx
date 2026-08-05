@@ -225,7 +225,25 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
             const duration = audioEl.duration;
             if (!duration || !Number.isFinite(duration) || wordSpans.length === 0) return;
             const charPos = (audioEl.currentTime / duration) * chunkText.length;
-            const word = wordSpans.find((w) => charPos >= w.start && charPos < w.end) ?? wordSpans[wordSpans.length - 1];
+            // The gap *between* two words (every word has one right after
+            // it) isn't inside either span, so charPos regularly lands in
+            // one -- Array#find's old `?? wordSpans[wordSpans.length - 1]`
+            // fallback for "no span contains this point" meant every single
+            // inter-word gap, not just the end of the chunk, jumped the
+            // highlight to the chunk's very *last* word before snapping
+            // back once charPos re-entered a real span. That's the
+            // "skips around" bug, confirmed by hand: it doesn't drift or
+            // lag, it visibly teleports to the end and back, once per word,
+            // for the whole chunk. Holding on the last word whose start is
+            // behind charPos instead -- the word that just finished, until
+            // the next one's span actually begins -- is both correct and
+            // how karaoke-style tracking is expected to behave through a
+            // gap in the first place.
+            let word = wordSpans[0];
+            for (const span of wordSpans) {
+              if (span.start > charPos) break;
+              word = span;
+            }
             setCurrentWordRange(word);
           };
           audioEl.addEventListener("timeupdate", handleTimeUpdate);
