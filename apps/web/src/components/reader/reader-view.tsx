@@ -363,6 +363,27 @@ export function ReaderView({ articleId }: { articleId: string }) {
     stop: ttsPlayer.stop,
   };
 
+  // Speculatively generates the first chunk before the user has pressed
+  // play at all -- the article's text and the reader's chosen TTS voice
+  // are both already known by the time this page has rendered, so there's
+  // no reason the several-second first-chunk wait (see tts-service.ts)
+  // has to start only once someone clicks. Skipped once this article is
+  // already the one loaded into the player (real playback, or a previous
+  // prewarm, already has it covered) -- this is purely about getting a
+  // head start before that point.
+  useEffect(() => {
+    if (!article || !readableText.trim() || ttsIsThisArticle) return;
+    ttsPlayer.prewarmFirstChunk(article.id, readableText);
+    // Intentionally keyed on prewarmFirstChunk itself, not the whole
+    // ttsPlayer object -- the context value is a fresh object every
+    // provider render (status, currentWordRange, etc. all change during
+    // active playback), so depending on it wholesale would re-fire this
+    // constantly. prewarmFirstChunk is its own real useCallback, correctly
+    // memoized on voice/rate -- that's the only part of ttsPlayer this
+    // effect actually needs to react to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [article, readableText, ttsIsThisArticle, ttsPlayer.prewarmFirstChunk]);
+
   async function handleCreateHighlight(
     selectedText: string,
     position: HighlightPosition,
