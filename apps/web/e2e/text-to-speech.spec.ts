@@ -41,7 +41,7 @@ test("play, pause, resume, and stop an article being read aloud", async ({ page 
   test.skip(!ttsWorks, "No working speech-synthesis backend in this environment (no system TTS voices)");
 
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 

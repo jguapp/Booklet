@@ -307,7 +307,40 @@ async function fetchHtml(rawUrl: string): Promise<string> {
   throw new ExtractionError("Too many redirects.");
 }
 
+/**
+ * Test-only escape hatch, so the e2e suite can serve article fixtures from a
+ * loopback HTTP server instead of fetching a real page off the internet for
+ * every spec that just needs an article to exist (see
+ * apps/web/e2e/fixture-server).
+ *
+ * Two properties make this safe to have at all:
+ *
+ *  - It is evaluated once, at module load, and `NODE_ENV === "production"`
+ *    hard-disables it. Setting the variable on a production deployment does
+ *    nothing whatsoever -- the SSRF protection below is not overridable
+ *    where it actually matters, only in an environment that has already
+ *    opted out of being one.
+ *  - It requires the exact string "true", and its name says what it does
+ *    rather than something innocuous like ALLOW_LOCAL.
+ *
+ * Anyone tempted to reach for this outside tests should not: the whole point
+ * of assertPublicHost is that "save this URL" is otherwise a textbook SSRF
+ * vector, and a saved article pointing at an internal metadata service is
+ * exactly the attack it exists to stop.
+ */
+const ALLOW_PRIVATE_ADDRESSES =
+  process.env.NODE_ENV !== "production" && process.env.EXTRACTION_ALLOW_PRIVATE_ADDRESSES === "true";
+
+if (ALLOW_PRIVATE_ADDRESSES) {
+  console.warn(
+    "[extraction] EXTRACTION_ALLOW_PRIVATE_ADDRESSES is set: URL fetches to private/loopback addresses are permitted. " +
+      "This is for the e2e fixture server only and is ignored entirely when NODE_ENV=production.",
+  );
+}
+
 async function assertPublicHost(hostname: string): Promise<void> {
+  if (ALLOW_PRIVATE_ADDRESSES) return;
+
   let addresses: { address: string; family: number }[];
   try {
     addresses = await dns.lookup(hostname, { all: true });

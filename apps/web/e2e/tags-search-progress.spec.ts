@@ -3,9 +3,12 @@ import { waitForSaveModalToClose } from "./helpers";
 
 /**
  * Tags, full-text search, and reading-progress persistence -- all local/
- * anonymous mode (IndexedDB), same as the rest of this e2e suite. Uses
- * real Wikipedia saves rather than fixtures since the point is exercising
- * the real extraction -> full text -> search pipeline, not a stub.
+ * anonymous mode (IndexedDB), same as the rest of this e2e suite.
+ *
+ * Saves go through the local fixture server (see e2e/fixture-server), but
+ * still exercise the real extraction -> full text -> search pipeline end to
+ * end; only the origin of the HTML changed, not the path it takes. Live
+ * extraction against real-world markup is covered by save-real-url.spec.ts.
  */
 
 async function saveUrl(page: import("@playwright/test").Page, url: string) {
@@ -18,7 +21,7 @@ async function saveUrl(page: import("@playwright/test").Page, url: string) {
 
 test("tag an article, filter the library by tag, and see it persist", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Tag_(metadata)");
+  await saveUrl(page, "http://127.0.0.1:4321/tagging.html");
 
   await page.locator("a[href^='/reader/']").first().click();
   await page.waitForURL(/\/reader\//);
@@ -43,7 +46,7 @@ test("tag an article, filter the library by tag, and see it persist", async ({ p
 
 test("library defaults to the Unread tab, showing a fresh save immediately", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Readability");
+  await saveUrl(page, "http://127.0.0.1:4321/readability.html");
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
 
   // A fresh navigation confirms this isn't just leftover client state --
@@ -65,11 +68,13 @@ test("library defaults to the Unread tab, showing a fresh save immediately", asy
 
 test("full-text search finds an article by body text, not just its title", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Full-text_search");
+  await saveUrl(page, "http://127.0.0.1:4321/article/full-text-search.html");
 
   const search = page.getByPlaceholder(/search titles, text, notes/i);
-  await search.fill("a single computer-stored document");
-  await expect(page.getByText("Full-text search", { exact: true }).first()).toBeVisible({ timeout: 5_000 });
+  // A phrase that appears only in the article's body, never in its title --
+  // which is the whole point of this test.
+  await search.fill("ease with which a reader can understand");
+  await expect(page.getByText("Full Text Search", { exact: true }).first()).toBeVisible({ timeout: 5_000 });
 
   await search.fill("this phrase should not appear anywhere in that article");
   await expect(page.getByText("No articles match that search.")).toBeVisible();
@@ -77,7 +82,7 @@ test("full-text search finds an article by body text, not just its title", async
 
 test("reading progress persists across a reload and resumes scroll position", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Tag_(metadata)"); // long article -- actually scrollable
+  await saveUrl(page, "http://127.0.0.1:4321/long-article.html"); // ~40 paragraphs -- actually scrollable
 
   await page.locator("a[href^='/reader/']").first().click();
   await page.waitForURL(/\/reader\//);

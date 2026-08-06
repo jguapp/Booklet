@@ -107,8 +107,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   // production deployment needs a shared store (e.g. Redis via
   // @fastify/rate-limit's `redis` option) so limits are enforced across
   // instances instead of separately per-process.
+  // Configurable because the e2e suite drives the entire app from a single
+  // IP address in a couple of minutes -- exactly the shape this limit exists
+  // to stop, and it will trip on a large enough suite even though nothing is
+  // wrong. Raising it there beats the alternatives (per-test IP spoofing, or
+  // discovering it as an intermittent 429 in one unlucky spec).
   await app.register(rateLimit, {
-    max: 300,
+    max: Number(process.env.GLOBAL_RATE_LIMIT_MAX) || 300,
     timeWindow: "1 minute",
   });
 
