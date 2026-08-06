@@ -80,7 +80,7 @@ test("a save made outside the page appears once the tab regains focus, without a
   const createRes = await fetch(`${API_URL}/api/articles`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ url: "https://en.wikipedia.org/wiki/Alan_Turing?e2e=" + Date.now() }),
+    body: JSON.stringify({ url: "http://127.0.0.1:4321/article/alan-turing.html?e2e=" + Date.now() }),
   });
   expect(createRes.status).toBe(201);
 
@@ -103,7 +103,7 @@ test("the same holds for highlights imported outside the page (the extension's O
   const articleRes = await fetch(`${API_URL}/api/articles`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ url: "https://en.wikipedia.org/wiki/Reading" }),
+    body: JSON.stringify({ url: "http://127.0.0.1:4321/article/reading.html" }),
   });
   const article = await articleRes.json();
 

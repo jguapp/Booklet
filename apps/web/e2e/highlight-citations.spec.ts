@@ -86,7 +86,7 @@ test("an EPUB highlight's citation shows a section reference", async ({ page }) 
 test("an HTML highlight's citation shows which paragraph it's in, not just paragraph 1", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Tag_(metadata)"); // long -- multiple real paragraphs
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/long-article.html"); // ~40 paragraphs
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 

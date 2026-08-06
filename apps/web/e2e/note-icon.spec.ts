@@ -36,7 +36,7 @@ async function selectFirstWords(page: import("@playwright/test").Page, count: nu
 
 test("a highlight's note shows as an icon, not inline text, and opens on click", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Readability");
+  await saveUrl(page, "http://127.0.0.1:4321/readability.html");
 
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);
@@ -61,7 +61,7 @@ test("a highlight's note shows as an icon, not inline text, and opens on click",
 
 test("editing and deleting a note still works from the read view", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Readability");
+  await saveUrl(page, "http://127.0.0.1:4321/readability.html");
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);
 

@@ -79,7 +79,7 @@ test("setting a Kindle email lets you send an article from the reader", async ({
 
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/E-reader");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/article/e-reader.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 

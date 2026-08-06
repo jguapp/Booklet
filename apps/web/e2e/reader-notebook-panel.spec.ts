@@ -34,7 +34,7 @@ test("toggling the Notebook panel from the toolbar shows and hides it without lo
 }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
   await page.locator("a[href^='/reader/']").first().click();
@@ -57,7 +57,7 @@ test("toggling the Notebook panel from the toolbar shows and hides it without lo
 test("Info tab shows article metadata", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
   await page.locator("a[href^='/reader/']").first().click();
@@ -76,7 +76,7 @@ test("HTML: a highlight appears in the Notebook tab, and clicking it jumps back 
 }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
   await page.locator("a[href^='/reader/']").first().click();

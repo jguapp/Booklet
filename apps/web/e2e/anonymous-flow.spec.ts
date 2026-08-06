@@ -18,7 +18,7 @@ const SAMPLE_EPUB = path.join(process.cwd(), "e2e", "fixtures", "sample.epub");
  * save -> read -> highlight loop for real, not a stubbed version of it.
  */
 
-const TEST_ARTICLE_URL = "https://en.wikipedia.org/wiki/Readability";
+const TEST_ARTICLE_URL = "http://127.0.0.1:4321/readability.html";
 
 test("landing page offers a no-account path into the library", async ({ page }) => {
   await page.goto("/");
@@ -90,7 +90,7 @@ test("images in a saved article are inlined, not left pointing at the original s
   await page.goto("/library");
 
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Tag_(metadata)");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/tagging.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 
