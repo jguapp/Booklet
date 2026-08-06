@@ -46,6 +46,23 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @booklet/api exec prisma generate
 RUN pnpm --filter @booklet/api build
+# Bake Kokoro's ONNX weights into the image so no running container ever
+# fetches them. Without this the ~90MB model downloads on the first
+# read-aloud in every fresh container -- three times over, since the worker
+# pool starts three processes that all cold-miss at once -- making the first
+# request after a deploy a 10-60s wait and putting a core feature at the
+# mercy of huggingface.co being reachable at request time.
+#
+# No ENV is needed to make this stick, and deliberately so: the installed
+# @huggingface/transformers reads *no* cache environment variables at all
+# (not HF_HOME, not TRANSFORMERS_CACHE, not HF_HUB_CACHE -- verified against
+# its env.js, which hardcodes the path and only allows overriding it
+# programmatically via env.cacheDir). It caches into
+# node_modules/@huggingface/transformers/.cache/, and the runtime stage below
+# copies /repo wholesale, node_modules included -- so running this here is
+# sufficient on its own. Don't "fix" this by adding an HF_HOME; it would be
+# silently ignored.
+RUN node apps/api/scripts/prefetch-tts-model.mjs
 
 FROM base AS runtime
 ENV NODE_ENV=production

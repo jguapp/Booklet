@@ -17,7 +17,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getCachedSpeech, setCachedSpeech } from "./tts-cache.js";
+import { getCachedSpeech, setCachedSpeech, speechCacheKey } from "./tts-cache.js";
 
 const require = createRequire(import.meta.url);
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -65,13 +65,27 @@ interface WorkerMessage {
 
 let workers: PoolWorker[] = [];
 let nextRequestId = 0;
+/** Requests someone is actually waiting on right now -- a play in progress. */
 const queue: QueuedTask[] = [];
+/**
+ * Speculative work: audio we think will be wanted shortly, but that nobody is
+ * currently blocked on (see the /api/tts/warm route). Drained only when the
+ * normal queue is empty, which is what makes warming safe to be generous
+ * with -- it can only ever consume capacity that would otherwise sit idle,
+ * and can never push back the chunk a listener is actually waiting for.
+ *
+ * Without this split, warming an article's opening on every reader-open
+ * would compete directly with real playback for a pool of three, so
+ * speculating would sometimes make the thing it was speculating about
+ * slower.
+ */
+const lowPriorityQueue: QueuedTask[] = [];
 const inFlight = new Map<number, { resolve: (buffer: Buffer) => void; reject: (err: Error) => void }>();
 
 function pump(): void {
   for (const worker of workers) {
     if (worker.busy) continue;
-    const task = queue.shift();
+    const task = queue.shift() ?? lowPriorityQueue.shift();
     if (!task) return;
     worker.busy = true;
     const id = nextRequestId++;
@@ -137,17 +151,62 @@ export function warmTtsPool(): void {
   ensureStarted();
 }
 
-export async function generateSpeechPooled(text: string, voice: string, speed: number): Promise<Buffer> {
-  const cached = getCachedSpeech(text, voice, speed);
-  if (cached) return cached;
+/**
+ * Requests already being served, keyed identically to the cache. Without
+ * this, N concurrent requests for the same chunk all miss the cache (nothing
+ * is written until the first one *finishes*), all occupy a worker, and all
+ * generate the same audio -- with a pool of 3, three identical requests can
+ * consume the entire pool producing one chunk's worth of distinct output.
+ *
+ * That collision is the normal case, not a rare one: the reader speculatively
+ * warms the opening chunks as soon as an article is opened, and the play loop
+ * asks for those same chunks the moment play is pressed, so the two race by
+ * design. It also covers the same article open in two tabs, or on a phone and
+ * a laptop.
+ *
+ * Note this wraps the L2 lookup as well as generation -- otherwise the
+ * duplicate requests would each still pay their own Redis round trip before
+ * discovering they were redundant.
+ */
+const inFlightByKey = new Map<string, Promise<Buffer>>();
 
-  ensureStarted();
-  const buffer = await new Promise<Buffer>((resolve, reject) => {
-    queue.push({ text, voice, speed, resolve, reject });
-    pump();
-  });
-  setCachedSpeech(text, voice, speed, buffer);
-  return buffer;
+export function generateSpeechPooled(
+  text: string,
+  voice: string,
+  speed: number,
+  { speculative = false }: { speculative?: boolean } = {},
+): Promise<Buffer> {
+  const key = speechCacheKey(text, voice, speed);
+
+  // A speculative request that collides with a real one already in flight
+  // simply rides along on it -- and, importantly, so does the reverse: a
+  // real play-path request for a chunk already being warmed reuses that
+  // work instead of queueing a second copy behind it.
+  const existing = inFlightByKey.get(key);
+  if (existing) return existing;
+
+  const work = (async () => {
+    const cached = await getCachedSpeech(text, voice, speed);
+    if (cached) return cached;
+
+    ensureStarted();
+    const buffer = await new Promise<Buffer>((resolve, reject) => {
+      (speculative ? lowPriorityQueue : queue).push({ text, voice, speed, resolve, reject });
+      pump();
+    });
+    setCachedSpeech(text, voice, speed, buffer);
+    return buffer;
+  })();
+
+  inFlightByKey.set(key, work);
+  // Cleared on rejection as well as success -- leaving a failed promise in
+  // here would make one transient error permanently sticky for that exact
+  // chunk, which is far worse than the duplicate work this map prevents.
+  // The `.catch` is only to keep the deletion from surfacing as an unhandled
+  // rejection; the original promise's rejection still reaches every caller.
+  void work.catch(() => {}).finally(() => inFlightByKey.delete(key));
+
+  return work;
 }
 
 function shutdown(): void {

@@ -18,6 +18,7 @@
  * the gap.
  */
 import { KokoroTTS } from "kokoro-js";
+import { toPcm16Wav } from "./wav-pcm16.js";
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 
@@ -92,5 +93,9 @@ export async function generateSpeech(text: string, voice: string, speed: number)
   } catch (err) {
     throw new TtsGenerationError(err instanceof Error ? err.message : String(err));
   }
-  return Buffer.from(audio.toWav());
+  // Converted here, inside the worker process, rather than in the parent --
+  // so the halving also applies to the structured clone that carries this
+  // buffer back over IPC (see tts-pool.ts's `serialization: "advanced"`),
+  // not just to the cache and the eventual HTTP response.
+  return toPcm16Wav(Buffer.from(audio.toWav()));
 }
