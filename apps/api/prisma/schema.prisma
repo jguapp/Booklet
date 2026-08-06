@@ -81,6 +81,7 @@ model User {
   feeds                   Feed[]
   apiTokens               ApiToken[]
   webhooks                Webhook[]
+  readingActivityDays     ReadingActivityDay[]
 
   resurfaceFrequency  ResurfaceFrequency @default(DAILY)
   highlightsPerDigest Int                @default(5)
@@ -310,6 +311,31 @@ model Article {
   @@index([userId, favorited])
   @@index([userId, deletedAt])
   @@index([userId, canonicalUrl])
+}
+
+// One row per (user, calendar day) that had any active reading time, for
+// the stats page's GitHub-contributions-style heatmap. Deliberately its own
+// small aggregate table rather than deriving "days read" from Article's own
+// timestamps (savedAt/readAt/archivedAt): those only mark when an article
+// was *started* or *finished*, so a day spent reading partway through an
+// already-in-progress article -- finishing nothing, starting nothing new --
+// wouldn't show up at all. `seconds` accumulates the same
+// activeReadingSecondsDelta increments Article.activeReadingSeconds already
+// receives (see articles.ts's PATCH handler), just bucketed by the day the
+// reading actually happened instead of only living as one lifetime total
+// per article.
+model ReadingActivityDay {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Always midnight UTC of the calendar day -- a date, not a timestamp,
+  // even though the column type has to be DateTime (Postgres DATE would be
+  // more honest, but Prisma's cross-provider DateTime is what every other
+  // model here already uses, and consistency matters more than shaving one
+  // type out of the schema).
+  date    DateTime
+  seconds Int      @default(0)
+
+  @@id([userId, date])
 }
 
 model Highlight {

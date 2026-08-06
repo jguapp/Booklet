@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Article, SourceType } from "@booklet/shared";
+import type { Article, ReadingActivityDay, SourceType } from "@booklet/shared";
 import { computeReadingStats } from "@booklet/shared";
 import { loadArticles } from "@/lib/data/articles";
+import { loadReadingActivity } from "@/lib/data/reading-activity";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
 import { SourceIcon } from "@/components/library/source-icon";
@@ -20,20 +21,65 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-const HEATMAP_WEEKS = 12;
+// A full year, GitHub-contributions-style -- matches what
+// /api/stats/reading-activity itself returns (see that route's own
+// comment). The archivedAt-based fallback (anonymous/local mode, which has
+// no per-day data to ask the server for) uses the same window so both
+// sources lay out into the same size grid.
+const HEATMAP_WEEKS = 53;
 
 function dayKey(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+const HEAT_LEVEL_CLASS = ["bg-surface-2", "bg-accent/30", "bg-accent/55", "bg-accent/80", "bg-accent"];
+
+interface HeatmapDay {
+  date: Date;
+  level: number;
+  tooltip: string;
+}
+
+/** Real per-day reading time -- level buckets are minutes read, not article
+ * counts, since that's what this data actually measures (see
+ * ReadingActivityDay's own schema comment for why article-level events
+ * alone undercount real reading activity). */
+function levelFromMinutes(minutes: number): number {
+  if (minutes <= 0) return 0;
+  if (minutes < 10) return 1;
+  if (minutes < 25) return 2;
+  if (minutes < 45) return 3;
+  return 4;
+}
+
+/** Articles *finished* that day -- the only signal available without a
+ * signed-in account's server-tracked history (see loadReadingActivity's own
+ * comment). Undercounts real reading activity (a day spent partway through
+ * an article, finishing nothing, shows as blank) but is better than an
+ * empty heatmap for anonymous/local-mode use. */
+function levelFromFinishedCount(count: number): number {
+  if (count <= 0) return 0;
+  if (count === 1) return 1;
+  if (count === 2) return 2;
+  if (count <= 4) return 3;
+  return 4;
+}
+
 /** Last HEATMAP_WEEKS*7 days, oldest first, as a flat list -- rendered into
- * a 7-row (Sun-Sat) grid below by chunking every 7 into a week column. */
-function computeDailyActivity(articles: Article[]): { date: Date; count: number }[] {
-  const counts = new Map<string, number>();
-  for (const a of articles) {
-    if (!a.archivedAt) continue;
-    const key = dayKey(new Date(a.archivedAt));
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+ * a 7-row (Sun-Sat) grid below by chunking every 7 into a week column.
+ * `activity` (real per-day reading seconds) is preferred when available;
+ * falls back to deriving from articles' own archivedAt otherwise. */
+function computeDailyActivity(articles: Article[], activity: ReadingActivityDay[] | null): HeatmapDay[] {
+  const minutesByDay = new Map<string, number>();
+  const finishedByDay = new Map<string, number>();
+  if (activity) {
+    for (const a of activity) minutesByDay.set(a.date, a.seconds / 60);
+  } else {
+    for (const a of articles) {
+      if (!a.archivedAt) continue;
+      const key = dayKey(new Date(a.archivedAt));
+      finishedByDay.set(key, (finishedByDay.get(key) ?? 0) + 1);
+    }
   }
 
   const today = new Date();
@@ -46,35 +92,29 @@ function computeDailyActivity(articles: Article[]): { date: Date; count: number 
   const start = new Date(end);
   start.setDate(start.getDate() - totalDays + 1);
 
-  const days: { date: Date; count: number }[] = [];
+  const days: HeatmapDay[] = [];
   for (let i = 0; i < totalDays; i++) {
     const d = new Date(start);
     d.setDate(d.getDate() + i);
-    days.push({ date: d, count: d > today ? 0 : (counts.get(dayKey(d)) ?? 0) });
+    const key = dayKey(d);
+    const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    if (d > today) {
+      days.push({ date: d, level: 0, tooltip: `${label}: no data yet` });
+    } else if (activity) {
+      const minutes = minutesByDay.get(key) ?? 0;
+      days.push({ date: d, level: levelFromMinutes(minutes), tooltip: `${label}: ${Math.round(minutes)} min read` });
+    } else {
+      const count = finishedByDay.get(key) ?? 0;
+      days.push({ date: d, level: levelFromFinishedCount(count), tooltip: `${label}: ${count} finished` });
+    }
   }
   return days;
 }
 
-const HEAT_LEVEL_CLASS = [
-  "bg-surface-2",
-  "bg-accent/30",
-  "bg-accent/55",
-  "bg-accent/80",
-  "bg-accent",
-];
-
-function heatLevel(count: number): number {
-  if (count <= 0) return 0;
-  if (count === 1) return 1;
-  if (count === 2) return 2;
-  if (count <= 4) return 3;
-  return 4;
-}
-
-function ActivityHeatmap({ articles }: { articles: Article[] }) {
-  const days = useMemo(() => computeDailyActivity(articles), [articles]);
+function ActivityHeatmap({ articles, activity }: { articles: Article[]; activity: ReadingActivityDay[] | null }) {
+  const days = useMemo(() => computeDailyActivity(articles, activity), [articles, activity]);
   const weeks = useMemo(() => {
-    const cols: { date: Date; count: number }[][] = [];
+    const cols: HeatmapDay[][] = [];
     for (let i = 0; i < days.length; i += 7) cols.push(days.slice(i, i + 7));
     return cols;
   }, [days]);
@@ -83,11 +123,11 @@ function ActivityHeatmap({ articles }: { articles: Article[] }) {
     <div className="flex gap-[3px] overflow-x-auto pb-1">
       {weeks.map((week, i) => (
         <div key={i} className="flex flex-col gap-[3px]">
-          {week.map(({ date, count }) => (
+          {week.map(({ date, level, tooltip }) => (
             <div
               key={dayKey(date)}
-              title={`${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}: ${count} finished`}
-              className={cn("h-[11px] w-[11px] rounded-[2px]", HEAT_LEVEL_CLASS[heatLevel(count)])}
+              title={tooltip}
+              className={cn("h-[11px] w-[11px] rounded-[2px]", HEAT_LEVEL_CLASS[level])}
             />
           ))}
         </div>
@@ -152,10 +192,15 @@ function SourceBreakdown({ articles }: { articles: Article[] }) {
 export default function StatsPage() {
   const { status, isAuthenticated } = useAuth();
   const [articles, setArticles] = useState<Article[] | null>(null);
+  // null while loading *or* for anonymous/local mode (no server history to
+  // ask for) -- ActivityHeatmap falls back to the archivedAt heuristic in
+  // both cases, so there's no separate loading state to track here.
+  const [activity, setActivity] = useState<ReadingActivityDay[] | null>(null);
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
     loadArticles(isAuthenticated).then(setArticles);
+    loadReadingActivity(isAuthenticated).then((res) => setActivity(res?.days ?? null));
   }, [status, isAuthenticated]);
 
   useEffect(() => {
@@ -196,10 +241,10 @@ export default function StatsPage() {
 
           <section>
             <h2 className="mb-3 font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">
-              Activity, last {HEATMAP_WEEKS} weeks
+              Days read, past year
             </h2>
             <div className="rounded-md border border-border bg-surface px-5 py-4">
-              <ActivityHeatmap articles={articles} />
+              <ActivityHeatmap articles={articles} activity={activity} />
             </div>
           </section>
 
