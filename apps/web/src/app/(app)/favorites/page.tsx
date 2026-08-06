@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, ArticleCollectionMemberships, Collection } from "@booklet/shared";
 import { ArticleCard } from "@/components/library/article-card";
-import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
+import { RenameDialog } from "@/components/ui/rename-dialog";
+import { loadArticles, renameArticle, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
 import { loadCollectionMemberships, loadCollections } from "@/lib/data/collections";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
@@ -14,6 +15,7 @@ export default function FavoritesPage() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [membership, setMembership] = useState<ArticleCollectionMemberships>({});
   const [loaded, setLoaded] = useState(false);
+  const [renaming, setRenaming] = useState<Article | null>(null);
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
@@ -55,6 +57,13 @@ export default function FavoritesPage() {
     setArticles((prev) => prev.filter((a) => a.id !== article.id));
   }
 
+  async function handleRenameConfirm(title: string) {
+    if (!renaming) return;
+    const updated = await renameArticle(renaming, title, isAuthenticated);
+    setArticles((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    setRenaming(null);
+  }
+
   function handleMembershipChange(articleId: string, collectionId: string, isMember: boolean) {
     setMembership((prev) => {
       const current = prev[articleId] ?? [];
@@ -85,6 +94,7 @@ export default function FavoritesPage() {
               article={article}
               onToggleArchived={handleToggleArchived}
               onToggleFavorited={handleToggleFavorited}
+              onRename={setRenaming}
               onDelete={handleDelete}
               collections={collections}
               authenticated={isAuthenticated}
@@ -94,6 +104,16 @@ export default function FavoritesPage() {
             />
           ))}
         </div>
+      )}
+
+      {renaming && (
+        <RenameDialog
+          title="Rename article"
+          label="Title"
+          initialValue={renaming.title ?? "Untitled"}
+          onCancel={() => setRenaming(null)}
+          onConfirm={handleRenameConfirm}
+        />
       )}
     </div>
   );

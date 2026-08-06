@@ -441,9 +441,12 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
       if (!existing) return reply.code(404).send({ error: "not_found", message: "Article not found." });
 
-      const { status, progressFraction, tags, favorited, deletedAt, activeReadingSecondsDelta } = request.body ?? {};
+      const { status, progressFraction, tags, favorited, deletedAt, activeReadingSecondsDelta, title } = request.body ?? {};
       if (status !== undefined && !STATUSES.includes(status)) {
         return reply.code(400).send({ error: "invalid_status", message: "Invalid status." });
+      }
+      if (title !== undefined && (typeof title !== "string" || !title.trim() || title.trim().length > 300)) {
+        return reply.code(400).send({ error: "invalid_title", message: "title must be 1-300 characters." });
       }
       if (
         progressFraction !== undefined &&
@@ -480,6 +483,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           where: { id: existing.id },
           data: {
             ...(progressFraction !== undefined ? { progressFraction } : {}),
+            ...(title !== undefined ? { title: title.trim() } : {}),
             ...(tags !== undefined ? { tags: [...new Set(tags.map((t) => t.trim()))] } : {}),
             ...(favorited !== undefined ? { favorited } : {}),
             ...(activeReadingSecondsDelta !== undefined

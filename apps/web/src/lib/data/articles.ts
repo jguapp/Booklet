@@ -330,6 +330,22 @@ export async function updateArticleTags(article: Article, tags: string[], authen
   return updated;
 }
 
+/** Renames an article. Really replaces the title (there's no separate
+ * "original" kept around to fall back to) -- same as every other field
+ * here, it works signed out against the local store too. */
+export async function renameArticle(article: Article, title: string, authenticated: boolean): Promise<Article> {
+  const cleaned = title.trim();
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: cleaned }),
+    });
+  }
+  const updated: Article = { ...article, title: cleaned, updatedAt: new Date().toISOString() };
+  await localArticles.put(updated);
+  return updated;
+}
+
 export async function updateArticleFavorited(
   article: Article,
   favorited: boolean,
