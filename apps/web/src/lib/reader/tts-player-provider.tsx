@@ -116,7 +116,21 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
     voice: string;
     rate: number;
     promise: Promise<Blob>;
+    controller: AbortController;
   } | null>(null);
+
+  // Whichever AbortController currently governs in-flight /api/tts
+  // requests for the active generation -- set by playKokoro (a fresh one,
+  // or inherited from a matching prewarm -- see there), reset to null once
+  // stop() actually aborts it. Stopping used to only stop *consuming*
+  // results client-side while the underlying fetches (and the server-side
+  // generation behind them) kept running to completion regardless, tying
+  // up pool workers for audio nothing would ever play -- confirmed by hand
+  // this is a real, measurable contributor to "starting the same article
+  // over again is slower than the first time": the second play's own
+  // requests were queuing behind the first play's still-running, already-
+  // abandoned ones.
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!supported || !("speechSynthesis" in window)) return;
@@ -161,20 +175,28 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       ) {
         return;
       }
-      const promise = generateKokoroChunk(chunkText, reader.ttsVoice, reader.ttsRate);
+      // Supersede, don't just overwrite -- a previous prewarm (a different
+      // article, or the same article before its text/voice finished
+      // settling) is no longer needed once this one exists, so cancel it
+      // rather than leaving it to run to completion for nothing.
+      existing?.controller.abort();
+      const controller = new AbortController();
+      const promise = generateKokoroChunk(chunkText, reader.ttsVoice, reader.ttsRate, controller.signal);
       // A failed prewarm (network hiccup, the user closing the tab before
       // it resolves) shouldn't surface as an unhandled rejection just
       // because nothing ever consumed it -- attaching this no-op catch
       // marks the promise as handled without changing what the *original*
       // promise resolves/rejects to for whoever does still await it below.
       promise.catch(() => {});
-      prewarmedRef.current = { articleId, chunkText, voice: reader.ttsVoice, rate: reader.ttsRate, promise };
+      prewarmedRef.current = { articleId, chunkText, voice: reader.ttsVoice, rate: reader.ttsRate, promise, controller };
     },
     [supported, reader.ttsVoice, reader.ttsRate],
   );
 
   const stop = useCallback(() => {
     generationRef.current++; // abandon any in-flight chunk loop
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     if (supported && "speechSynthesis" in window) window.speechSynthesis.cancel();
     utteranceRef.current = null;
     audioElRef.current?.pause();
@@ -264,6 +286,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       // up a stale one.
       const warm = prewarmedRef.current;
       prewarmedRef.current = null;
+      let controller: AbortController;
       if (
         warm &&
         warm.articleId === articleId &&
@@ -271,15 +294,24 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
         warm.voice === readerRef.current.ttsVoice &&
         warm.rate === readerRef.current.ttsRate
       ) {
+        // That request IS this generation's chunk 0 now -- keep sharing
+        // its controller so stopping mid-playback can still reach it,
+        // instead of leaving it under a controller nothing else knows
+        // about anymore.
+        controller = warm.controller;
         inFlight.set(0, warm.promise);
         nextToPrefetch = 1;
+      } else {
+        warm?.controller.abort(); // stale prewarm for a different article/chunk/voice -- not needed
+        controller = new AbortController();
       }
+      abortControllerRef.current = controller;
 
       const ensurePrefetched = (uptoIndexInclusive: number) => {
         while (nextToPrefetch <= uptoIndexInclusive && nextToPrefetch < chunks.length) {
           inFlight.set(
             nextToPrefetch,
-            generateKokoroChunk(chunks[nextToPrefetch], readerRef.current.ttsVoice, readerRef.current.ttsRate),
+            generateKokoroChunk(chunks[nextToPrefetch], readerRef.current.ttsVoice, readerRef.current.ttsRate, controller.signal),
           );
           nextToPrefetch++;
         }

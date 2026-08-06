@@ -33,6 +33,14 @@ is read for the fallback behavior):
   in memory for the process's whole lifetime, not per-request. Real but
   moderate memory cost per worker; size this to the host's actual
   headroom rather than leaving the default unexamined on a small instance.
+- `TTS_CACHE_MAX_MB` (API, default `200`) -- caps the in-memory cache of
+  already-generated speech audio (`apps/api/src/services/tts-cache.ts`),
+  keyed by voice + speed + the exact text so replaying an article (or
+  re-reading a paragraph) skips generation entirely instead of paying the
+  full cost again. Held in the main server process's own memory (not a
+  separate cache service), evicted LRU once this cap is hit, and lost on a
+  restart -- it just repopulates as things get read again, not a real cost
+  at this app's scale.
 
 ## Database
 

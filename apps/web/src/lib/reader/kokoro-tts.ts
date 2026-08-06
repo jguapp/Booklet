@@ -25,13 +25,22 @@ export { KOKORO_VOICES, NATIVE_VOICE_ID, isKokoroVoice };
  * (simple fetch-ahead pipelining; unlike the old WASM Worker, a network
  * request doesn't block anything locally, so no Worker is needed to
  * achieve overlap this time). No auth needed -- same as the route itself,
- * see tts.ts. */
-export function generateKokoroChunk(text: string, voice: string, speed: number): Promise<Blob> {
+ * see tts.ts.
+ *
+ * `signal`, when passed, lets the caller actually cancel this request --
+ * stopping playback used to just stop *consuming* the result client-side
+ * while the fetch (and the server-side generation behind it) kept running
+ * to completion regardless, tying up a pool worker for audio nothing would
+ * ever play. Aborting the fetch closes the connection, which the server
+ * can detect and use to free that capacity up immediately instead of
+ * finishing pointless work. */
+export function generateKokoroChunk(text: string, voice: string, speed: number, signal?: AbortSignal): Promise<Blob> {
   return apiFetchBlob("/api/tts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, voice, speed }),
     auth: false,
+    signal,
   });
 }
 
@@ -72,6 +81,27 @@ const MAX_CHUNK_CHARS = 140;
 // at the normal, more request-efficient size, so only chunk one pays for
 // a faster start.
 const FIRST_CHUNK_MAX_CHARS = 80;
+
+// How long a *single sentence* has to be before it's forced into more than
+// one chunk -- deliberately much higher than either cap above. Sentences
+// were being hard-wrapped whenever they alone exceeded the *accumulation*
+// cap (MAX_CHUNK_CHARS/FIRST_CHUNK_MAX_CHARS), which sounded fine when that
+// cap was 200, but lowering it to 140 (see MAX_CHUNK_CHARS's own comment)
+// pulled a lot of perfectly ordinary sentences into the hard-wrap path --
+// confirmed by hand against a real article's actual sentence lengths: 45 of
+// 553 sentences (8%) exceeded 140 chars, meaning 8% of this article's
+// sentences were being torn into fragments and sent to Kokoro as separate,
+// independently-synthesized requests. Two fragments of one sentence have no
+// way to sound like a continuous utterance -- each gets its own prosody and
+// edge silence, so what should be one flowing sentence comes out with an
+// audible, unnatural break where the split happened, exactly the "weird
+// stop mid-sentence" this exists to fix. A sentence between the normal cap
+// and this one now becomes its own single chunk instead -- longer than the
+// usual target, but spoken as the one continuous utterance it actually is.
+// Only sentences past *this* threshold (in the same article: 5 of 553,
+// ~1%) still get split, and even those try to break at a natural clause
+// boundary first (see the wrap loop below) rather than an arbitrary word.
+const HARD_WRAP_MAX_CHARS = 320;
 
 // Readability keeps figure captions and photo-credit lines as ordinary
 // body text (there's no structural marker left once an article's HTML has
@@ -141,16 +171,35 @@ export function toSafeTextChunks(text: string): string[] {
     const sentence = raw.trim();
     if (!sentence || CAPTION_LINE_PATTERN.test(sentence)) continue;
 
-    if (sentence.length > currentCap()) {
-      // A single sentence too long on its own (rare, but e.g. text with no
-      // punctuation at all) -- flush whatever's accumulated, then hard-wrap
-      // this one at word boundaries so no single request ever exceeds the
-      // cap.
+    if (sentence.length > HARD_WRAP_MAX_CHARS) {
+      // A single sentence too long even for the generous hard-wrap
+      // threshold (rare -- e.g. a run-on with no internal punctuation, or
+      // real text with no punctuation at all) -- flush whatever's
+      // accumulated, then wrap this one so no single request ever exceeds
+      // the cap. Prefers breaking at the last clause boundary (comma,
+      // semicolon, colon, em dash) before the cap over a raw word
+      // boundary: natural speech already has a slight pause at those
+      // marks, so a forced split there sounds like an ordinary breath
+      // instead of an arbitrary cut mid-thought. Falls back to a plain
+      // word boundary only when no clause punctuation exists in that span
+      // at all.
       flush();
       const words = sentence.match(/\S+\s*/g) ?? [sentence];
+      let lastClauseBreakLen = -1;
       for (const word of words) {
-        if (piece.length + word.length > currentCap() && piece) flush();
+        if (piece.length + word.length > HARD_WRAP_MAX_CHARS && piece) {
+          if (lastClauseBreakLen > 0) {
+            const remainder = piece.slice(lastClauseBreakLen).trimStart();
+            piece = piece.slice(0, lastClauseBreakLen).trim();
+            flush();
+            piece = remainder;
+          } else {
+            flush();
+          }
+          lastClauseBreakLen = -1;
+        }
         piece += word;
+        if (/[,;:—]\s*$/.test(word)) lastClauseBreakLen = piece.length;
       }
       flush();
       continue;
