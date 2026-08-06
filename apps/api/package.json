@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
     "typecheck": "tsc --noEmit",
     "build": "pnpm typecheck && node scripts/build.mjs",
-    "start": "node dist/index.js",
+    "start": "node --env-file-if-exists=.env dist/index.js",
     "postinstall": "prisma generate && node scripts/copy-kokoro-voices.mjs",
     "dev:db": "tsx scripts/dev-db.ts",
     "migrate:pglite": "tsx scripts/migrate-pglite.ts",
