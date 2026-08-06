@@ -10,6 +10,7 @@
 // or via CI's bench-tts-ttfa job, which has the real network access this
 // sandbox doesn't (Kokoro's weights are fetched from Hugging Face).
 import { generateSpeechPooled } from "../src/services/tts-pool.js";
+import { closeRedis, isRedisConfigured } from "../src/services/redis-client.js";
 
 const VOICE = "af_heart";
 const SPEED = 1;
@@ -20,6 +21,7 @@ const SPEED = 1;
 const FIRST_CHUNK_TEXT = "The quick brown fox jumps over the lazy dog near the old wooden bridge.";
 const SECOND_CHUNK_TEXT = "A distant train whistle echoed through the quiet valley just after dawn.";
 const PREWARM_TEXT = "Rain tapped steadily against the window while the fire slowly burned low.";
+const DEDUPE_TEXT = "Snow fell on the empty platform long after the last train had gone.";
 const CONCURRENT_TEXTS = [
   "Morning fog settled over the harbor as the first boats left the dock.",
   "He counted the streetlights fading one by one as the sky grew lighter.",
@@ -76,7 +78,45 @@ async function main(): Promise<void> {
       `only ${(performance.now() - playPressedAt).toFixed(0)}ms still felt as TTFA after an 800ms head start`,
   );
 
+  // 6. In-flight de-duplication (tts-pool.ts's inFlightByKey). Five
+  // simultaneous requests for one previously-unseen chunk should cost one
+  // generation, not five -- this is the collision that happens for real
+  // every time speculative warming and the play loop ask for the same chunk
+  // at once. Compared against #2's measured single-generation cost rather
+  // than an absolute threshold, since runner CPU varies enormously.
+  const dedupeStart = performance.now();
+  const dedupeResults = await Promise.all(
+    Array.from({ length: 5 }, () => generateSpeechPooled(DEDUPE_TEXT, VOICE, SPEED)),
+  );
+  const dedupeMs = performance.now() - dedupeStart;
+  const identical = dedupeResults.every((b) => b === dedupeResults[0]);
+  console.log(`6. 5 concurrent identical requests: ${dedupeMs.toFixed(0)}ms, all shared one buffer: ${identical}`);
+
+  // 7. Redis (L2) hit. Only meaningful with REDIS_URL set -- the point is
+  // the tier that survives a restart, which is exactly what the in-process
+  // L1 cannot do. Simulated here by writing, then reading back through a
+  // module whose L1 has been cleared.
+  if (isRedisConfigured()) {
+    await timed("7. L2 (Redis) hit after L1 eviction", async () => {
+      const { getCachedSpeech } = await import("../src/services/tts-cache.js");
+      return getCachedSpeech(SECOND_CHUNK_TEXT, VOICE, SPEED);
+    });
+  } else {
+    console.log("7. L2 (Redis) hit: skipped -- no REDIS_URL set");
+  }
+
+  // Payload size is a first-class number here, not a footnote: at 24kHz the
+  // difference between 32-bit float and 16-bit PCM is ~48KB per second of
+  // speech, which on a slow connection is directly felt as time to first
+  // audio. Printing it means a regression shows up in CI logs.
+  const bytesPerSecond = 24000 * 2;
+  console.log(
+    `\nPayload: ${(cold.length / 1024).toFixed(0)}KB for chunk one ` +
+      `(~${(cold.length / bytesPerSecond).toFixed(1)}s of audio at 16-bit/24kHz)`,
+  );
+
   console.log("\n--- done ---");
+  await closeRedis();
   process.exit(0);
 }
 

@@ -33,6 +33,28 @@ is read for the fallback behavior):
   in memory for the process's whole lifetime, not per-request. Real but
   moderate memory cost per worker; size this to the host's actual
   headroom rather than leaving the default unexamined on a small instance.
+- `REDIS_URL` (API) -- a shared, persistent second tier for the generated-
+  speech cache (`apps/api/src/services/tts-cache.ts`). Without it the API
+  uses only its in-process cache, which is correct but lost on every restart
+  and every deploy, and not shared between instances -- meaning the first
+  person to read anything after a release pays the full multi-second
+  generation cost again for audio a previous instance had already produced.
+  With it, that audio survives restarts and is shared across instances and
+  across a user's devices. **Set a `maxmemory` and `allkeys-lru` on the Redis
+  itself** (see `docker-compose.yml` for the shape) -- these entries are pure
+  cache with a long TTL, so the right behavior under memory pressure is to
+  evict the coldest, not Redis's default of refusing new writes. The API
+  never blocks on Redis: lookups race a short timeout and a circuit breaker
+  skips it entirely after a failure, so a down or slow Redis degrades to
+  "no cache", never to "slow app".
+- `TTS_REDIS_TTL_DAYS` (API, default `30`) -- how long cached audio survives
+  in Redis without being read; refreshed on every hit.
+- `TTS_RATE_LIMIT_MAX` (API, default `600` in production) -- requests per IP
+  per 10 minutes against `/api/tts`. The default covers roughly 80 minutes of
+  generated audio per IP; raise it if a shared NAT/office address legitimately
+  hits it. **Read this together with `TRUST_PROXY` below** -- without that set
+  correctly, this limit applies to your proxy rather than per user, and no
+  value here is large enough.
 - `TTS_CACHE_MAX_MB` (API, default `200`) -- caps the in-memory cache of
   already-generated speech audio (`apps/api/src/services/tts-cache.ts`),
   keyed by voice + speed + the exact text so replaying an article (or
@@ -92,6 +114,18 @@ JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toStr
   and `chrome-extension://*` always (for the browser extension) -- in
   production it only allows the exact `WEB_ORIGIN` you set. Set it to
   your real deployed web app's origin.
+- **`TRUST_PROXY`**: set this to `true` if — and only if — the API sits
+  behind a reverse proxy or load balancer you control (Fly, Railway, Render,
+  nginx, Cloudflare; essentially every real deployment). Rate limiting keys
+  on `request.ip`, and without `trustProxy` that resolves to the *proxy's*
+  address rather than the client's, so **every user in the world shares a
+  single rate-limit bucket** and read-aloud stops working for everyone within
+  minutes of any real traffic. This is invisible locally and in
+  `docker-compose` because neither has a proxy in front, so test it
+  explicitly against your actual deployment. Leave it unset when nothing
+  trusted sits in front: `X-Forwarded-For` is client-controlled, so trusting
+  it without a proxy to overwrite it lets anyone bypass rate limiting by
+  spoofing a fresh IP per request.
 - **Rate limiting**: in-memory (`@fastify/rate-limit`'s default store) --
   fine for one instance, silently stops being a real limit if you run more
   than one API instance behind a load balancer without switching to a

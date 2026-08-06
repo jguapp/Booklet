@@ -14,7 +14,7 @@
  * it keeps each request small and bounded (see tts.ts's MAX_TEXT_LENGTH).
  */
 import { KOKORO_VOICES, NATIVE_VOICE_ID, isKokoroVoice, type TtsVoiceOption } from "@booklet/shared";
-import { apiFetchBlob } from "@/lib/api/client";
+import { apiFetch, apiFetchBlob } from "@/lib/api/client";
 
 export type { TtsVoiceOption as KokoroVoiceOption };
 export { KOKORO_VOICES, NATIVE_VOICE_ID, isKokoroVoice };
@@ -42,6 +42,32 @@ export function generateKokoroChunk(text: string, voice: string, speed: number, 
     auth: false,
     signal,
   });
+}
+
+/**
+ * Asks the server to generate these chunks into its cache without sending
+ * any audio back -- fire-and-forget, resolves as soon as the server has
+ * accepted the request rather than when generation finishes.
+ *
+ * Used for the chunks *after* the one the player holds itself: they only
+ * need to be cache hits by the time playback reaches them, not to be in the
+ * browser's hands up front. Warming them this way costs one small request
+ * instead of downloading several hundred kilobytes of audio that a reader
+ * who never presses play would never have used.
+ *
+ * Failures are swallowed: a warm that didn't happen just means that chunk
+ * gets generated normally when playback reaches it, which is exactly the
+ * behavior that existed before warming.
+ */
+export function warmKokoroChunks(texts: string[], voice: string, speed: number, signal?: AbortSignal): void {
+  if (texts.length === 0) return;
+  void apiFetch("/api/tts/warm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts, voice, speed }),
+    auth: false,
+    signal,
+  }).catch(() => {});
 }
 
 // The server caps a single request at 1000 characters (tts.ts's
@@ -139,7 +165,28 @@ const CAPTION_LINE_PATTERN =
 // of sentences and only flushing a chunk once it's actually close to
 // MAX_CHUNK_CHARS fixes this: those fragments just get grouped together
 // into normally-sized chunks instead of each paying its own request.
+// A single-entry memo, which is all this needs: the two callers
+// (prewarmFirstChunk and playKokoro, both in tts-player-provider.tsx) are
+// always handed the *same* readableText string for the article currently
+// open, so a one-slot cache hits every time while holding at most one
+// article's chunks alive.
+//
+// Worth having because this is not a cheap function: it runs several regex
+// passes over an entire article's extracted text -- synchronously, on the
+// main thread. It was running at least twice per article (once to prewarm,
+// once when play was pressed) plus once more on every re-render that
+// re-fired the prewarm effect, which for a long article is a visible stall
+// on the click path, right where it costs the most.
+let lastChunked: { text: string; chunks: string[] } | null = null;
+
 export function toSafeTextChunks(text: string): string[] {
+  if (lastChunked && lastChunked.text === text) return lastChunked.chunks;
+  const result = computeSafeTextChunks(text);
+  lastChunked = { text, chunks: result };
+  return result;
+}
+
+function computeSafeTextChunks(text: string): string[] {
   const chunks: string[] = [];
   // Collapses *every* whitespace run (not just newlines) before splitting
   // into sentences -- article-content.tsx's read-along re-derives this
@@ -167,11 +214,34 @@ export function toSafeTextChunks(text: string): string[] {
   // being accumulated right now is destined to become chunk one.
   const currentCap = () => (chunks.length === 0 ? FIRST_CHUNK_MAX_CHARS : MAX_CHUNK_CHARS);
 
+  // The width the hard-wrap loop below breaks at. Same first-chunk-is-special
+  // reasoning as currentCap(): whatever chunk one ends up being is the entire
+  // time-to-first-audio budget, so it's held to FIRST_CHUNK_MAX_CHARS even
+  // here, while every later fragment keeps the generous threshold that exists
+  // to stop ordinary sentences being torn apart.
+  const currentWrapWidth = () => (chunks.length === 0 ? FIRST_CHUNK_MAX_CHARS : HARD_WRAP_MAX_CHARS);
+
   for (const raw of sentences) {
     const sentence = raw.trim();
     if (!sentence || CAPTION_LINE_PATTERN.test(sentence)) continue;
 
-    if (sentence.length > HARD_WRAP_MAX_CHARS) {
+    // Evaluated *before* the accumulate/flush step below, so it reflects
+    // where this sentence is actually going to land. A sentence that will
+    // open chunk one (nothing flushed yet and nothing accumulating) is held
+    // to the first-chunk cap; anything else keeps the hard-wrap threshold.
+    //
+    // Without this, a single opening sentence longer than the 80-char cap
+    // but shorter than 320 skipped the wrap path entirely and became an
+    // unsplit chunk one -- up to 4x the budget that exists specifically to
+    // bound time-to-first-audio, and since generation time scales with chunk
+    // length, up to 4x the wait before a single word is heard. Splitting it
+    // costs a clause-boundary seam mid-sentence (the wrap loop prefers
+    // those, so it reads as an ordinary breath), which is a deliberate trade
+    // for chunk one only -- every later sentence still gets to stay whole.
+    const opensFirstChunk = chunks.length === 0 && !piece;
+    const wrapAt = opensFirstChunk ? FIRST_CHUNK_MAX_CHARS : HARD_WRAP_MAX_CHARS;
+
+    if (sentence.length > wrapAt) {
       // A single sentence too long even for the generous hard-wrap
       // threshold (rare -- e.g. a run-on with no internal punctuation, or
       // real text with no punctuation at all) -- flush whatever's
@@ -187,7 +257,7 @@ export function toSafeTextChunks(text: string): string[] {
       const words = sentence.match(/\S+\s*/g) ?? [sentence];
       let lastClauseBreakLen = -1;
       for (const word of words) {
-        if (piece.length + word.length > HARD_WRAP_MAX_CHARS && piece) {
+        if (piece.length + word.length > currentWrapWidth() && piece) {
           if (lastClauseBreakLen > 0) {
             const remainder = piece.slice(lastClauseBreakLen).trimStart();
             piece = piece.slice(0, lastClauseBreakLen).trim();
