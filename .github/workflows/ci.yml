@@ -124,6 +124,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @booklet/api exec prisma migrate deploy
       - run: pnpm --filter @booklet/web exec playwright install --with-deps chromium
+      # Same reason as the bench job: the API's three TTS workers all
+      # cold-miss the model cache at once and race writing it, which
+      # produced a corrupt model and left read-aloud non-functional for the
+      # whole run (tts-player.spec.ts timing out at 60s waiting for
+      # playback). Fetch it once, single-process, first. See #161 for the
+      # durable fix.
+      - run: node apps/api/scripts/prefetch-tts-model.mjs
       - run: pnpm --filter @booklet/api dev &
       - run: pnpm --filter @booklet/web dev &
       - name: Wait for API and web to be ready
