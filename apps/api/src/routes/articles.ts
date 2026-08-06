@@ -9,6 +9,7 @@ import type {
 } from "@booklet/shared";
 import { canonicalizeUrl } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
+import { utcMidnight } from "../lib/dates.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
 import { EpubExtractionError, extractEpubText } from "../services/epub-extraction.js";
@@ -474,29 +475,44 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       }
 
       const now = new Date();
-      const article = await prisma.article.update({
-        where: { id: existing.id },
-        data: {
-          ...(progressFraction !== undefined ? { progressFraction } : {}),
-          ...(tags !== undefined ? { tags: [...new Set(tags.map((t) => t.trim()))] } : {}),
-          ...(favorited !== undefined ? { favorited } : {}),
-          ...(activeReadingSecondsDelta !== undefined
-            ? { activeReadingSeconds: { increment: activeReadingSecondsDelta } }
-            : {}),
-          // The client signals trash/restore by presence, not by trusting a
-          // client-supplied timestamp -- the server always stamps its own
-          // `now()` for "trash it", same reasoning as readAt/archivedAt below.
-          ...(deletedAt !== undefined ? { deletedAt: deletedAt === null ? null : now } : {}),
-          ...(status !== undefined
-            ? {
-                status,
-                readAt: status === "READING" && !existing.readAt ? now : existing.readAt,
-                archivedAt: status === "ARCHIVED" && !existing.archivedAt ? now : existing.archivedAt,
-                ...(status === "UNREAD" ? { readAt: null, archivedAt: null } : {}),
-              }
-            : {}),
-        },
-      });
+      const [article] = await prisma.$transaction([
+        prisma.article.update({
+          where: { id: existing.id },
+          data: {
+            ...(progressFraction !== undefined ? { progressFraction } : {}),
+            ...(tags !== undefined ? { tags: [...new Set(tags.map((t) => t.trim()))] } : {}),
+            ...(favorited !== undefined ? { favorited } : {}),
+            ...(activeReadingSecondsDelta !== undefined
+              ? { activeReadingSeconds: { increment: activeReadingSecondsDelta } }
+              : {}),
+            // The client signals trash/restore by presence, not by trusting a
+            // client-supplied timestamp -- the server always stamps its own
+            // `now()` for "trash it", same reasoning as readAt/archivedAt below.
+            ...(deletedAt !== undefined ? { deletedAt: deletedAt === null ? null : now } : {}),
+            ...(status !== undefined
+              ? {
+                  status,
+                  readAt: status === "READING" && !existing.readAt ? now : existing.readAt,
+                  archivedAt: status === "ARCHIVED" && !existing.archivedAt ? now : existing.archivedAt,
+                  ...(status === "UNREAD" ? { readAt: null, archivedAt: null } : {}),
+                }
+              : {}),
+          },
+        }),
+        // Same delta that just went into Article.activeReadingSeconds's
+        // lifetime total, also bucketed by *today* -- see
+        // ReadingActivityDay's own schema comment for why this needs to be
+        // a separate table rather than derived from Article's timestamps.
+        ...(activeReadingSecondsDelta !== undefined && activeReadingSecondsDelta > 0
+          ? [
+              prisma.readingActivityDay.upsert({
+                where: { userId_date: { userId: request.userId!, date: utcMidnight(now) } },
+                create: { userId: request.userId!, date: utcMidnight(now), seconds: activeReadingSecondsDelta },
+                update: { seconds: { increment: activeReadingSecondsDelta } },
+              }),
+            ]
+          : []),
+      ]);
 
       return reply.send(toArticle(article));
     },
