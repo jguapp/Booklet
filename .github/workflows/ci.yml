@@ -129,6 +129,23 @@ jobs:
       # extraction endpoint instead of skipping coverage silently.
       - run: pnpm --filter @booklet/web test:e2e
 
+  bench-tts-ttfa:
+    # One-off: measures real Kokoro TTFA (cold pool, warm/uncached, cache
+    # hit, concurrent chunks, prewarm head-start) -- see
+    # apps/api/scripts/bench-tts-ttfa.ts. Needs real network access to fetch
+    # Kokoro's weights from Hugging Face, and no Postgres -- the TTS
+    # pipeline itself never touches the database.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @booklet/api exec tsx scripts/bench-tts-ttfa.ts
+
   docker-build:
     runs-on: ubuntu-latest
     steps:
