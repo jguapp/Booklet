@@ -21,3 +21,4 @@ export * from "./recap";
 export * from "./kindle-clippings";
 export * from "./highlight-colors";
 export * from "./tts-voices";
+export * from "./tts-chunking";
