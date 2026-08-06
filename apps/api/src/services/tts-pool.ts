@@ -17,6 +17,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getCachedSpeech, setCachedSpeech } from "./tts-cache.js";
 
 const require = createRequire(import.meta.url);
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -136,12 +137,17 @@ export function warmTtsPool(): void {
   ensureStarted();
 }
 
-export function generateSpeechPooled(text: string, voice: string, speed: number): Promise<Buffer> {
+export async function generateSpeechPooled(text: string, voice: string, speed: number): Promise<Buffer> {
+  const cached = getCachedSpeech(text, voice, speed);
+  if (cached) return cached;
+
   ensureStarted();
-  return new Promise((resolve, reject) => {
+  const buffer = await new Promise<Buffer>((resolve, reject) => {
     queue.push({ text, voice, speed, resolve, reject });
     pump();
   });
+  setCachedSpeech(text, voice, speed, buffer);
+  return buffer;
 }
 
 function shutdown(): void {
