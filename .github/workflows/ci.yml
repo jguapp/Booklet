@@ -136,6 +136,22 @@ jobs:
       - name: Wait for API and web to be ready
         run: |
           npx wait-on http://localhost:4000/api/health http://localhost:3000 --timeout 60000
+      # Generate one small chunk before the suite starts, so the first TTS
+      # spec doesn't pay the pool's cold start inside its own assertion
+      # window. /api/health goes green while the pool is still spawning
+      # workers and loading a model into each, and on a 2-vCPU runner
+      # already busy with Next and Postgres that first generation can
+      # exceed the 60s the spec allows -- which is exactly how it failed.
+      # The second TTS spec passed in the same run, warm, which is what
+      # identified this as cold start rather than a broken pipeline.
+      # `|| true`: this is a warm-up, not a gate. If it fails the specs
+      # will report it far more legibly than a bare curl exit code.
+      - name: Warm the TTS pool
+        run: |
+          curl -sS -X POST http://localhost:4000/api/tts \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"Warming up.","voice":"af_heart","speed":1}' \
+            --max-time 180 -o /dev/null -w 'warm-up HTTP %{http_code} in %{time_total}s\n' || true
       # Playwright starts the article fixture server itself (see
       # playwright.config.ts's webServer). One spec, save-real-url.spec.ts,
       # still fetches a genuine public URL so real-world extraction stays
