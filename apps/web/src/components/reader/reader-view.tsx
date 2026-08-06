@@ -10,6 +10,7 @@ import {
   loadArticle,
   loadArticleFile,
   loadArticles,
+  renameArticle,
   sendArticleToKindle,
   updateArticleProgress,
   updateArticleStatus,
@@ -21,6 +22,8 @@ import { ApiError } from "@/lib/api/client";
 import { formatMinutesLeft, formatReadingTime } from "@/lib/format";
 import { textToParagraphHtml } from "@/lib/reader/text-to-html";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
+import { IconPencil } from "@/components/ui/icons";
+import { RenameDialog } from "@/components/ui/rename-dialog";
 import { ReaderToolbar } from "./reader-toolbar";
 import { ReaderProgressBar } from "./reader-progress-bar";
 import { NotebookPanel } from "./notebook-panel";
@@ -67,6 +70,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const size = reader.size;
   const { toast } = useToast();
   const [sendingToKindle, setSendingToKindle] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [article, setArticle] = useState<Article | null>(null);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [progress, setProgress] = useState(0);
@@ -444,6 +448,13 @@ export function ReaderView({ articleId }: { articleId: string }) {
     setArticle(updated);
   }
 
+  async function handleRenameConfirm(title: string) {
+    if (!article) return;
+    const updated = await renameArticle(article, title, isAuthenticated);
+    setArticle(updated);
+    setRenaming(false);
+  }
+
   async function handleSendToKindle() {
     if (!article) return;
     setSendingToKindle(true);
@@ -513,8 +524,16 @@ export function ReaderView({ articleId }: { articleId: string }) {
           <span className="font-sans text-xs uppercase tracking-wide">{article.sourceType}</span>
         </div>
 
-        <h1 className="mb-3 text-balance font-serif text-[34px] font-semibold leading-tight text-ink">
+        <h1 className="group mb-3 flex items-start gap-2 text-balance font-serif text-[34px] font-semibold leading-tight text-ink">
           {article.title}
+          <button
+            type="button"
+            title="Rename"
+            onClick={() => setRenaming(true)}
+            className="mt-2.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface-2 hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <IconPencil className="h-4 w-4" />
+          </button>
         </h1>
         <p className="mb-5 font-sans text-xs text-ink-faint">
           {article.url ? (
@@ -737,6 +756,16 @@ export function ReaderView({ articleId }: { articleId: string }) {
       )}
 
       {reader.showProgressBar && <ReaderProgressBar progress={progress} remainingMinutes={remainingMinutes} />}
+
+      {renaming && (
+        <RenameDialog
+          title="Rename article"
+          label="Title"
+          initialValue={article.title ?? "Untitled"}
+          onCancel={() => setRenaming(false)}
+          onConfirm={handleRenameConfirm}
+        />
+      )}
     </div>
   );
 }

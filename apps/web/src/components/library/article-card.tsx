@@ -6,7 +6,7 @@ import { formatReadingTime, formatRelativeDate } from "@/lib/format";
 import { SourceIcon } from "./source-icon";
 import { StatusBadge } from "./status-badge";
 import { CollectionMenu } from "./collection-menu";
-import { IconArchive, IconFolder, IconInbox, IconStar, IconTrash } from "@/components/ui/icons";
+import { IconArchive, IconFolder, IconInbox, IconPencil, IconStar, IconTrash } from "@/components/ui/icons";
 import { ARTICLE_DRAG_MIME } from "@/lib/dnd/trash-drop";
 import { cn } from "@/lib/cn";
 
@@ -14,6 +14,7 @@ interface ArticleCardProps {
   article: Article;
   onToggleArchived?: (article: Article) => void;
   onToggleFavorited?: (article: Article) => void;
+  onRename?: (article: Article) => void;
   onDelete?: (article: Article) => void;
   collections?: Collection[];
   authenticated?: boolean;
@@ -30,6 +31,7 @@ export function ArticleCard({
   article,
   onToggleArchived,
   onToggleFavorited,
+  onRename,
   onDelete,
   collections,
   authenticated,
@@ -106,6 +108,20 @@ export function ArticleCard({
               className="flex h-6 w-6 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface-2 hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
             >
               {isArchived ? <IconInbox className="h-3.5 w-3.5" /> : <IconArchive className="h-3.5 w-3.5" />}
+            </button>
+          )}
+          {onRename && (
+            <button
+              type="button"
+              title="Rename"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onRename(article);
+              }}
+              className="flex h-6 w-6 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity hover:bg-surface-2 hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
+            >
+              <IconPencil className="h-3.5 w-3.5" />
             </button>
           )}
           {collections && authenticated !== undefined && (
