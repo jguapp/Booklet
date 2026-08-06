@@ -99,6 +99,10 @@ export interface UpdateArticleRequest {
   progressFraction?: number;
   tags?: string[];
   favorited?: boolean;
+  /** User-renamed title -- overwrites whatever extraction found (or
+   * "Untitled"). Trimmed, 1-300 chars. There's no separate "original
+   * title" kept anywhere once this is set; it really does replace it. */
+  title?: string;
   /** Set to trash it, null to restore. */
   deletedAt?: string | null;
   /** Seconds to add to activeReadingSeconds since the last flush -- an

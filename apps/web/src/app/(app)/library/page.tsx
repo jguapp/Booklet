@@ -10,8 +10,9 @@ import { IconSearch } from "@/components/ui/icons";
 import { ArticleCard } from "@/components/library/article-card";
 import { SaveArticleModal } from "@/components/library/save-article-modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { RenameDialog } from "@/components/ui/rename-dialog";
 import { cn } from "@/lib/cn";
-import { loadArticles, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
+import { loadArticles, renameArticle, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
 import { loadArticlesInCollection, loadCollectionMemberships, loadCollections } from "@/lib/data/collections";
 import { searchLibrary } from "@/lib/data/search";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
@@ -58,6 +59,7 @@ function LibraryPageInner() {
   const [searchResults, setSearchResults] = useState<{ articles: Article[]; highlights: Highlight[] } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [confirmingHoarding, setConfirmingHoarding] = useState<number | null>(null); // current unread count, while the "you sure?" prompt is up
+  const [renaming, setRenaming] = useState<Article | null>(null);
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
@@ -152,6 +154,13 @@ function LibraryPageInner() {
   async function handleDelete(article: Article) {
     await trashArticle(article, isAuthenticated);
     setArticles((prev) => prev.filter((a) => a.id !== article.id));
+  }
+
+  async function handleRenameConfirm(title: string) {
+    if (!renaming) return;
+    const updated = await renameArticle(renaming, title, isAuthenticated);
+    setArticles((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    setRenaming(null);
   }
 
   function handleMembershipChange(articleId: string, collectionId: string, isMember: boolean) {
@@ -272,6 +281,7 @@ function LibraryPageInner() {
               article={article}
               onToggleArchived={handleToggleArchived}
               onToggleFavorited={handleToggleFavorited}
+              onRename={setRenaming}
               onDelete={handleDelete}
               collections={collections}
               authenticated={isAuthenticated}
@@ -326,6 +336,16 @@ function LibraryPageInner() {
             setConfirmingHoarding(null);
             setModalOpen(true);
           }}
+        />
+      )}
+
+      {renaming && (
+        <RenameDialog
+          title="Rename article"
+          label="Title"
+          initialValue={renaming.title ?? "Untitled"}
+          onCancel={() => setRenaming(null)}
+          onConfirm={handleRenameConfirm}
         />
       )}
     </div>
