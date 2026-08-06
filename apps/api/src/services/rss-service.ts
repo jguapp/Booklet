@@ -1,5 +1,5 @@
-import dns from "node:dns/promises";
 import { JSDOM } from "jsdom";
+import { checkPublicHost } from "../lib/private-address.js";
 import type { FetchedFeed, FeedItem } from "@booklet/shared";
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -125,32 +125,11 @@ async function fetchXml(rawUrl: string): Promise<string> {
 }
 
 async function assertPublicHost(hostname: string): Promise<void> {
-  let addresses: { address: string; family: number }[];
-  try {
-    addresses = await dns.lookup(hostname, { all: true });
-  } catch {
-    throw new FeedFetchError("Couldn't resolve that host.");
-  }
-  if (addresses.length === 0 || addresses.some((a) => isPrivateOrReservedIp(a.address, a.family))) {
-    throw new FeedFetchError("That URL points to a private or reserved network address.");
-  }
-}
-
-function isPrivateOrReservedIp(address: string, family: number): boolean {
-  if (family === 4) {
-    const [a, b] = address.split(".").map(Number);
-    if (a === 10 || a === 127 || a === 0) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-    return false;
-  }
-
-  const lower = address.toLowerCase();
-  if (lower === "::1" || lower === "::") return true;
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // fc00::/7 unique local
-  if (lower.startsWith("fe80")) return true; // link-local
-  if (lower.startsWith("::ffff:")) return isPrivateOrReservedIp(lower.slice("::ffff:".length), 4);
-  return false;
+  const check = await checkPublicHost(hostname);
+  if (check.ok) return;
+  throw new FeedFetchError(
+    check.reason === "unresolvable"
+      ? "Couldn't resolve that host."
+      : "That URL points to a private or reserved network address.",
+  );
 }

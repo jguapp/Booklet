@@ -76,7 +76,7 @@ test("HTML: a highlight appears in the Notebook tab, and clicking it jumps back 
 }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/long-article.html");  // long enough to scroll well past the highlight
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
   await page.locator("a[href^='/reader/']").first().click();
