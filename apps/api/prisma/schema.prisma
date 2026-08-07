@@ -340,6 +340,7 @@ model Article {
 
   highlights  Highlight[]
   collections ArticleCollection[]
+  embeddings  ArticleEmbedding[]
 
   @@unique([userId, url])
   @@index([userId, status])
@@ -347,6 +348,13 @@ model Article {
   @@index([userId, favorited])
   @@index([userId, deletedAt])
   @@index([userId, canonicalUrl])
+  /// The GIN index backing search (#155). Declared here as well as in its
+  /// migration for the same reason searchVector itself is: anything Prisma
+  /// cannot see, it treats as drift. Leaving it out made the very next
+  /// `migrate dev` emit a DROP for it against the shadow database, which
+  /// failed the whole migration -- a raw-SQL index is not a thing you can
+  /// create once and forget about.
+  @@index([searchVector], type: Gin)
 }
 
 // One row per (user, calendar day) that had any active reading time, for
@@ -372,6 +380,43 @@ model ReadingActivityDay {
   seconds Int      @default(0)
 
   @@id([userId, date])
+}
+
+/// One embedded window of an article's text, for semantic search (#156).
+///
+/// Several rows per article, not one: all-MiniLM-L6-v2 truncates at 256 word
+/// pieces, so embedding a whole article does not average it -- it embeds the
+/// opening and silently discards the rest, making a mid-article passage
+/// unfindable. See chunkForEmbedding in packages/shared.
+///
+/// `vector` is a plain Float[] (Postgres double precision[]) rather than a
+/// pgvector column, and that is a decision this issue asked to be recorded
+/// rather than a shortcut. pgvector is not available in the postgres:16 image
+/// that CI and docker-compose both run -- `SELECT * FROM
+/// pg_available_extensions WHERE name = 'vector'` returns nothing -- so
+/// adopting it would mean changing the image in CI, in compose, and in
+/// whatever a real deployment ends up using, plus an extension this app
+/// otherwise has no need for. At one person's library, similarity over a few
+/// thousand 384-float vectors is milliseconds in process. Revisit if a
+/// library ever grows to where a scan is the bottleneck, which is the point
+/// at which an ANN index actually earns its dependency.
+model ArticleEmbedding {
+  id        String  @id @default(cuid())
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  /// Denormalized from article.userId so a search can scope by user without
+  /// joining -- same reasoning as Highlight.userId. Deliberately not a
+  /// relation: it is a query-scoping copy, and the cascade that actually
+  /// matters (article deleted -> embeddings deleted) comes from `article`.
+  userId String
+
+  chunkIndex Int
+  vector     Float[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([articleId, chunkIndex])
+  @@index([userId])
 }
 
 model Highlight {
