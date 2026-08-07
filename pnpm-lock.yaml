@@ -209,6 +209,9 @@ importers:
       '@datadog/browser-rum':
         specifier: ^7.7.0
         version: 7.7.0
+      '@huggingface/transformers':
+        specifier: ^3.8.1
+        version: 3.8.1
       '@sentry/browser':
         specifier: ^10.68.0
         version: 10.68.0

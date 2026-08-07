@@ -9,11 +9,15 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:worker": "node scripts/build-embedding-worker.mjs",
+    "predev": "node scripts/build-embedding-worker.mjs",
+    "prebuild": "node scripts/build-embedding-worker.mjs"
   },
   "dependencies": {
     "@booklet/shared": "workspace:*",
     "@datadog/browser-rum": "^7.7.0",
+    "@huggingface/transformers": "^3.8.1",
     "@sentry/browser": "^10.68.0",
     "epubjs": "^0.3.93",
     "jszip": "^3.10.1",
