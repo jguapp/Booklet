@@ -33,6 +33,10 @@ function article(over: Partial<Article> & { id: string }): Article {
     skippedImageCount: 0,
     progressFraction: 0,
     activeReadingSeconds: 0,
+    // Never listened (#152) -- irrelevant to search, but Article requires it.
+    listeningFraction: null,
+    listeningUpdatedAt: null,
+    listeningDeviceId: null,
     tags: [],
     status: "UNREAD",
     savedAt: "2024-01-01T00:00:00.000Z",
