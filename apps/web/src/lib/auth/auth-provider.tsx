@@ -14,9 +14,17 @@ import type {
 } from "@booklet/shared";
 import { apiFetch } from "@/lib/api/client";
 import { clearAccessToken, getAccessToken, setAccessToken, silentRefresh } from "@/lib/auth/session";
-import { migrateLocalDataToAccount } from "@/lib/data/sync";
+import { migrateLocalDataToAccount, PartialMigrationError } from "@/lib/data/sync";
+import { localArticles } from "@/lib/local/db";
 
 type AuthStatus = "loading" | "authenticated" | "anonymous";
+
+export interface SyncFailure {
+  /** How many articles are still sitting in IndexedDB, un-migrated. */
+  remainingArticles: number;
+  /** What did make it across before the failure, if anything. */
+  partial: ImportResponse | null;
+}
 
 interface AuthContextValue {
   status: AuthStatus;
@@ -29,6 +37,11 @@ interface AuthContextValue {
   updateSettings: (input: UpdateSettingsRequest) => Promise<void>;
   /** Result of the most recent local→account import (on signup/login, or a manual re-sync). */
   lastSyncResult: ImportResponse | null;
+  /** Set when an import didn't fully land, so the library can say so and offer
+   * a retry. Everything still listed here is still in IndexedDB -- the point
+   * of surfacing it is that a silent failure looks exactly like "my library
+   * was deleted when I signed up" (#164). */
+  syncFailure: SyncFailure | null;
   /** Manual re-sync -- a safety net if the automatic import on login/signup ever fails partway. */
   syncLocalData: () => Promise<ImportResponse>;
   dismissSyncResult: () => void;
@@ -40,10 +53,23 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** Only reached when the migration threw before it could report progress
+ * (a bug, or IndexedDB itself failing) -- the batched path carries its own
+ * count. Best-effort: if even this read fails there is nothing useful left
+ * to say beyond "it didn't work". */
+async function countLocalArticles(): Promise<number> {
+  try {
+    return (await localArticles.getAll()).length;
+  } catch {
+    return 0;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [user, setUser] = useState<UserProfile | null>(null);
   const [lastSyncResult, setLastSyncResult] = useState<ImportResponse | null>(null);
+  const [syncFailure, setSyncFailure] = useState<SyncFailure | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,12 +103,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const runMigration = useCallback(async () => {
     try {
       const result = await migrateLocalDataToAccount();
+      setSyncFailure(null);
       if (result.importedArticles > 0 || result.importedHighlights > 0) {
         setLastSyncResult(result);
       }
-    } catch {
-      // Best-effort -- local data is left untouched on failure (migrateLocalDataToAccount
-      // only clears IndexedDB after a successful import), so syncLocalData() can retry later.
+    } catch (err) {
+      // Never swallowed. The data does survive -- migrateLocalDataToAccount
+      // only drops a batch from IndexedDB once the server has accepted it --
+      // but from behind the screen an unreported failure is indistinguishable
+      // from "signing up deleted my library", because every module in
+      // lib/data/* switches to reading from the server the moment status
+      // becomes authenticated. Recording it lets the library say what
+      // happened and offer the retry that was always possible (#164).
+      const partial = err instanceof PartialMigrationError ? err.progress : null;
+      const remaining =
+        err instanceof PartialMigrationError ? err.remainingArticles : await countLocalArticles();
+      setSyncFailure({ remainingArticles: remaining, partial });
+      if (partial && (partial.importedArticles > 0 || partial.importedHighlights > 0)) {
+        setLastSyncResult(partial);
+      }
     }
   }, []);
 
@@ -117,8 +156,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const syncLocalData = useCallback(async () => {
+    // Deliberately not try/caught: this one is user-initiated (the retry on
+    // the library's failure notice), so the caller shows the error and the
+    // notice stays put until an attempt actually succeeds.
     const result = await migrateLocalDataToAccount();
     setLastSyncResult(result);
+    setSyncFailure(null);
     return result;
   }, []);
 
@@ -133,6 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearAccessToken();
     setUser(null);
     setLastSyncResult(null);
+    setSyncFailure(null);
     setStatus("anonymous");
   }, []);
 
@@ -180,6 +224,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         updateSettings,
         lastSyncResult,
+        syncFailure,
         syncLocalData,
         dismissSyncResult,
         requestPasswordReset,
