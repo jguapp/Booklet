@@ -24,6 +24,18 @@ const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url),
 // @booklet/shared is deliberately excluded from this list: unlike
 // everything else here, it's unbuilt workspace TypeScript, so it has to be
 // inlined, not externalized.
+//
+// The corollary, and it has bitten once: importing a package that is only a
+// *transitive* dependency leaves it un-externalized, so esbuild tries to
+// bundle it. For a pure-JS package that merely bloats the output; for
+// anything with a native binding it fails outright. Importing
+// @huggingface/transformers directly (to configure the ONNX session, #162)
+// pulled in onnxruntime-node and broke the Docker build with "No loader is
+// configured for '.node' files" -- while `tsc --noEmit` was perfectly happy,
+// because type-checking resolves through node_modules and never asks who
+// declared what. The fix is to declare it as a real dependency, which is
+// correct regardless: relying on a transitive is a break waiting for kokoro-js
+// to change its own dependency list.
 const external = Object.keys(pkg.dependencies ?? {}).filter((name) => name !== "@booklet/shared");
 
 const shared = {

@@ -634,6 +634,94 @@
           </p>
         </div>
 
+        <h4 id="local-migration">Crossing the seam: local &rarr; account</h4>
+        <p>
+          That migration is the single riskiest moment in the whole
+          offline-first design, and it is worth understanding why. The
+          instant <code>status</code> becomes <code>authenticated</code>,
+          <em>every</em> module in <code>lib/data/*</code> switches to reading
+          from the server. If the migration hasn't landed by then, the reader
+          sees an empty library — and from behind the screen "the import
+          failed" and "signing up deleted everything I saved" look exactly the
+          same.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">A real ship blocker: the silent empty library</span>
+          <p>
+            <code>migrateLocalDataToAccount()</code> used to POST the entire
+            local library — every article's full
+            <code>extractedHtml</code> included — as one JSON body. Fastify's
+            <code>bodyLimit</code> was never set, so it was the default
+            <strong>1&nbsp;MB</strong>, and the request was rejected with a
+            <code>413</code> before the route was even reached. The caller
+            wrapped it in <code>catch {}</code>: no toast, no log, no retry.
+            Signup carried on regardless.
+          </p>
+          <p>
+            This was not an edge case for large libraries. Extraction inlines
+            images as base64 data URIs up to 15&nbsp;MB an article, and base64
+            inflates bytes by about a third — so <strong>one ordinary
+            image-heavy save could exceed the limit on its own</strong>.
+          </p>
+          <p>
+            The data was never actually destroyed (IndexedDB is only cleared
+            after a <em>successful</em> import), which is exactly what made it
+            so easy to miss: nothing was lost, and nothing said so.
+          </p>
+        </div>
+        <p>
+          The fix has four parts, and the interesting thing is that only the
+          first is about the size limit:
+        </p>
+        <ul>
+          <li><strong>Batched by real serialized bytes</strong> (~4&nbsp;MB a
+            batch), with each batch dropped from IndexedDB only once the
+            server has accepted it. A failure part-way leaves the remainder
+            intact and a retry <em>resumes</em> rather than restarting. An
+            article larger than the target still goes alone, because an
+            article is the smallest thing the route can accept.</li>
+          <li><strong>A deliberate 32&nbsp;MB <code>bodyLimit</code></strong>,
+            scoped to that one route — sized for the largest single article
+            rather than left at an accidental default. Fastify parses bodies
+            before <code>preHandler</code>, so this buffer is reachable
+            pre-authentication; that exposure is bounded by the global rate
+            limit and confined to one route rather than raised app-wide.</li>
+          <li><strong>The failure is surfaced</strong>: the library says how
+            many articles are still on the device, states plainly that nothing
+            was lost, and offers a retry.</li>
+          <li><strong>The writes are batched server-side.</strong> The route
+            issued a <code>findUnique</code> + <code>create</code> per article
+            <em>and</em> per highlight — roughly 4,000 serialized round trips
+            for a 2,000-article Pocket import, inside one HTTP request. Ids
+            are generated up front so <code>createMany</code> can be used and
+            the localId&nbsp;&rarr;&nbsp;server-id mapping still comes back
+            without a per-row query. Measured on 502 articles and 501
+            highlights: <strong>6,754&nbsp;ms &rarr; 1,186&nbsp;ms</strong>.</li>
+        </ul>
+        <div class="callout">
+          <span class="callout-label">Batching exposed two more bugs</span>
+          <p>
+            Both were latent before and would have stayed invisible without
+            it. Two local articles sharing a URL tripped
+            <code>@@unique([userId, url])</code> and took the whole batch down
+            — fine when rows went in one at a time, fatal in a
+            <code>createMany</code>. And highlights have no unique constraint,
+            so <strong>any replay duplicated them</strong>. That second one
+            only became reachable <em>because</em> of the retry design: a
+            batch the server committed but whose response was lost gets sent
+            again, and would have silently doubled someone's notebook. Both
+            are now deduplicated and covered by tests.
+          </p>
+        </div>
+        <p>
+          One suggestion was deliberately <strong>not</strong> taken: dropping
+          <code>extractedHtml</code> for articles that have a
+          <code>url</code>, on the grounds that the server could re-extract
+          it. It could — but not for a page that has since changed or gone
+          offline, and keeping a readable copy of those is real value this app
+          otherwise provides. Sizing the limit honestly was the better trade.
+        </p>
+
         <h3 id="system-diagram">System Diagram</h3>
         <pre><code>┌─────────────┐   ┌──────────────────┐   ┌──────────────┐
 │   Web app   │   │ Browser extension│   │  Mobile app  │
@@ -1268,7 +1356,7 @@
             The warm-ahead count stayed at two, but its justification did
             not. It is no longer "the extra chunks are free because the pool
             is parallel"; it is that speculative work runs on a
-            <a href="#tts">low-priority queue tier</a> that only ever
+            <a href="#feat-tts">low-priority queue tier</a> that only ever
             consumes capacity which would otherwise sit idle, so it cannot
             push back the chunk a listener is actually waiting for even when
             the pool is effectively serial.
@@ -2361,6 +2449,31 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
         <h2><span class="part-label">Part X</span>Changelog of This Document</h2>
         <table>
           <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-07</td>
+            <td>
+              v4 — added
+              <a href="#local-migration">Crossing the seam: local &rarr;
+              account</a> to Part III, on the ship blocker that made signing
+              up look like it deleted your library: the whole local library
+              went up as one JSON body against an unset 1&nbsp;MB
+              <code>bodyLimit</code>, and the client caught the resulting
+              <code>413</code> and did nothing with it. Covers the batching
+              that replaced it, why batches are cleared only once accepted
+              (so a retry resumes), the two latent bugs batching exposed — a
+              duplicate URL taking down a whole <code>createMany</code>, and
+              highlights having no unique constraint, so a lost response
+              would have doubled someone's notebook — and the suggestion
+              deliberately not taken. Closed out the
+              <a href="#part-9">ONNX Runtime session tuning</a> entry: the
+              pool's "three concurrent generations &asymp; one" claim was a
+              real measurement of a machine nobody deploys to, corrected with
+              an explicit per-worker thread budget, core-derived pool sizing,
+              and a benchmark that now prints the host's core count and the
+              concurrency ratio so it can't drift back into folklore. The
+              warm-ahead count kept its value and lost its justification.
+            </td>
+          </tr>
           <tr>
             <td>2026-08-07</td>
             <td>
