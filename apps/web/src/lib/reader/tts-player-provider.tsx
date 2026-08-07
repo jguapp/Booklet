@@ -5,6 +5,9 @@ import { pickBestVoice } from "./tts-voice";
 import { isKokoroVoice, generateKokoroChunk, toSafeTextChunks, warmKokoroChunks } from "./kokoro-tts";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { useToast } from "@/lib/toast/toast-provider";
+import { useAuth } from "@/lib/auth/auth-provider";
+import { updateArticleListeningPosition } from "@/lib/data/articles";
+import { getDeviceId } from "./device-id";
 import { abandonTtfaSample, markFirstAudio, markFirstChunkReady, markPlayClicked } from "./tts-metrics";
 
 export type TtsStatus = "idle" | "loading" | "playing" | "paused";
@@ -32,7 +35,10 @@ interface TtsPlayerContextValue {
    * comment. null whenever currentChunkText is, plus briefly at the very
    * start of each chunk before the first timeupdate fires. */
   currentWordRange: { start: number; end: number } | null;
-  play: (articleId: string, articleTitle: string, text: string) => void;
+  /** `startFraction` resumes from a stored listening position (#152) -- 0-1
+   * over the article's text, rounded down to the chunk containing it. Ignored
+   * by the native SpeechSynthesis voice, which has no chunks to start from. */
+  play: (articleId: string, articleTitle: string, text: string, startFraction?: number) => void;
   pause: () => void;
   resume: () => void;
   stop: () => void;
@@ -65,6 +71,23 @@ const TtsPlayerContext = createContext<TtsPlayerContextValue | null>(null);
  * start.
  */
 const PREWARM_SERVER_CHUNKS = 2;
+
+/**
+ * How often the listening position is written (#152).
+ *
+ * Matches reader-view.tsx's PROGRESS_SAVE_INTERVAL_MS deliberately -- this is
+ * the listening sibling of that flush and there's no reason for the two to
+ * disagree. What it must NOT be is per-`timeupdate`: that fires several times
+ * a second per chunk, and a request each would cost far more than the feature
+ * is worth. The position is accumulated in a ref on every tick (free) and only
+ * ever leaves the tab on this timer, on tab-hide, and on stop.
+ */
+const LISTENING_SAVE_INTERVAL_MS = 10_000;
+
+/** Below this, a position isn't worth writing or resuming from -- it rounds to
+ * "you just started", and offering to resume someone to the first few seconds
+ * of an article is noise rather than help. */
+const MIN_LISTENING_FRACTION = 0.01;
 
 /** Non-whitespace runs in `text`, as character-offset spans -- the units
  * playKokoro's timing estimate assigns playback time to. */
@@ -115,6 +138,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   // return), which is exactly what a failed chunk does -- so an error
   // rendered there would disappear in the same frame it appeared.
   const { toast } = useToast();
+  const { isAuthenticated } = useAuth();
   const readerRef = useRef(reader);
   // Synced via effect, not written during render (React refs are only safe
   // to read/write outside of render -- effects, event handlers, etc.) --
@@ -124,9 +148,73 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
     readerRef.current = reader;
   }, [reader]);
 
+  /**
+   * Writes the accumulated listening position, if it has actually moved since
+   * the last write (#152).
+   *
+   * Never throws and never awaits into the playback path: a failed position
+   * write means the user resumes from a slightly older point, which is not
+   * worth interrupting playback or showing an error for.
+   */
+  const flushListeningPosition = useCallback((reset = false) => {
+    const id = listeningArticleIdRef.current;
+    const fraction = listeningFractionRef.current;
+    // Clearing lives in here rather than at the call site: these refs are
+    // captured by this callback, and the React Compiler's immutability rule
+    // (correctly) rejects mutating them again after calling it. Doing both in
+    // one place also makes it impossible to clear without flushing first.
+    const clear = () => {
+      if (!reset) return;
+      listeningArticleIdRef.current = null;
+      listeningFractionRef.current = null;
+      lastFlushedFractionRef.current = null;
+    };
+    if (!id || fraction === null) return clear();
+    // Below the floor this is indistinguishable from "just started", and
+    // writing it would make every abandoned first-chunk play produce a resume
+    // offer on the user's other devices.
+    if (fraction < MIN_LISTENING_FRACTION) return clear();
+    // A paused player fires no timeupdate, so the timer would otherwise
+    // rewrite the identical value every interval, forever.
+    if (lastFlushedFractionRef.current === fraction) return clear();
+    lastFlushedFractionRef.current = fraction;
+    void updateArticleListeningPosition(id, fraction, getDeviceId(), isAuthenticated).catch(() => undefined);
+    clear();
+  }, [isAuthenticated]);
+
+  // Same triggers as reader-view.tsx's progress flush, and for the same
+  // reasons: the interval covers ordinary listening, visibilitychange covers
+  // backgrounding the tab (which on mobile is what closing the app looks
+  // like), and the unmount flush covers the rest. Unlike that one, this lives
+  // in the provider rather than the reader page -- playback deliberately
+  // outlives the reader route (see this file's header), so a flush owned by
+  // the page would stop recording the moment the user navigated away while
+  // still listening.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") flushListeningPosition();
+    }
+    const interval = setInterval(flushListeningPosition, LISTENING_SAVE_INTERVAL_MS);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      flushListeningPosition();
+    };
+  }, [flushListeningPosition]);
+
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const generationRef = useRef(0);
+
+  // Listening position (#152). Refs, not state: this updates on every
+  // `timeupdate` (several times a second) and nothing renders from it -- as
+  // state it would re-render the whole app shell on each tick for no visible
+  // change. The article id is tracked alongside the fraction so a flush that
+  // lands after the user has switched articles writes to the right row.
+  const listeningFractionRef = useRef<number | null>(null);
+  const listeningArticleIdRef = useRef<string | null>(null);
+  const lastFlushedFractionRef = useRef<number | null>(null);
   const resolveCurrentChunkRef = useRef<(() => void) | null>(null);
 
   // Real, measured first-chunk generation time is the whole "TTS feels slow
@@ -262,6 +350,10 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const stop = useCallback(() => {
+    // Before anything is torn down -- stopping is the single most likely
+    // moment for the position to matter, and the refs it reads are cleared
+    // below.
+    flushListeningPosition(true);
     generationRef.current++; // abandon any in-flight chunk loop
     // Safe to do here even though play() calls stop() first: play()'s own
     // mark is recorded afterwards, in playKokoro.
@@ -282,7 +374,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
     setCurrentChunkIndex(0);
     setTotalChunks(0);
     setCurrentWordRange(null);
-  }, [supported, revokeObjectUrl]);
+  }, [supported, revokeObjectUrl, flushListeningPosition]);
 
   const playNative = useCallback((text: string) => {
     window.speechSynthesis.cancel();
@@ -302,12 +394,23 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const playKokoro = useCallback(
-    async (articleId: string, text: string) => {
+    async (articleId: string, text: string, startFraction = 0) => {
       const myGeneration = ++generationRef.current;
       setStatus("loading");
 
       const chunks = toSafeTextChunks(text);
       setTotalChunks(chunks.length);
+
+      // Resume (#152). The stored position is a fraction of the article, so
+      // it maps onto whatever chunking is in force *now* -- which is the whole
+      // reason it isn't stored as an index. Rounding down means resuming at
+      // the start of the chunk containing the position rather than mid-chunk:
+      // chunk audio is generated as one utterance and can't be seeked into
+      // meaningfully, and re-hearing a sentence is a much better failure than
+      // skipping one. Clamped so a corrupt or out-of-range value can only ever
+      // cost a restart from the beginning.
+      const startIndex =
+        startFraction > 0 ? Math.min(chunks.length - 1, Math.max(0, Math.floor(startFraction * chunks.length))) : 0;
 
       // Sliding-window prefetch, not just one chunk ahead: the server runs
       // a small pool of real concurrent generation processes now (see
@@ -346,7 +449,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       // subsequent transition, and worse the further into the article you
       // get. A monotonic cursor guarantees each index is only ever
       // requested once, no matter how many times this is called.
-      let nextToPrefetch = 0;
+      let nextToPrefetch = startIndex;
 
       // Reuse prewarmFirstChunk's head start if it's still the right one --
       // same article, same first chunk's text, same voice/rate -- instead
@@ -360,6 +463,10 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       let controller: AbortController;
       if (
         warm &&
+        // A resume doesn't start at chunk 0, so the prewarmed chunk 0 is audio
+        // this playthrough will never reach -- reusing it would start the
+        // article from the beginning despite the user having asked to resume.
+        startIndex === 0 &&
         warm.articleId === articleId &&
         warm.chunkText === chunks[0] &&
         warm.voice === readerRef.current.ttsVoice &&
@@ -392,7 +499,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
 
       let firstChunkStarted = false;
       try {
-        for (let i = 0; i < chunks.length; i++) {
+        for (let i = startIndex; i < chunks.length; i++) {
           if (generationRef.current !== myGeneration) return;
           ensurePrefetched(i + PREFETCH_DEPTH - 1);
 
@@ -413,7 +520,9 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
             const aborted = err instanceof DOMException && err.name === "AbortError";
             if (!aborted) {
               toast(
-                i === 0
+                // "stopped early" would be wrong for a resume whose very first
+                // chunk failed -- nothing played, so it never started.
+                i === startIndex
                   ? "Couldn't start reading aloud. Please try again."
                   : "Reading aloud stopped early — the audio couldn't be loaded.",
               );
@@ -421,7 +530,10 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
             setStatus("idle");
             return;
           }
-          if (i === 0) markFirstChunkReady();
+          // startIndex, not 0 -- on a resume the first chunk the user actually
+          // waits for is the one being resumed to, and that wait is what TTFA
+          // means here. Keyed off 0 it would never fire on a resumed play.
+          if (i === startIndex) markFirstChunkReady();
           inFlight.delete(i);
           if (generationRef.current !== myGeneration) return;
 
@@ -452,6 +564,18 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
           const handleTimeUpdate = () => {
             const duration = audioEl.duration;
             if (!duration || !Number.isFinite(duration) || wordSpans.length === 0) return;
+
+            // Listening position (#152): this chunk's index plus how far into
+            // it playback has reached, over the total. Interpolating within
+            // the chunk rather than using the bare index matters at this
+            // app's chunk sizes -- an 80-140 character chunk is only a few
+            // seconds, but a long article is hundreds of them, and resuming
+            // to a chunk boundary would drop up to a whole chunk every time.
+            // Written to a ref on every tick and read by the flush timer; see
+            // flushListeningPosition for why nothing leaves the tab here.
+            listeningArticleIdRef.current = articleId;
+            listeningFractionRef.current = Math.min(1, (i + audioEl.currentTime / duration) / chunks.length);
+
             const charPos = (audioEl.currentTime / duration) * chunkText.length;
             // The gap *between* two words (every word has one right after
             // it) isn't inside either span, so charPos regularly lands in
@@ -512,14 +636,19 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const play = useCallback(
-    (newArticleId: string, newArticleTitle: string, text: string) => {
+    (newArticleId: string, newArticleTitle: string, text: string, startFraction = 0) => {
       if (!supported || !text.trim()) return;
       stop();
       setArticleId(newArticleId);
       setArticleTitle(newArticleTitle);
       if (isKokoroVoice(reader.ttsVoice)) {
-        playKokoro(newArticleId, text);
+        playKokoro(newArticleId, text, startFraction);
       } else {
+        // The native SpeechSynthesis path speaks the whole text in one
+        // browser-internal call with no chunk boundaries to start from, so
+        // there is nowhere to resume to -- it always starts at the beginning.
+        // reader-view.tsx only offers the resume prompt for Kokoro voices for
+        // this reason; this is the backstop.
         playNative(text);
       }
     },

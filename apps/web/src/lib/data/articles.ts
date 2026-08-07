@@ -348,17 +348,27 @@ export async function updateArticleProgress(
  * most recent one" -- see UpdateArticleRequest.
  */
 export async function updateArticleListeningPosition(
-  article: Article,
+  articleId: string,
   listeningFraction: number,
   deviceId: string,
   authenticated: boolean,
-): Promise<Article> {
+): Promise<Article | null> {
   if (authenticated) {
-    return apiFetch<Article>(`/api/articles/${article.id}`, {
+    return apiFetch<Article>(`/api/articles/${articleId}`, {
       method: "PATCH",
       body: JSON.stringify({ listeningFraction, listeningDeviceId: deviceId }),
     });
   }
+  // Takes an id rather than an Article because the only caller is the global
+  // player (tts-player-provider.tsx), which is mounted in the root layout and
+  // deliberately knows nothing but which article is playing -- playback
+  // outlives the reader page that has the record in hand. One indexed read per
+  // flush, on a multi-second cadence, is not worth restructuring that for.
+  const article = await localArticles.get(articleId);
+  // Gone from local storage mid-playback (deleted in another tab) -- there is
+  // nothing to write a position onto, and recreating the row would resurrect
+  // a deleted article.
+  if (!article) return null;
   // Local mode still records it: the position survives a reload on this
   // device, which is most of the value even with nothing to sync to. The
   // device id is stored too, so the resume prompt's "on another device" check
