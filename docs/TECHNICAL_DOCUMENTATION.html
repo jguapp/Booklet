@@ -342,7 +342,7 @@
   <button class="mobile-toc-toggle" id="mobileTocToggle" type="button">☰ Contents</button>
   <nav class="toc" id="toc">
     <div class="toc-title">📖 Booklet</div>
-    <div class="toc-sub">The Coding Bible — v1, living document</div>
+    <div class="toc-sub">The Coding Bible — v5, living document</div>
     <ol>
       <li><a href="#part-0">0. How to Use This Document</a></li>
       <li><a href="#part-1">I. The Big Picture</a>
@@ -365,11 +365,17 @@
           <li><a href="#tech-typescript">TypeScript, Everywhere</a></li>
           <li><a href="#tech-node-fastify">Node.js + Fastify</a></li>
           <li><a href="#tech-postgres-prisma">PostgreSQL + Prisma</a></li>
+          <li><a href="#tech-fts">How Postgres Full-Text Search Works</a></li>
           <li><a href="#tech-nextjs">Next.js + React</a></li>
           <li><a href="#tech-tailwind">Tailwind CSS</a></li>
           <li><a href="#tech-pnpm-turbo">pnpm Workspaces + Turborepo</a></li>
-          <li><a href="#tech-testing-tools">Vitest + Playwright</a></li>
+          <li><a href="#tech-one-react">One React for the Workspace</a></li>
+          <li><a href="#tech-testing-tools">Vitest, jsdom + Playwright</a></li>
           <li><a href="#tech-indexeddb">IndexedDB</a></li>
+          <li><a href="#tech-bundling">Bundling: esbuild, and why production ≠ dev</a></li>
+          <li><a href="#tech-onnx">ONNX Runtime, WASM &amp; WebGPU</a></li>
+          <li><a href="#tech-docker">Docker &amp; Containers</a></li>
+          <li><a href="#tech-otel">OpenTelemetry &amp; the Vocabulary of Tracing</a></li>
         </ol>
       </li>
       <li><a href="#part-4">IV. The Data Model</a></li>
@@ -392,18 +398,32 @@
       <li>
         <a href="#part-6">VI. Testing Philosophy</a>
         <ol>
+          <li><a href="#test-layers">The Four Layers</a></li>
+          <li><a href="#web-unit-runner">The 19,000 Untested Lines</a></li>
           <li><a href="#e2e-fixtures">The e2e suite, switched off and back on</a></li>
         </ol>
       </li>
       <li>
         <a href="#part-7">VII. CI/CD &amp; Deployment</a>
         <ol>
+          <li><a href="#ci-what-it-is">What CI Actually Does Here</a></li>
+          <li><a href="#ci-cost">The Day the Allowance Ran Out</a></li>
+          <li><a href="#gitlab-port">Porting the Pipeline to GitLab</a></li>
+          <li><a href="#ci-gating">Gating Jobs on the Tree, Not on a Flag</a></li>
+          <li><a href="#deployment">Deployment &amp; Environment</a></li>
           <li><a href="#observability">Observability</a></li>
         </ol>
       </li>
       <li><a href="#part-8">VIII. Glossary</a></li>
       <li><a href="#part-9">IX. Roads Not Taken</a></li>
-      <li><a href="#part-10">X. Changelog of This Document</a></li>
+      <li><a href="#part-boundaries">X. Delivery Boundaries &amp; Known Gaps</a>
+        <ol>
+          <li><a href="#boundaries-production">The production critical path</a></li>
+          <li><a href="#boundaries-clients">Store publishing and mobile</a></li>
+          <li><a href="#boundaries-guardrails">Engineering guardrails</a></li>
+        </ol>
+      </li>
+      <li><a href="#part-10">XI. Changelog of This Document</a></li>
     </ol>
   </nav>
 
@@ -469,10 +489,33 @@
           a judgment call or a plausible-but-unverified characterization
           (some of the TTS voice descriptions, for instance), it says that
           too. Sections marked <span class="tag">stub</span> are placeholders
-          for the next editing pass, not finished — this is v1 of something
+          for the next editing pass, not finished — this is v5 of something
           meant to keep growing, not a one-shot document pretending to be
-          complete.
+          complete. <a href="#part-10">Part X</a> records what each revision
+          added, and ends with the current list of known gaps.
         </p>
+        <div class="callout">
+          <span class="callout-label">If you are reading this to prepare for an interview</span>
+          <p>
+            Read <a href="#part-1">Part I</a> and
+            <a href="#part-2">Part II</a> for the thirty-second and
+            five-minute versions of what this is. Read
+            <a href="#part-3">Part III</a> if you want to be able to say what
+            each tool <em>does</em> and why it beat its alternative — the
+            "why" boxes there are the answers to "why did you pick X".
+          </p>
+          <p>
+            Then read <a href="#part-9">Part IX</a> in full. It is the
+            shortest part of this document and by far the highest-value one
+            for that purpose, because "tell me about a technical decision you
+            reversed" and "tell me about a bug that was hard to find" are
+            asked in almost every interview, and every entry there is a real,
+            measured answer to one of them. <a href="#feat-tts">The TTS
+            story</a> is the single richest example: eight chapters of
+            measure, decide, measure again, including the parts that were
+            thrown away.
+          </p>
+        </div>
       </section>
 
       <hr class="divider">
@@ -847,6 +890,36 @@
           The API (<code>apps/api</code>) runs on Node.js, using
           <a href="https://fastify.dev">Fastify</a> as the HTTP framework.
         </p>
+        <p>
+          <strong>What Node.js is, for a beginner:</strong> JavaScript was
+          born as a language that only ran inside a web browser. Node.js is
+          that same language engine (V8, the one Chrome uses) lifted out of
+          the browser and given the things a browser deliberately withholds:
+          reading and writing files, opening network sockets, spawning other
+          processes. That's the whole idea — one language on both sides of
+          the wire. In this project it's what makes
+          <code>packages/shared</code> possible at all: the SM-2 scheduling
+          math is imported unchanged by a Fastify route handler on the server
+          and by a React component in a browser tab, because both are running
+          the same language on the same engine.
+        </p>
+        <p>
+          The other Node fact that matters for reading this codebase is its
+          concurrency model. Node runs your JavaScript on a
+          <strong>single thread</strong> with an <em>event loop</em>: work
+          that waits on something external (a database query, an HTTP fetch)
+          is handed off and the thread moves on, picking the result up later
+          via a callback or a <code>Promise</code>. That is excellent for an
+          API that mostly waits on Postgres, and <em>terrible</em> for work
+          that actually pins a CPU — because while that work runs, nothing
+          else on that thread can. Speech synthesis is exactly that kind of
+          work, and it is the direct reason the TTS pipeline runs in a pool of
+          separate <em>processes</em> rather than inline (see
+          <a href="#feat-tts">Chapter 3</a>). OCR is the same shape of
+          problem, which is why it's capped at 20 pages and why a failure
+          inside it once took the entire server down (see
+          <a href="#feat-ocr">OCR</a>).
+        </p>
         <div class="callout why">
           <span class="callout-label">Why Fastify over Express</span>
           <p>
@@ -933,10 +1006,122 @@
           </p>
         </div>
 
+        <h3 id="tech-fts">How Postgres Full-Text Search Works</h3>
+        <p>
+          Search is the one place this project reaches past Prisma into raw
+          SQL, so it's worth understanding the machinery rather than treating
+          it as a magic incantation. Every term below appears verbatim in
+          <code>apps/api/src/routes/search.ts</code> and in
+          <code>prisma/migrations/20260813000000_article_search_vector/</code>.
+        </p>
+        <table>
+          <tr><th>Term</th><th>What it actually is</th></tr>
+          <tr>
+            <td><code>tsvector</code></td>
+            <td>A Postgres column type holding a document that has been <em>pre-chewed</em> for searching: the text is split into words, each word is reduced to its stem, stop-words ("the", "and") are dropped, and what remains is stored as a sorted list of lexemes with their positions. Storing this instead of re-parsing the article on every query is the entire performance story.</td>
+          </tr>
+          <tr>
+            <td><strong>Lexeme</strong></td>
+            <td>A stemmed, normalized word. <code>running</code>, <code>runs</code> and <code>ran</code> all reduce to the lexeme <code>run</code> — which is why searching "run" finds an article that only ever said "running". This is what people mean by <em>stemming</em>, and it is the single biggest reason a real full-text index beats a <code>LIKE '%run%'</code> substring match.</td>
+          </tr>
+          <tr>
+            <td><code>tsquery</code></td>
+            <td>The search side of the same idea: the user's typed query, stemmed the same way and turned into a boolean expression of lexemes. The <code>@@</code> operator is "does this <code>tsvector</code> satisfy this <code>tsquery</code>".</td>
+          </tr>
+          <tr>
+            <td><code>websearch_to_tsquery</code></td>
+            <td>One of three functions that build a <code>tsquery</code> from human input. This one parses the conventions people already know from web search engines: bare words mean AND, <code>"quoted phrases"</code> mean an adjacent phrase, and <code>-word</code> excludes. Chosen over <code>plainto_tsquery</code> (which also ANDs but understands no operators) and <code>to_tsquery</code> (which demands explicit <code>&amp;</code>/<code>|</code> syntax and throws a syntax error on ordinary prose).</td>
+          </tr>
+          <tr>
+            <td><code>setweight</code> / A-B-C-D</td>
+            <td>Postgres lets each lexeme carry one of four weight labels. Booklet assigns <strong>A</strong> to the title, <strong>B</strong> to author + site name, <strong>C</strong> to the excerpt, and <strong>D</strong> to the full extracted body. The weights are what make a title hit outrank a passing mention buried in ten thousand words of body text.</td>
+          </tr>
+          <tr>
+            <td><code>ts_rank</code></td>
+            <td>Turns a (vector, query) pair into a relevance score, using those weights plus how often and how densely the query's lexemes occur. This is the <code>ORDER BY</code>.</td>
+          </tr>
+          <tr>
+            <td><code>ts_headline</code></td>
+            <td>Generates the little snippet under each result with the matched words marked. Note it re-parses the original document to do so — it works from the text, not from the <code>tsvector</code> — which is why the query has to hand it the real column.</td>
+          </tr>
+          <tr>
+            <td><strong>GIN index</strong></td>
+            <td>Generalized Inverted Index. "Inverted" means it's built the way a book's index is: instead of row&nbsp;&rarr;&nbsp;words, it stores word&nbsp;&rarr;&nbsp;the rows containing it. Without it, <code>@@</code> would mean scanning every row of the table.</td>
+          </tr>
+          <tr>
+            <td><strong>Generated / stored column</strong></td>
+            <td><code>GENERATED ALWAYS AS (...) STORED</code> — Postgres computes the <code>tsvector</code> itself from the title/author/excerpt/body columns and keeps it up to date on every insert and update. No application code, no trigger, and no way for the index to silently drift out of sync with the article it describes.</td>
+          </tr>
+        </table>
+        <div class="callout why">
+          <span class="callout-label">Why GIN rather than GiST</span>
+          <p>
+            Postgres offers both for <code>tsvector</code>. GiST is smaller
+            and cheaper to update but <em>lossy</em> — it can return false
+            positives that Postgres must then recheck against the real row.
+            GIN is larger and slower to write but exact and considerably
+            faster to read. A saved-articles table is read constantly and
+            written once per save, so GIN is the obvious side of that
+            tradeoff — and the migration says so in a comment rather than
+            leaving the choice looking arbitrary.
+          </p>
+        </div>
+        <div class="callout">
+          <span class="callout-label">The client-side counterpart: MiniSearch</span>
+          <p>
+            None of the above exists in a browser, and local/anonymous mode
+            has no server to ask. <code>local-search-index.ts</code> therefore
+            builds an equivalent index in memory with
+            <a href="https://lucaong.github.io/minisearch/">MiniSearch</a>, a
+            small dependency-free JavaScript full-text engine, over the
+            articles already sitting in IndexedDB. It's given the same
+            structure deliberately: the <code>stemmer</code> package supplies
+            Porter stemming to mirror Postgres's <code>english</code>
+            configuration, per-field boosts stand in for the A/B/C/D weights,
+            and its query mode ANDs terms the way
+            <code>websearch_to_tsquery</code> does. MiniSearch scores with a
+            BM25-style formula rather than <code>ts_rank</code>'s
+            weighted-position one, so the two rankers are
+            <strong>comparable, not identical</strong> — see
+            <a href="#feat-search">Search</a> for why that's a documented
+            consequence rather than a bug.
+          </p>
+        </div>
+
         <h3 id="tech-nextjs">Next.js + React</h3>
         <p>
           The web app is <a href="https://nextjs.org">Next.js</a> (App
           Router) with React 19.
+        </p>
+        <p>
+          <strong>What React is, for a beginner:</strong> the traditional way
+          to change a web page is to find an element and mutate it — set its
+          text, add a class, remove a child. That works until two different
+          pieces of code both think they own the same element, at which point
+          the page's appearance and the program's actual state quietly stop
+          agreeing. React inverts it: you write a function that takes the
+          current state and <em>returns what the page should look like</em>,
+          and React works out the minimal set of real DOM changes to get
+          there. You never write "add this element"; you write "given this
+          state, these elements exist". State changes, the function re-runs,
+          React diffs the result against what's on screen and patches the
+          difference.
+        </p>
+        <p>
+          Two React words appear constantly in this codebase and are worth
+          knowing precisely. A <strong>component</strong> is one of those
+          functions — <code>ReaderView</code>, <code>ArticleCard</code>,
+          <code>RenameDialog</code>. A <strong>hook</strong> is a function
+          starting with <code>use</code> that lets a component hold onto
+          something across re-runs: <code>useState</code> for a value that
+          should trigger a re-render when it changes, <code>useRef</code> for
+          one that shouldn't, <code>useEffect</code> for work that has to
+          happen <em>after</em> rendering (subscribing to an event, starting a
+          timer). That <code>useState</code>/<code>useRef</code> distinction
+          is not academic here — the read-aloud position accumulates into
+          refs specifically because storing it in state would re-render the
+          whole app shell several times a second for a value nothing displays
+          (see <a href="#feat-tts">Chapter 8</a>).
         </p>
         <div class="callout why">
           <span class="callout-label">Why Next.js specifically</span>
@@ -956,7 +1141,29 @@
             this).
           </p>
         </div>
-
+        <div class="callout warn">
+          <span class="callout-label">One Next.js behavior that has real consequences here: <code>NEXT_PUBLIC_</code></span>
+          <p>
+            Next.js splits environment variables in two. An ordinary variable
+            is read on the server at runtime. A variable prefixed
+            <code>NEXT_PUBLIC_</code> is <strong>textually substituted into
+            the JavaScript bundle at build time</strong> — it is baked into
+            files a browser downloads, so it is public by construction and
+            fixed at the moment the image was built.
+          </p>
+          <p>
+            Both halves of that have bitten this project. Supplying
+            <code>NEXT_PUBLIC_SENTRY_DSN</code> through Docker Compose's
+            <code>environment:</code> was too late to ever reach a browser, so
+            the container would start cleanly with error monitoring silently
+            doing nothing — the failure mode that looks exactly like success.
+            It's passed as a build <code>ARG</code> now. And the rule is why
+            the Datadog RUM <strong>client token</strong> is correctly
+            <code>NEXT_PUBLIC_</code> (it is publishable and write-only) while
+            a Datadog <strong>API key</strong> must never be — see
+            <a href="#observability">Observability</a>.
+          </p>
+        </div>
         <h3 id="tech-tailwind">Tailwind CSS</h3>
         <p>
           Styling is Tailwind CSS v4, utility-first — no CSS-in-JS, no
@@ -967,6 +1174,31 @@
           reference — so <code>bg-paper</code> or <code>text-ink</code>
           automatically repaint correctly under every theme without any
           component needing to know which theme is active.
+        </p>
+        <p>
+          <strong>What "utility-first" means:</strong> instead of inventing a
+          semantic class name (<code>.article-card</code>) and writing its
+          rules in a stylesheet somewhere else, you compose the element out of
+          many tiny single-purpose classes right where it's written —
+          <code>class="flex items-center gap-3 rounded-lg p-4"</code>. It
+          looks noisy at first and buys two specific things. Styles are
+          <em>local</em>: deleting a component deletes its styling with it,
+          and no rule written for one screen can leak into another, which is
+          the failure mode of every large hand-written stylesheet. And there
+          is no naming problem, which sounds trivial until you've spent an
+          afternoon arguing about whether something is a card, a tile, or a
+          panel.
+        </p>
+        <p>
+          <strong>What CSS custom properties add on top:</strong> a custom
+          property (<code>--color-paper: #EDEBE2</code>) is a variable the
+          browser itself resolves at paint time, not a build-time constant.
+          Redefine it under a different selector — <code>[data-theme="sepia"]</code>
+          — and every element referencing it repaints, with no JavaScript and
+          no component re-render. That's why switching between Booklet's four
+          reader themes is instant and why no component contains the word
+          "sepia" anywhere. This documentation page uses the same technique,
+          which is why it follows your system's light/dark setting.
         </p>
 
         <h3 id="tech-pnpm-turbo">pnpm Workspaces + Turborepo</h3>
@@ -1012,15 +1244,172 @@
           </p>
         </div>
 
-        <h3 id="tech-testing-tools">Vitest + Playwright</h3>
+        <h3 id="tech-one-react">One React for the Workspace</h3>
         <p>
-          Unit and integration tests run on <a href="https://vitest.dev">Vitest</a>
-          (fast, native-ESM, Jest-compatible API). End-to-end tests run on
-          <a href="https://playwright.dev">Playwright</a>, driving a real
-          Chromium browser against the real running app — see
-          <a href="#part-6">Testing Philosophy</a> for how these are actually
-          used, which is more specific than "unit tests for logic, e2e for
-          UI."
+          This deserves its own section because it is the clearest example in
+          the repo of a <em>dependency-hygiene</em> problem presenting as an
+          unrelated, incomprehensible bug — and of the difference between
+          fixing that and configuring around it.
+        </p>
+        <p>
+          <strong>Background: what a package manager's "linker" does.</strong>
+          pnpm's headline feature is that it does <em>not</em> copy a
+          dependency into every project that needs it. It keeps one copy in a
+          content-addressable store and builds each package's
+          <code>node_modules</code> out of symlinks into it, arranged in a
+          strict nested tree where a package can only see what it actually
+          declared. That strictness is a feature: it catches code importing
+          something it never listed as a dependency.
+        </p>
+        <p>
+          Booklet cannot use it. <code>pnpm-workspace.yaml</code> sets
+          <code>nodeLinker: hoisted</code>, which produces a flat, npm-style
+          <code>node_modules</code> instead — because Metro, the React Native
+          bundler behind <code>apps/mobile</code>, could not resolve past the
+          NTFS junctions pnpm's default linker creates on Windows. The comment
+          that recorded that decision also predicted its cost, correctly:
+          <strong>a flat tree has exactly one winner per package name</strong>,
+          and anything that can't use the winner gets its own nested copy.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Three Reacts, and a failure that lies about its cause</span>
+          <p>
+            The workspace ended up resolving <em>three</em> React installs:
+            <code>apps/mobile</code> pinned 19.0.0 for Expo,
+            <code>apps/web</code> pinned 19.2.4, and what landed at the root
+            was neither — at one point a <code>react@19.0.0</code> paired with
+            a <code>react-dom@19.2.8</code>, a combination React does not
+            support at all.
+          </p>
+          <p>
+            React keeps the currently-rendering component's hook state in
+            module-level scope. Two copies of React means two of those, and a
+            component rendered by one while calling hooks from the other reads
+            a null internals object. What you get is
+            <code>Cannot read properties of null (reading 'useState')</code> —
+            an error that points at your component and says nothing whatsoever
+            about module resolution. Sometimes it doesn't even error; it just
+            renders nothing.
+          </p>
+          <p>
+            <strong>The trap worth remembering:</strong> a component with no
+            hooks renders fine across two copies. The first test written
+            against this rendered a <code>forwardRef</code> button, passed,
+            and proved nothing. Only rewriting it against
+            <code>RenameDialog</code> — <code>useState</code>,
+            <code>useRef</code>, <code>useEffect</code> and
+            <code>createPortal</code>, so it exercises
+            <code>react-dom</code> too, which was the mismatched half —
+            reproduced the real failure. The test is deliberately kept on that
+            component so a regression can't hide behind a hookless render.
+          </p>
+        </div>
+        <p>
+          The fix is four lines: a workspace-wide <code>overrides</code> block
+          pinning <code>react</code> and <code>react-dom</code> to 19.2.4 for
+          every package. An <em>override</em> tells the package manager to
+          force one version for a dependency no matter who asked for what —
+          the blunt instrument, appropriate here precisely because the goal is
+          "there is exactly one of these". 19.2.4 rather than mobile's 19.0.0
+          because web is where the rendering, the testing, and any production
+          traffic actually are.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why not just alias it in the test config</span>
+          <p>
+            The tempting fix was to make Vitest resolve React to one copy —
+            <code>resolve.alias</code>, <code>resolve.dedupe</code>,
+            <code>server.deps.inline</code>. All three were tried and none
+            work, because the renderer resolves React through Node before Vite
+            ever sees the import. But even if one had worked it would have
+            been the wrong fix: it would make <em>tests</em> agree about React
+            while the application kept shipping three copies, which is
+            configuring around a real defect rather than removing it. The
+            packages were left uninstalled and the issue filed (#166) instead
+            of leaving a test setup in place that looked functional.
+          </p>
+        </div>
+        <p>
+          The same cleanup removed three root dependencies that were npm
+          residue rather than intended work (<code>@sentry/node</code>,
+          <code>@sentry/profiling-node</code>, <code>@sentry/react</code> —
+          nothing imports the latter two; the code uses
+          <code>@sentry/browser</code> and <code>@sentry/node</code>, and the
+          root copy merely duplicated <code>apps/api</code>'s own declaration
+          at a different range). Dropping them also dropped
+          <code>@sentry/node-cpu-profiler</code>, whose install script
+          compiles native bindings through node-gyp — which is what had left
+          an unanswered build-script approval prompt sitting in
+          <code>pnpm-workspace.yaml</code> making every real
+          <code>pnpm install</code> exit non-zero. The prompt was deleted
+          rather than answered, because the dependency that provoked it should
+          never have been there.
+        </p>
+
+        <h3 id="tech-testing-tools">Vitest, jsdom + Playwright</h3>
+        <p>
+          <strong><a href="https://vitest.dev">Vitest</a></strong> is the test
+          runner for everything that isn't a browser test. A "test runner" is
+          the program that finds your test files, executes them, catches the
+          assertions that fail, and reports what happened; Vitest is built on
+          Vite, so it transforms TypeScript on the fly with no separate build
+          step and runs native ES modules rather than transpiling everything
+          down to CommonJS the way Jest historically did. Its API is
+          deliberately Jest-compatible (<code>describe</code>,
+          <code>it</code>, <code>expect</code>, <code>vi.mock</code>), so
+          existing knowledge transfers directly.
+        </p>
+        <p>
+          <strong><a href="https://github.com/jsdom/jsdom">jsdom</a></strong>
+          is a pure-JavaScript implementation of the DOM and a chunk of the
+          browser's other APIs, running inside Node. It gives a test a real
+          <code>document</code>, real <code>Element</code> and
+          <code>Range</code> objects, real event dispatch — everything a
+          browser provides <em>except</em> actually drawing anything. That
+          exception is the important part and defines the boundary between two
+          of this project's test layers: <strong>jsdom does no layout</strong>,
+          so <code>getBoundingClientRect()</code> and
+          <code>Range#getClientRects()</code> return zeros. Any logic that
+          depends on where something physically is on screen must be a
+          Playwright test; logic that only walks the tree — offset-to-node
+          bridging, section anchoring, popover dismissal rules — belongs in
+          jsdom, where it costs milliseconds instead of seconds.
+        </p>
+        <p>
+          jsdom is also load-bearing on the <em>server</em> here, which
+          surprises people: article extraction runs Mozilla Readability, and
+          Readability needs a DOM to walk. Parsing fetched HTML into jsdom is
+          how <code>apps/api</code> gets one.
+        </p>
+        <p>
+          <strong><a href="https://testing-library.com/docs/react-testing-library/intro/">@testing-library/react</a></strong>
+          renders a real component into a jsdom document and hands back
+          queries that find elements the way a user would — by visible text,
+          by accessible role, by label — rather than by CSS selector. That
+          bias is the whole philosophy: a test that finds a button by its
+          accessible name keeps passing through a refactor that renames a
+          class, and starts failing if the button stops being reachable to a
+          screen reader.
+        </p>
+        <p>
+          <strong><a href="https://playwright.dev">Playwright</a></strong>
+          drives a real browser — a real Chromium process, real rendering,
+          real network — against the real running app. It is the only layer
+          that can see a PDF canvas actually paint, an EPUB iframe actually
+          paginate, or audio actually play. It's also the most expensive layer
+          by an order of magnitude, which is why
+          <a href="#part-6">Testing Philosophy</a> is largely a story about
+          moving work <em>out</em> of it.
+        </p>
+        <p>
+          Two Playwright features this repo leans on specifically:
+          <code>webServer</code> in <code>playwright.config.ts</code> starts
+          processes the suite depends on (including the local article fixture
+          server) and waits for them before running anything, so the suite is
+          one command rather than a README instruction; and tag-based
+          filtering, which is how the seven specs that genuinely need the
+          public internet are marked <code>@live</code> and can be excluded
+          wholesale on a network-restricted runner.
         </p>
 
         <h3 id="tech-indexeddb">IndexedDB</h3>
@@ -1034,6 +1423,224 @@
           server-backed mode uses — see <a href="#offline-first">The
           Offline-First Model</a>.
         </p>
+        <p>
+          <strong>The concepts, precisely,</strong> because IndexedDB's API is
+          famously awkward and several real bugs in this project came from
+          getting one of them subtly wrong:
+        </p>
+        <ul>
+          <li><strong>Database &rarr; object store &rarr; record.</strong> An
+            <em>object store</em> is roughly a table, but it stores whole
+            JavaScript objects rather than rows of typed columns. Each record
+            has a key; an <em>index</em> can be declared on any property to
+            allow lookups and ordered scans by something other than that key.</li>
+          <li><strong>Everything is asynchronous and event-based.</strong>
+            Not promise-based — an operation returns an
+            <code>IDBRequest</code> that later fires <code>onsuccess</code> or
+            <code>onerror</code>. Modern code wraps that in a
+            <code>Promise</code>, which is what <code>db.ts</code> does.</li>
+          <li><strong>Transactions auto-close.</strong> A transaction stays
+            alive only while it has pending work; <code>await</code>ing
+            anything unrelated inside one lets it commit out from under you.
+            And crucially, a request firing <code>onsuccess</code> does
+            <em>not</em> mean the data is durable — the transaction can still
+            roll back afterwards. Writes here therefore await the
+            transaction's <code>oncomplete</code>, not the request's
+            <code>onsuccess</code>. Getting this backwards lets a write report
+            success and then silently vanish.</li>
+          <li><strong>Structured clone, not JSON.</strong> IndexedDB stores
+            values using the structured-clone algorithm, which handles
+            <code>Date</code>, <code>Map</code>, <code>Set</code>,
+            <code>ArrayBuffer</code> and cyclic references — things
+            <code>JSON.stringify</code> cannot. That power has an edge:
+            cloning a <code>Blob</code> stores a <em>reference</em> to a
+            browser-owned backing store rather than the bytes, and a Blob
+            whose backing store came from somewhere unusual can read back as
+            something that is no longer the audio you put in. That exact trap
+            is why the TTS audio cache reads <code>arrayBuffer()</code> before
+            writing — see <a href="#feat-tts">Chapter 7</a>.</li>
+          <li><strong>Storage is a quota, not a promise.</strong> The browser
+            can evict an origin's data under pressure, private-browsing modes
+            may refuse to open a database at all (Firefox throws
+            <em>synchronously</em> from <code>open()</code> rather than firing
+            <code>onerror</code>), and quota is shared across the origin. Any
+            code here that uses IndexedDB for a cache degrades to "just use
+            the network" on every one of those paths.</li>
+        </ul>
+        <div class="callout">
+          <span class="callout-label">Testing it: fake-indexeddb</span>
+          <p>
+            IndexedDB doesn't exist in Node, so the unit tests run against
+            <code>fake-indexeddb</code>, a full in-memory implementation of
+            the specification. It is real enough to exercise transaction
+            semantics, index ordering, and key collisions — which is how the
+            audio cache's LRU eviction bug was caught by a test rather than by
+            hand.
+          </p>
+        </div>
+
+        <h3 id="tech-bundling">Bundling: esbuild, and why production ≠ dev</h3>
+        <p>
+          A <strong>bundler</strong> reads an application's entry point,
+          follows every <code>import</code> transitively, and emits a small
+          number of files with the whole graph flattened into them. It exists
+          because shipping a thousand separate modules means a thousand
+          separate fetches in a browser, and because minification and
+          tree-shaking (dropping code nothing references) need a whole-program
+          view.
+        </p>
+        <p>
+          The API's production build (<code>apps/api/scripts/build.mjs</code>)
+          uses <a href="https://esbuild.github.io/">esbuild</a>, a bundler
+          written in Go that is roughly two orders of magnitude faster than
+          the JavaScript-based generation before it. The web app's bundling is
+          handled by Next.js itself.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">The production build is a different execution environment, and it breaks differently</span>
+          <p>
+            In development this API runs under <code>tsx</code>, which
+            resolves modules at runtime through Node's own algorithm. In
+            production it is one esbuild-flattened file run by plain
+            <code>node</code>. Those are not the same environment, and the gap
+            has produced real, silent breakage more than once.
+          </p>
+          <p>
+            The sharpest example:
+            <code>tsc</code> resolves imports through
+            <code>node_modules</code> and <strong>never asks who
+            declared</strong> a package. So importing a transitive dependency
+            — something you got only because another package depends on it —
+            typechecks perfectly and then fails in esbuild. That's exactly how
+            a direct <code>@huggingface/transformers</code> import broke the
+            Docker build with <em>"No loader is configured for '.node'
+            files"</em> while every other CI job stayed green. The response
+            was to declare the dependency properly <em>and</em> to run the
+            production bundle in the cheap typecheck job, so that signal
+            arrives about two minutes earlier than waiting for a Docker layer
+            to report it.
+          </p>
+          <p>
+            Bundling is also why auto-instrumentation was rejected for
+            tracing: it needs to patch modules as they load, and a flattened
+            single file has no load events left to intercept. See
+            <a href="#observability">Observability</a>.
+          </p>
+        </div>
+
+        <h3 id="tech-onnx">ONNX Runtime, WASM &amp; WebGPU</h3>
+        <p>
+          These three names appear throughout the TTS story and are usually
+          left unexplained, so:
+        </p>
+        <ul>
+          <li><strong>ONNX</strong> (Open Neural Network Exchange) is a
+            portable file format for a trained neural network — the network's
+            layer graph plus its learned weights, saved in a way that isn't
+            tied to the framework it was trained in.
+            <strong>ONNX Runtime</strong> is the engine that loads such a file
+            and actually runs it, with backends for CPU, CUDA, WebGPU and
+            more. Kokoro is distributed as ONNX, which is precisely why the
+            same 82-million-parameter model can run in a browser tab and in a
+            Node process with no separate Python service anywhere in this
+            architecture.</li>
+          <li><strong>WASM</strong> (WebAssembly) is a portable binary
+            instruction format that browsers execute in a sandbox at
+            near-native speed. It is how C/C++/Rust code reaches the web —
+            and in this project it's how the browser-side Kokoro attempt ran,
+            how Tesseract.js does OCR, and how PGlite runs a genuine Postgres
+            with nothing installed.</li>
+          <li><strong>WebGPU</strong> is the browser's modern GPU API, the
+            successor to WebGL, and unlike WebGL it exposes general-purpose
+            compute rather than only graphics. It's the fast path for
+            in-browser inference where available — availability being the
+            problem: it was still gated behind flags or absent in much of the
+            real installed base during this project's client-side TTS
+            attempt, and adapter detection itself was a source of failures.</li>
+        </ul>
+        <div class="callout why">
+          <span class="callout-label">Why "single-threaded WASM" was a ceiling and not a tuning problem</span>
+          <p>
+            The rejected client-side implementation measured 12–18 seconds per
+            sentence. That number is not the model being large — it's the
+            per-token cost of running matrix math inside a sandbox that, in
+            the general case, gets one thread and no GPU. Worker-based
+            pipelining, quantization and multi-threading were all tried; none
+            of them changed the shape of the problem, because none of them
+            changed the per-token cost. Moving the same ONNX file to a Node
+            process, where ONNX Runtime uses native code and real threads,
+            did — and it took one afternoon. See
+            <a href="#feat-tts">Chapters 1 and 2</a>.
+          </p>
+        </div>
+
+        <h3 id="tech-docker">Docker &amp; Containers</h3>
+        <p>
+          <strong>What a container is:</strong> a process running on the host
+          kernel, with its own isolated view of the filesystem, network and
+          process table. Not a virtual machine — there's no second kernel and
+          no emulated hardware, which is why a container starts in
+          milliseconds where a VM takes tens of seconds. What it gets isolation
+          from is <em>the host's software</em>: the exact Node version, the
+          exact system libraries, the exact file layout are all fixed inside
+          the image rather than assumed to exist on whatever machine runs it.
+        </p>
+        <p>
+          <strong>Image versus container:</strong> an <em>image</em> is a
+          read-only stack of filesystem layers plus metadata (what command to
+          run, what ports, what environment). A <em>container</em> is one
+          running instance of an image with a thin writable layer on top. A
+          <code>Dockerfile</code> is the script that builds an image, one
+          layer per instruction, and each layer is cached — so reordering a
+          Dockerfile so that dependency installation comes before source-code
+          copying is the single most common build-speed fix, since source
+          changes then don't invalidate the dependency layer.
+        </p>
+        <p>
+          Booklet has a <code>Dockerfile</code> per app plus a
+          <code>docker-compose.yml</code> that wires the API, the web app and
+          Postgres together for a one-command local stack. Compose is the
+          "several containers that need to see each other" layer: it creates a
+          network, gives each service a DNS name, and starts them in
+          dependency order.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">What containerizing actually bought this project</span>
+          <p>
+            Not deployment — there is no production host yet. Two other things.
+            First, it's the only way to run the <em>real</em> production
+            execution path in CI: <code>tsc</code>/esbuild to a bundle, then
+            plain <code>node dist/index.js</code> with no dev-time module
+            resolution helping, against a real Postgres, with the health route
+            actually polled. That path has broken while every other check
+            stayed green (see <a href="#tech-bundling">Bundling</a>). Second,
+            it's where Kokoro's ~90MB of ONNX weights are baked in at build
+            time, turning a 10–60 second first-request download into zero — see
+            <a href="#deployment">Deployment</a>.
+          </p>
+        </div>
+
+        <h3 id="tech-otel">OpenTelemetry &amp; the Vocabulary of Tracing</h3>
+        <p>
+          <a href="https://opentelemetry.io/">OpenTelemetry</a> (OTel) is a
+          vendor-neutral standard — and set of SDKs — for producing telemetry:
+          traces, metrics and logs. The reason it exists is that every
+          monitoring vendor used to ship its own agent and its own SDK, so
+          instrumenting your code meant choosing a vendor and then re-doing
+          the work to leave. OTel separates <em>producing</em> telemetry from
+          <em>where it goes</em>: your code emits standard spans, an exporter
+          ships them over <strong>OTLP</strong> (the OpenTelemetry Protocol) to
+          whatever backend is configured, and switching backends is a URL.
+        </p>
+        <table>
+          <tr><th>Term</th><th>Meaning</th></tr>
+          <tr><td><strong>Span</strong></td><td>One timed operation — a name, a start and end time, and a bag of key/value attributes. "Generate this TTS chunk" is a span.</td></tr>
+          <tr><td><strong>Trace</strong></td><td>A tree of spans sharing an id, representing one end-to-end request as it moves through the system. Spans nest: the parent's duration contains its children's.</td></tr>
+          <tr><td><strong>Attribute</strong></td><td>A labelled value on a span (<code>tts.queue_wait_ms</code>, <code>tts.cache_tier</code>). This is where the information you'll actually query lives; a span with a duration and no attributes tells you something was slow and nothing about why.</td></tr>
+          <tr><td><strong>Exporter</strong></td><td>The component that batches finished spans and ships them out. Buffered, which is why flushing it on shutdown matters — and why a stray <code>process.exit()</code> elsewhere silently discarded them (see <a href="#observability">Observability</a>).</td></tr>
+          <tr><td><strong>Instrumentation</strong></td><td>The code that creates spans. <em>Manual</em> means you wrote it at the call site; <em>automatic</em> means a library patches known frameworks at load time to create them for you.</td></tr>
+          <tr><td><strong>RUM</strong></td><td>Real User Monitoring — telemetry collected in the actual browser of an actual user, as opposed to from your servers or a synthetic benchmark. The only place a number like "time to first audio on a real laptop over real wifi" can come from.</td></tr>
+        </table>
       </section>
 
       <hr class="divider">
@@ -1084,6 +1691,73 @@
             not from this column). Both are large enough to matter: see
             <a href="#feat-search">Search</a> for the real, measured cost of
             fetching them for rows that don't need them, and the fix.
+          </p>
+        </div>
+
+        <div class="callout">
+          <span class="callout-label">The one column Prisma cannot describe: <code>searchVector</code></span>
+          <p>
+            <code>Article.searchVector</code> is declared in the schema as
+            <code>Unsupported("tsvector")?</code>. Prisma has no
+            <code>tsvector</code> type, and <code>Unsupported</code> is its
+            explicit escape hatch: the column is acknowledged so migrations
+            don't try to drop it and the generated client knows the field
+            exists, but it can't be read or filtered through the normal query
+            API. Its actual definition — the weighted
+            <code>setweight(...)</code> expression and the GIN index — lives
+            in the migration SQL, and querying it means dropping to
+            <code>$queryRaw</code>. That's the honest cost of using a database
+            feature richer than the ORM's type system, paid deliberately in
+            one file. See <a href="#tech-fts">How Postgres Full-Text Search
+            Works</a> for what each piece does.
+          </p>
+        </div>
+        <div class="callout">
+          <span class="callout-label">The listening-position trio</span>
+          <p>
+            Three columns added together (#152) so read-aloud can resume
+            across devices, and each one earns its place:
+          </p>
+          <p>
+            <code>listeningFraction Float?</code> — how far through the
+            article listening reached, as a fraction of its text.
+            <strong>Deliberately not a chunk index.</strong> Chunk boundaries
+            are a function of the TTS chunker's size constants, which are
+            latency knobs that have already moved once (200 &rarr; 140
+            characters), and re-extracting an article changes the text
+            underneath any index anyway — either would silently resume at the
+            wrong place. A fraction survives both, and matches how
+            <code>progressFraction</code> already normalizes across source
+            types.
+          </p>
+          <p>
+            <strong>Nullable, unlike <code>progressFraction</code></strong> —
+            "never listened" has to be distinguishable from "listened, then
+            paused at the very start", or the resume prompt fires on every
+            article nobody has ever played. Every construction site sets it
+            to <code>null</code> explicitly, <code>apps/mobile</code>
+            included: mobile has no read-aloud yet, but it shares the
+            <code>Article</code> type and syncs the same rows, so it must not
+            write a position the web reader would then offer to resume from.
+          </p>
+          <p>
+            <code>listeningUpdatedAt DateTime?</code> — a
+            <strong>server</strong> timestamp, which makes conflict
+            resolution honest: two devices playing the same article at once is
+            rare and no reconciliation of two positions is more correct than
+            "whichever was most recent", so the rule is last-write-wins,
+            stated rather than implied. Using the server's clock means a wrong
+            or lying client clock can't decide what "recent" means.
+          </p>
+          <p>
+            <code>listeningDeviceId String?</code> — exists because the
+            resume prompt claims "last played on another device" and that
+            claim needs a source. Without it, the tab that just wrote the
+            position offers to resume from itself. It identifies a
+            <em>browser</em>, not a person, is generated locally
+            (<code>crypto.randomUUID</code> with a fallback, since that is
+            unavailable outside a secure context — plain HTTP on a LAN address
+            is a real way people open this on a phone), and is never displayed.
           </p>
         </div>
 
@@ -1243,6 +1917,84 @@
           rate is meaningfully higher than a native text layer or Readability
           extraction.
         </p>
+        <p>
+          Tesseract needs <em>trained data</em> — a language model file
+          (<code>eng.traineddata.gz</code>) describing what English letterforms
+          look like — which tesseract.js fetches from a CDN on first use. That
+          one detail is how OCR took down the entire API.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">A failed download crashed the whole server (#163)</span>
+          <p>
+            The CDN fetch for the trained data returned <code>403</code>. The
+            API process died mid-request, and every subsequent request in that
+            run failed for want of an API rather than for anything to do with
+            OCR. A remote CDN returning 403 or 5xx is an ordinary production
+            event, not a sandbox quirk.
+          </p>
+          <p>
+            <strong>The mechanism is worth understanding, because it defeats
+            the obvious defense.</strong> tesseract.js reports worker failures
+            from inside its own message callback, and with no
+            <code>errorHandler</code> installed its fallback is a bare
+            <code>throw</code> on that callback's stack. That stack belongs to
+            the worker's message plumbing, not to your call — so no
+            <code>try/catch</code> around the OCR call and no
+            <code>.catch()</code> on its promise can reach it. Node sees an
+            uncaught exception and exits. Wrapping the call site, the
+            instinctive fix, would have done nothing at all.
+          </p>
+        </div>
+        <p>
+          The containment has four parts, and the second is the
+          non-obvious one:
+        </p>
+        <ul>
+          <li><strong>Install an <code>errorHandler</code>.</strong> Its mere
+            presence skips the throwing branch entirely and routes the failure
+            back into normal control flow as a typed <code>OcrError</code>.</li>
+          <li><strong>Race it against <code>createWorker</code>'s own
+            promise.</strong> tesseract.js does not reliably settle that
+            promise when the failure happens during trained-data load — it
+            rejects whichever internal job it associated the message with,
+            which need not be the one you're awaiting. Awaiting it alone
+            therefore <em>hangs</em> rather than throwing; confirmed as a 30
+            second test timeout rather than an error.</li>
+          <li><strong>Drop the dead worker</strong> so a later call retries. A
+            fetch that 403s once can succeed later, and the pool shouldn't
+            stay poisoned for the life of the process.</li>
+          <li><strong>Share the startup promise.</strong> A pre-existing race
+            fixed while in there: two concurrent recognitions each saw a null
+            worker and built their own, leaking one and paying WASM startup
+            twice.</li>
+        </ul>
+        <p>
+          Above that, PDF extraction now treats OCR as <em>best-effort</em>,
+          the same way it already treats inlining an article's images: if OCR
+          fails, fall back to whatever native text there was rather than
+          failing the upload. If there genuinely was none, the existing
+          "couldn't find any extractable text" message still says so.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why there are two OCR test files</span>
+          <p>
+            <code>ocr.test.ts</code> does real recognition, so it can only
+            observe this failure where the CDN is genuinely unreachable — a
+            test that only fails on someone else's bad day.
+            <code>ocr-failure.test.ts</code> stubs tesseract.js so the
+            containment is asserted identically everywhere, including the
+            exact shape that caused the outage: the handler fires and
+            <code>createWorker</code>'s promise never settles at all. All five
+            were verified to fail against the old implementation — two of them
+            by hanging — and pass against the new one.
+          </p>
+          <p>
+            A side effect worth noting because it's the kind of thing that
+            looks like an unrelated win: the API suite dropped from 51.6s to
+            12.3s, because the CDN-dependent test now fails in under a second
+            instead of hanging for thirty.
+          </p>
+        </div>
 
         <h3 id="feat-tts">Text-to-Speech — the Full Story</h3>
         <p>
@@ -1694,6 +2446,181 @@
           the browser-side numbers have to exist too.
         </p>
 
+        <h4 id="tts-ch7">Chapter 7 — The client-side audio cache, and a bug that looked impossible</h4>
+        <p>
+          Chapter 6 made a <em>repeat</em> request fast: the server caches
+          generated audio in-process and, optionally, in Redis. But it is
+          still a request. Every replay of an article and every page reload
+          re-downloaded every chunk — paying CORS preflight, transfer time and
+          server work again for bytes that had not changed and could not
+          change. Chapter 7 (#150) makes the second play cost
+          <strong>nothing at all</strong>: no network, no server, no pool
+          worker.
+        </p>
+        <p>
+          The mechanism is a third cache tier in front of the two server-side
+          ones — generated WAV chunks stored in IndexedDB, keyed by exactly
+          what determines the audio: the text, the voice, and the speed.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">The first attempt was written, debugged, and reverted — it never produced a single hit</span>
+          <p>
+            Key derivation, transaction commit, and the circuit-breaker flag
+            were each eliminated as the cause. The hypothesis that survived is
+            what this version changes: it stored the <code>fetch</code>
+            <code>Blob</code> directly.
+          </p>
+          <p>
+            <strong>A <code>Blob</code> is a handle, not bytes.</strong>
+            Structured-cloning one into IndexedDB (see
+            <a href="#tech-indexeddb">IndexedDB</a>) stores a reference to a
+            backing store the browser owns — and a Blob whose backing store
+            came from somewhere unusual, such as a streamed cross-origin
+            response, can clone in and read back as something that is no
+            longer the audio. Reading <code>arrayBuffer()</code> before the
+            <code>put</code> removes that entire class of problem for the cost
+            of one ~96KB copy per chunk; the Blob is reconstructed on read,
+            where only the MIME type needs preserving.
+          </p>
+          <p>
+            The reason this was hard is that <em>every layer reported
+            success</em>. The write resolved, the transaction committed, the
+            read returned an object. Nothing in the failure said "the bytes
+            you got back are not the bytes you stored" — which is exactly the
+            kind of bug that costs a rewrite to find and one sentence to
+            explain afterwards.
+          </p>
+        </div>
+        <p>
+          Four other decisions in that file are each a real defect avoided:
+        </p>
+        <table>
+          <tr><th>Decision</th><th>The failure it prevents</th></tr>
+          <tr>
+            <td>Transactions await <code>oncomplete</code>, not the request's <code>onsuccess</code></td>
+            <td>A request can succeed and its transaction still roll back afterwards. Awaiting only the request lets a write report success and then quietly not exist.</td>
+          </tr>
+          <tr>
+            <td>Keys are <strong>FNV-1a</strong> hashes, with the full voice/speed/text tuple stored alongside</td>
+            <td><code>crypto.subtle</code> is secure-context-only, so a proper cryptographic hash isn't always available — plain HTTP on a LAN address is a real way people open this on a phone. FNV-1a is a fast non-cryptographic hash, which means collisions are possible; storing the tuple means a collision is <em>detected on read</em> instead of silently playing one article's audio for another's text.</td>
+          </tr>
+          <tr>
+            <td>Its own IndexedDB database (<code>booklet-tts-audio</code>), not the <code>booklet</code> one</td>
+            <td>That database holds the user's irreplaceable data. This one holds regenerable bytes that want their own eviction policy and must be discardable wholesale on a format change. Mixing them makes "clear the cache" indistinguishable from "delete the library".</td>
+          </tr>
+          <tr>
+            <td>Eviction stamps are a <strong>monotonic counter</strong>, not <code>Date.now()</code></td>
+            <td>A prefetch window writes several chunks inside one millisecond, giving them identical <code>lastUsedAt</code> values — which leaves their order in the index undefined, so eviction drops an arbitrary tied record rather than the least-recently-used one. That is how an LRU quietly stops being an LRU. Found by the eviction test, not by hand.</td>
+          </tr>
+        </table>
+        <p>
+          The cache runs against a default budget of 48MB and evicts
+          least-recently-used when it's exceeded. Every failure path degrades
+          to <em>just use the network</em>: a blocked origin, private browsing
+          (where Firefox throws synchronously from <code>open()</code> rather
+          than firing <code>onerror</code>), or an unsatisfiable quota
+          disables the cache for the session rather than ever making playback
+          worse than it was without it.
+        </p>
+        <div class="callout">
+          <span class="callout-label">What the 12 tests cover, and what they honestly don't</span>
+          <p>
+            Round-trip byte fidelity, key stability and separation,
+            forged-collision safety, LRU eviction under a forced small budget,
+            and graceful degradation — all over
+            <code>fake-indexeddb</code>. What they do <em>not</em> yet cover is
+            the issue's real acceptance criterion: that a second play issues
+            zero <code>/api/tts</code> requests, verified in a browser against
+            unstubbed audio. That is recorded as outstanding rather than
+            implied by the green suite, because it is precisely the check the
+            reverted first attempt got wrong.
+          </p>
+        </div>
+
+        <h4 id="tts-ch8">Chapter 8 — Where you stopped listening</h4>
+        <p>
+          Read-aloud position lived entirely in memory, so starting an article
+          on a phone and picking up a laptop started from the beginning. #152
+          persists it and offers to resume — shipped in two parts, the column
+          and sync path first, then the player wiring and the prompt.
+        </p>
+        <p>
+          The schema decisions (a fraction rather than a chunk index, nullable
+          rather than defaulted, a server timestamp, a device id) are covered
+          in <a href="#part-4">the data model</a>; they are the interesting
+          half. What follows is the runtime half.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why the flush lives in the player provider, not the reader page</span>
+          <p>
+            Playback deliberately outlives the reader route — that is the
+            entire reason <code>tts-player-provider</code> is mounted in the
+            root layout rather than the page. A flush owned by the page would
+            therefore stop recording the moment someone navigated away while
+            still listening, which is exactly the situation in which a
+            cross-device position matters most. Otherwise it uses the same
+            triggers as the reader's own progress flush: a 10-second interval,
+            <code>visibilitychange</code> (which, on mobile, is what closing
+            the app looks like), and unmount.
+          </p>
+        </div>
+        <p>
+          Position accumulates into <strong>refs</strong> on every
+          <code>timeupdate</code> and only leaves the tab on those triggers —
+          satisfying the requirement of no per-<code>timeupdate</code> network
+          traffic. Refs rather than state because nothing renders from the
+          value; as state it would re-render the whole app shell several times
+          a second for no visible change (see
+          <a href="#tech-nextjs">React</a> on that distinction). The value
+          interpolates <em>within</em> the current chunk rather than using the
+          bare chunk index: chunks are 80–140 characters, so a boundary-only
+          position would discard up to a whole chunk on every resume.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Resuming rounds down, on purpose</span>
+          <p>
+            A chunk's audio is one generated utterance and cannot be
+            meaningfully seeked into, so a resume has to land on a chunk
+            boundary one way or the other. Rounding <em>down</em> to the chunk
+            containing the position means re-hearing part of a sentence;
+            rounding up means skipping one. Re-hearing is a much better
+            failure.
+          </p>
+        </div>
+        <p>
+          Three places in the player had quietly assumed playback starts at
+          chunk 0, and each had to learn otherwise — a good illustration of
+          how a feature's real cost is rarely in the feature's own code:
+        </p>
+        <ul>
+          <li>The <strong>prewarmed chunk 0</strong> is bypassed on a resume.
+            Reusing it would start from the beginning despite the user having
+            explicitly asked not to — the optimization actively defeating the
+            feature.</li>
+          <li><strong>TTFA is marked at the first chunk actually waited
+            for</strong>, not at chunk 0, or a resume would report a
+            time-to-first-audio for audio nobody was waiting on.</li>
+          <li>The <strong>"stopped early" error copy</strong> no longer claims
+            a resume that failed on its very first chunk had started.</li>
+        </ul>
+        <p>
+          The prompt is <strong>offered, never forced</strong> — the issue
+          calls that half the feature. It renders nothing unless there is a
+          position worth returning to (past 1%, before 98%), says "on another
+          device" only when the stored device id actually proves it rather
+          than guessing, and is skipped entirely for the native
+          <code>SpeechSynthesis</code> voice, which speaks the whole text in
+          one call and has no position to resume to.
+          <code>normalizeArticle</code> backfills the three fields for records
+          saved before any of this existed, so an older local article reads as
+          <code>null</code> rather than <code>undefined</code>.
+        </p>
+        <p>
+          Nine unit tests cover the resume <em>decision</em> specifically —
+          the part that is easy to get quietly wrong, and cheap to pin now
+          that <a href="#web-unit-runner">apps/web has a unit runner</a>.
+        </p>
+
         <h3 id="feat-resurface">Resurfacing (SM-2)</h3>
         <p>
           SM-2 (SuperMemo 2, Wozniak 1987) is the actual algorithm, not a
@@ -1783,6 +2710,61 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             first place — not a caching fix, a query-shape fix.
           </p>
         </div>
+        <h4>Semantic search <span class="tag">in progress</span></h4>
+        <p>
+          <strong>Being built now (#156), and described here as partial on
+          purpose</strong> — the schema and the shared ranking logic exist,
+          the routes and client wiring do not. Keyword search finds articles
+          containing your words; semantic search aims to find articles
+          <em>about</em> what you meant, by embedding text into vectors and
+          comparing directions rather than matching lexemes. Two decisions are
+          already committed and both were recorded at the point of decision
+          rather than reconstructed later:
+        </p>
+        <ul>
+          <li><strong>Several embeddings per article, not one.</strong>
+            <code>all-MiniLM-L6-v2</code> truncates at 256 word pieces, so
+            embedding a whole article does not <em>average</em> it — it embeds
+            the opening and silently discards the rest, which would make any
+            mid-article passage permanently unfindable. Articles are therefore
+            chunked into windows, one <code>ArticleEmbedding</code> row each.</li>
+          <li><strong>A plain <code>Float[]</code> column, not pgvector.</strong>
+            pgvector isn't available in the <code>postgres:16</code> image
+            that CI and <code>docker-compose</code> both run, so adopting it
+            means changing the image in three places plus taking on an
+            extension the app otherwise has no use for. At one person's
+            library, similarity over a few thousand 384-float vectors is
+            milliseconds in process. The condition to revisit is named rather
+            than left vague: when a full scan is actually the bottleneck,
+            which is the point at which an approximate-nearest-neighbour index
+            earns its dependency.</li>
+        </ul>
+        <p>
+          The similarity, chunking and result-fusion code lives in
+          <code>packages/shared</code> for exactly the reason the TTS chunker
+          does: the server will embed with transformers.js under Node and the
+          browser will embed with transformers.js under WASM, and if those two
+          ranked results by separately written maths, "signed-in and local
+          mode behave the same" would hold only until one of them was edited.
+          One implementation, two callers.
+        </p>
+        <div class="callout">
+          <span class="callout-label">A small thing worth copying: the defensive cosine</span>
+          <p>
+            <code>cosineSimilarity</code> divides by both magnitudes even
+            though the model is normally asked for normalized output, where
+            cosine collapses to a plain dot product. The reasoning is about
+            failure modes rather than performance: the assumption is invisible
+            when it breaks — a caller forgetting <code>normalize</code>, a
+            vector round-tripped through a lossy store — and it produces
+            silently wrong <em>ordering</em> rather than an error, which is
+            the worst possible kind of bug in a ranking function. Two extra
+            multiply-accumulates per dimension over 384 floats is a cheap
+            premium against that. A zero vector likewise returns 0 rather than
+            <code>NaN</code>, so it is merely irrelevant instead of poisoning
+            every comparison it takes part in.
+          </p>
+        </div>
 
         <h3 id="feat-collections">Collections</h3>
         <p>
@@ -1848,25 +2830,44 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <section id="part-6">
         <h2><span class="part-label">Part VI</span>Testing Philosophy</h2>
+        <h3 id="test-layers">The Four Layers</h3>
         <p>
-          Three layers, each answering a different question:
+          Each answers a different question, at a different cost, and the cost
+          difference is the whole design:
         </p>
-        <ul>
-          <li><strong>Unit (Vitest, <code>packages/shared</code>)</strong> —
-            pure logic with no I/O: the SM-2 algorithm, highlight-anchor
-            resolution, URL canonicalization, collection filters, Kindle-
-            clippings parsing. Fast, deterministic, no database.</li>
-          <li><strong>Integration (Vitest, <code>apps/api</code>)</strong> —
-            the full API surface exercised through Fastify's own
-            <code>.inject()</code> — real route handlers, real Prisma
-            queries against a real (test) Postgres, no HTTP server actually
-            listening on a socket.</li>
-          <li><strong>End-to-end (Playwright, <code>apps/web</code>)</strong> —
-            a real Chromium browser driving the real running app: real PDF
-            canvas rendering, real EPUB iframe pagination, real cross-iframe
-            text selection, real Kokoro model generation (not mocked) for
-            the TTS suite.</li>
-        </ul>
+        <table>
+          <tr><th>Layer</th><th>What it proves</th><th>Cost</th></tr>
+          <tr>
+            <td><strong>Pure unit</strong><br>Vitest, <code>packages/shared</code></td>
+            <td>Logic with no I/O and no DOM: the SM-2 algorithm, highlight-anchor resolution, URL canonicalization, collection filters, Kindle-clippings parsing, TTS chunking.</td>
+            <td>84 tests, milliseconds</td>
+          </tr>
+          <tr>
+            <td><strong>DOM unit</strong><br>Vitest + jsdom, <code>apps/web</code></td>
+            <td>Browser logic that doesn't need pixels: offset&harr;DOM-node bridging, section anchoring, popover dismissal rules, the resume decision — plus, since #166, real rendered React components.</td>
+            <td>~49 tests, ~2s</td>
+          </tr>
+          <tr>
+            <td><strong>Integration</strong><br>Vitest, <code>apps/api</code></td>
+            <td>The full API surface through Fastify's own <code>.inject()</code>: real route handlers, real Prisma queries against a real test Postgres, no socket actually listening.</td>
+            <td>149 tests, ~12s</td>
+          </tr>
+          <tr>
+            <td><strong>End-to-end</strong><br>Playwright, <code>apps/web</code> + <code>apps/extension</code></td>
+            <td>A real Chromium driving the real app: PDF canvas rendering, EPUB iframe pagination, cross-iframe text selection, real Kokoro generation, a real loaded browser extension.</td>
+            <td>~116 tests, ~8.7 min</td>
+          </tr>
+        </table>
+        <p>
+          <code>.inject()</code> in that third row is worth explaining, since
+          it's what makes the API layer fast enough to run constantly: Fastify
+          can construct a request object and push it straight through its own
+          routing, hooks, validation and handler chain <em>in process</em>,
+          returning the response object without ever opening a TCP socket. You
+          get genuine end-to-end route behavior — real middleware, real
+          serialization, real database — without the per-test cost of a server
+          listening and a client connecting.
+        </p>
         <div class="callout why">
           <span class="callout-label">Why real generation instead of mocking TTS in e2e tests</span>
           <p>
@@ -1888,6 +2889,81 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           constructor to trace real playback events, a git-stash-isolated
           re-run to prove a failure predates a specific change — rather than
           guessing from the failure message alone.
+        </p>
+
+        <h3 id="web-unit-runner">The 19,000 Untested Lines</h3>
+        <p>
+          Until recently that four-layer table had a hole in the middle of it.
+          <code>packages/shared</code> had Vitest, <code>apps/api</code> had
+          Vitest, and <strong>roughly 19,000 lines of the web app's own logic
+          had no test runner at all</strong> — covered only by Playwright, at
+          whole-browser cost and whole-browser latency, or not at all.
+        </p>
+        <p>
+          The argument for closing it wasn't hygiene, it was a bill that had
+          already been paid. <strong>Four real bugs shipped that a unit test
+          here would have caught in under a second each:</strong>
+        </p>
+        <ul>
+          <li>Both chunk-0 sizing bugs in the TTS chunker — already the reason
+            that chunker was moved into <code>packages/shared</code>.</li>
+          <li>The read-along section anchor resolving to the wrong element at
+            a text-node boundary (see
+            <a href="#e2e-fixtures">the e2e story</a> below, where it
+            masqueraded as a flaky test for a full CI cycle).</li>
+          <li>The highlight popover dismissing itself on a scroll event that
+            arrived <em>after</em> it opened.</li>
+        </ul>
+        <p>
+          Every one of them surfaced as a slow, intermittent e2e failure that
+          read like flakiness. The last two cost a full CI cycle each just to
+          locate. That is the real argument for a fast layer: not that unit
+          tests catch more bugs than e2e tests, but that they
+          <strong>describe</strong> the ones they catch, immediately, instead
+          of presenting them as a timeout somewhere else.
+        </p>
+        <p>
+          The runner is <code>apps/web/vitest.config.ts</code> — jsdom rather
+          than node, because most of what's worth testing there is DOM logic
+          with no meaning without a <code>document</code>. Playwright's own
+          <code>e2e/</code> directory is excluded <em>explicitly</em> rather
+          than by naming convention, so that adding a
+          <code>src/**/*.spec.ts</code> later can't quietly pull the whole
+          browser suite into the unit run.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Proving the tests earn their place</span>
+          <p>
+            Writing tests after fixing the bugs they describe is how suites
+            fill up with assertions that have never once failed. So the
+            verification here was to <strong>reintroduce both of that
+            session's real bugs and confirm 6 failures across the two
+            files</strong>, then restore the fixes. A test that has never been
+            observed failing is a hypothesis, not a regression guard.
+          </p>
+        </div>
+        <p>
+          One test in particular is documentation as much as verification.
+          <code>dom-range.test.ts</code> pins the offset&harr;DOM bridging
+          <em>including its deliberate asymmetry</em> at a text-node boundary:
+          the helper resolves to the <strong>end of the earlier node</strong>
+          on purpose, because highlight rendering shares it and biasing it
+          forward would change which text nodes get wrapped in
+          <code>&lt;mark&gt;</code>. That is exactly the kind of thing a later
+          "obvious fix" breaks silently, so it is now written down somewhere
+          the compiler can enforce.
+        </p>
+        <p>
+          The first version of this runner shipped <em>without</em> React
+          component rendering, and the reason is a story in itself — see
+          <a href="#tech-one-react">One React for the Workspace</a>. Because
+          of it, the popover's scroll rule was initially tested through a
+          small extracted <code>hasScrolledAway()</code> helper rather than a
+          rendered component: less coverage than a real interaction test, and
+          documented as such rather than glossed over. Rendering works now,
+          and the first rendered component test deliberately targets
+          <code>RenameDialog</code> — a component with enough hooks to
+          actually exercise the thing that was broken.
         </p>
 
         <h3 id="e2e-fixtures">The e2e suite was switched off, and why it is back on</h3>
@@ -2000,22 +3076,311 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <section id="part-7">
         <h2><span class="part-label">Part VII</span>CI/CD &amp; Deployment</h2>
+
+        <h3 id="ci-what-it-is">What CI Actually Does Here</h3>
         <p>
-          <code>.github/workflows/ci.yml</code> runs on every push/PR:
-          typecheck + lint for every package, the shared/api/web test suites
-          (API and web e2e against a real Postgres service container), the
-          extension's e2e suite under <code>xvfb</code> (a virtual display,
-          since a real browser extension needs a real browser window even in
-          headless CI), and a <code>docker-build</code> job that builds both
-          production images and smoke-tests the API image against a real
-          Postgres container.
+          <strong>Continuous Integration</strong>, stripped of the ceremony,
+          is one idea: every push runs the same checks, on a clean machine
+          nobody has configured by hand, before anyone is asked to trust the
+          change. The "clean machine" half is what makes it worth paying for —
+          it is the only environment in which "works on my machine" is not a
+          possible explanation.
         </p>
         <p>
-          Deployment itself (see <code>DEPLOYMENT.md</code>) is
-          Docker-based — a <code>Dockerfile</code> per app, verified by CI's
-          own build-and-smoke-test, but not yet pointed at a real production
-          host (no cloud account exists in this project's own development
-          environment).
+          Booklet's pipeline exists twice, in two dialects, and both are real
+          and current: <code>.github/workflows/ci.yml</code> for GitHub
+          Actions and <code>.gitlab-ci.yml</code> for GitLab CI/CD. Six jobs,
+          in three stages:
+        </p>
+        <table>
+          <tr><th>Job</th><th>What it does, and why it's separate</th></tr>
+          <tr>
+            <td><code>typecheck-and-lint</code></td>
+            <td>Four <code>tsc --noEmit</code> passes (api, web, extension, mobile) plus lint — and, deliberately, the API's <strong>production esbuild bundle</strong>. The bundle is here rather than only in <code>docker-build</code> because <code>tsc</code> never asks who <em>declared</em> a package, so a transitive import typechecks cleanly and then fails in esbuild. Moving the cheapest half of that signal here reports it about two minutes earlier. See <a href="#tech-bundling">Bundling</a>.</td>
+          </tr>
+          <tr>
+            <td><code>test-unit</code></td>
+            <td><code>packages/shared</code> and <code>apps/web</code>'s Vitest suites together in one job — neither needs a database, a browser, or built artifacts, and the whole thing is a couple of seconds. A dedicated job per suite would spend longer on checkout and install than on the tests.</td>
+          </tr>
+          <tr>
+            <td><code>test-api</code></td>
+            <td>The API integration suite against a real Postgres <em>service container</em> — a second container the CI system starts alongside the job and connects to the same network. Real Postgres rather than the PGlite dev database, so the normal Prisma migration engine applies.</td>
+          </tr>
+          <tr>
+            <td><code>test-web-e2e</code></td>
+            <td>Playwright against the real stack: API, web app, Postgres, and the local article fixture server, all running at once.</td>
+          </tr>
+          <tr>
+            <td><code>test-extension-e2e</code></td>
+            <td>The browser extension's suite under <strong><code>xvfb</code></strong> — a virtual X display. A real extension needs a real background service worker, which (confirmed empirically) does not register under Chromium's headless mode, so the browser has to run <em>headed</em> against a display that doesn't physically exist. Also runs Mozilla's own manifest validator, which catches Firefox-specific <code>manifest.json</code> regressions nothing else here would, since the e2e suite itself only drives Chromium.</td>
+          </tr>
+          <tr>
+            <td><code>docker-build</code></td>
+            <td>Builds both production images and actually <em>starts</em> the API image against a throwaway Postgres, polling <code>/api/health</code> until it answers. Confirms the built image doesn't merely exist — it boots, and Prisma really connects.</td>
+          </tr>
+        </table>
+        <div class="callout why">
+          <span class="callout-label">Why a build-and-run job earns its keep</span>
+          <p>
+            Every other job runs under <code>tsx</code> or Vitest, where
+            module resolution is generous. The production path —
+            tsc/esbuild to a bundle, then plain <code>node dist/index.js</code>
+            — is a genuinely different execution environment and has broken
+            silently before while every other check stayed green. That is the
+            specific class of failure this job exists to catch, and it has
+            caught it.
+          </p>
+        </div>
+
+        <h3 id="ci-cost">The Day the Allowance Ran Out</h3>
+        <p>
+          Mid-branch, CI started failing with <code>runner_id: 0</code> — an
+          error that describes nothing. The cause was billing: the GitHub
+          Actions allowance was exhausted, and the repository was left with
+          <strong>no automated checks at all</strong>.
+        </p>
+        <p>
+          Two responses followed, and they're independent. The first was to
+          cut what the pipeline burns, because at roughly 22 minutes of
+          billable runner time per full run, the spending pattern turned out
+          to be mostly waste:
+        </p>
+        <ul>
+          <li><strong>Cancel superseded runs.</strong> Pushing five times in
+            an afternoon meant five concurrent full runs, four of them already
+            obsolete and none of which anyone would read. <strong>This is by
+            far the biggest lever</strong> — everything else on this list is
+            rounding error next to it. The final push on a branch still gets a
+            complete run; only the already-pointless ones are dropped.</li>
+          <li><strong>Skip prose-only changes.</strong> A commit touching only
+            markdown or <code>docs/</code> cost a full run and contained no
+            code to typecheck, bundle, or drive a browser against.</li>
+          <li><strong>Stop running the TTS benchmark on pull requests.</strong>
+            It is a <em>measurement</em>, not a gate: it has no pass/fail
+            criteria, so it cannot fail a PR and nobody reads it per-push. It
+            still runs on the default branch, where the trend line is the
+            point, and can be asked for by hand on any branch — which is how
+            the numbers in <a href="#part-9">the pool-parallelism entry</a>
+            were taken anyway.</li>
+        </ul>
+        <div class="callout warn">
+          <span class="callout-label">The docs-skip has a caveat, recorded in the workflow itself</span>
+          <p>
+            Skipping the workflow means a docs-only PR reports <em>no</em>
+            checks at all. That's harmless today. If required status checks
+            are ever enabled on this repository, it becomes a PR that can
+            never merge — and the fix at that point is a no-op job that
+            reports success, not a skipped workflow. The note lives in the
+            YAML rather than in someone's memory.
+          </p>
+        </div>
+        <div class="callout">
+          <span class="callout-label">A bug found only because CI was gone</span>
+          <p>
+            Verifying by hand in CI's absence,
+            <code>/api/health</code> reported <code>loaded: 1</code> for a
+            model that had definitively failed to load — the exact lie the
+            readiness reporting had been added to stop telling.
+          </p>
+          <p>
+            The worker awaited <code>warmTtsModel()</code>, which catches its
+            own errors and resolves either way, so it could never report
+            <code>ok: false</code>. It awaits <code>loadTtsModel()</code> now,
+            which propagates. <code>warmTtsModel</code> keeps its swallowing
+            behavior for <em>server startup</em>, where not taking the whole
+            API down over a TTS model is the right call — and the comment on
+            each now says which is which and why. Confirmed against a running
+            API with the weights CDN unreachable: health reports
+            <code>status: ok</code> with <code>workers: 2, loaded: 0</code>,
+            and the pool logs both failed loads.
+          </p>
+          <p>
+            Three tests pin it, two of which fail against the old version —
+            including one asserting <em>which function is awaited</em>, since
+            the two are indistinguishable by return type. That is an unusual
+            test to write and the right one here: the defect was never in the
+            values, only in which of two identically-shaped functions was
+            called.
+          </p>
+        </div>
+
+        <h3 id="gitlab-port">Porting the Pipeline to GitLab</h3>
+        <p>
+          The second response was to port the whole thing to GitLab CI/CD,
+          which is where the pipeline runs now. Every job is a
+          <strong>deliberate translation</strong> of its Actions counterpart
+          rather than a fresh design, so the two can be compared side by side
+          while both exist, with every non-cosmetic difference commented at
+          the point it occurs.
+        </p>
+        <p>
+          Four translation hazards account for most of the work, and each one
+          silently produces a broken-but-green or mysteriously-red pipeline if
+          missed. They generalize well beyond this repo:
+        </p>
+        <table>
+          <tr><th>Hazard</th><th>GitHub Actions</th><th>GitLab CI</th></tr>
+          <tr>
+            <td><strong>Service hostnames</strong></td>
+            <td>Maps a service container's ports onto <code>localhost</code>.</td>
+            <td>Does not. A service is reachable at <em>its own hostname</em> on a shared network — so every <code>DATABASE_URL</code> says <code>postgres:5432</code>, not <code>localhost:5432</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Service readiness</strong></td>
+            <td><code>--health-cmd pg_isready</code> waits until Postgres will actually answer.</td>
+            <td>No equivalent — it only waits for the <em>port to open</em>, which Postgres does before it will answer queries. Without an explicit wait, the first <code>prisma migrate deploy</code> intermittently dies on a connection the server closes during startup.</td>
+          </tr>
+          <tr>
+            <td><strong>Shell lifetime</strong></td>
+            <td>Each <code>run:</code> step is a fresh shell on a persistent VM.</td>
+            <td>The whole <code>script:</code> runs in <em>one</em> shell. Backgrounding (<code>… &amp;</code>) works more naturally, but an early <code>cd</code> or exported variable leaks into every later line.</td>
+          </tr>
+          <tr>
+            <td><strong>Privileges</strong></td>
+            <td><code>sudo apt-get …</code> is normal.</td>
+            <td>The docker executor already runs as root and <code>sudo</code> isn't installed — every <code>sudo</code> simply comes out.</td>
+          </tr>
+        </table>
+        <p>
+          The readiness wait is a small piece of engineering worth reading: it
+          polls with bash's <code>/dev/tcp</code> rather than installing
+          <code>pg_isready</code> (so it costs no <code>apt</code>), then
+          confirms real readiness by letting the migration itself retry five
+          times. Checking that the port is open is necessary and not
+          sufficient; the only proof Postgres will answer a query is a query.
+        </p>
+        <p>
+          Several smaller decisions in that file are each a paid-for lesson:
+        </p>
+        <ul>
+          <li><strong>pnpm's store is relocated into the project directory.</strong>
+            GitLab only caches paths inside the build directory, and pnpm's
+            default store lives in <code>$HOME</code>, which is outside it —
+            so the cache silently does nothing until you move it.</li>
+          <li><strong>Corepack's download prompt is disabled.</strong> Corepack
+            asks before downloading a pnpm it doesn't already have, and on a
+            non-interactive runner that is an <em>indefinite hang</em> rather
+            than a failure.</li>
+          <li><strong>Playwright's own image, not <code>node</code> +
+            <code>playwright install --with-deps</code>.</strong> The browser
+            and its ~100 system packages are already baked in, saving a couple
+            of minutes of <code>apt</code> per run in each of two jobs. The
+            image tag has to track <code>@playwright/test</code> in
+            <code>package.json</code>; the <code>install</code> call is kept
+            on top because it's a cheap no-op when they agree and a correct
+            repair when a lockfile bump makes them disagree — a drifted tag
+            then costs seconds instead of failing outright.</li>
+          <li><strong>The TTS model is pre-fetched in a single process</strong>
+            before anything that starts the pool. Three workers cold-missing
+            the Hugging Face cache simultaneously race to write the same file,
+            which was observed producing a truncated model and a
+            <em>"Protobuf parsing failed"</em> crash — not merely wasted
+            bandwidth.</li>
+          <li><strong><code>docker-build</code> uses Docker-in-Docker,</strong>
+            and curls the API from a throwaway container on the same network
+            rather than a published port — because with dind the docker daemon
+            is a <em>separate container</em>, so <code>-p</code> publishes onto
+            the daemon's network namespace, not the job's.</li>
+          <li><strong>Publishing lives inside <code>docker-build</code>,
+            not in a separate job.</strong> dind gives every job a brand-new
+            daemon with an empty layer cache, so nothing built in one job
+            survives into another — a separate publish job would rebuild both
+            images from scratch, including baking in Kokoro's weights, twice
+            per push. An exhausted CI allowance is what started this migration;
+            spending it that way would be an odd way to finish.</li>
+        </ul>
+        <div class="callout rejected">
+          <span class="callout-label">Deliberately not ported: the docs <code>paths-ignore</code></span>
+          <p>
+            GitLab's <code>rules:changes</code> means "run <em>if</em> these
+            paths changed", which cannot express "skip only if nothing
+            <em>but</em> docs changed". The naive inversion skips the whole
+            pipeline on any merge request that touches a doc alongside real
+            code — which is most of them.
+          </p>
+          <p>
+            Silently not running CI on a real code change is a far worse
+            failure than spending a runner on a prose-only merge request, so
+            the optimization is left out until it can be done correctly. The
+            asymmetry is the point: one mistake wastes money, the other ships
+            a bug.
+          </p>
+        </div>
+
+        <h3 id="ci-gating">Gating Jobs on the Tree, Not on a Flag</h3>
+        <p>
+          The first real GitLab pipeline failed on <code>main</code>, and the
+          cause was instructive: the config had been written against the
+          branch carrying the TTS pool work and then cherry-picked to a branch
+          that has none of it. Both failures were the same missing module.
+        </p>
+        <p>
+          The wider version of that same mistake was worse and quieter. On the
+          Actions side, <code>test-web-e2e</code> carried a hard
+          <code>if: false</code> — the suite had been switched off for being
+          too slow to gate merges on (see
+          <a href="#e2e-fixtures">the e2e story</a>), and what made it viable
+          again was the local fixture server. Porting the job
+          <em>without</em> porting that flag quietly re-enabled a suite the
+          branch could not run.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">A job that cannot run should not exist, rather than fail</span>
+          <p>
+            So each of these jobs is now gated with <code>rules:exists</code>
+            on <strong>the file that makes it possible</strong>: the fixture
+            server for <code>test-web-e2e</code>, the benchmark script for
+            <code>bench-tts-ttfa</code>.
+          </p>
+          <p>
+            That states the same decision as a <em>fact about the tree</em>
+            rather than a flag someone has to remember to flip. Branches
+            without the work skip the job; the job switches itself on the
+            moment that work merges, with no second edit and no window in
+            which the config and the code disagree. The failure mode of a
+            forgotten <code>if: false</code> is a permanently disabled test
+            suite nobody notices; this construction has no such mode.
+          </p>
+          <p>
+            The model pre-fetch keeps a shell guard on top of the rule anyway,
+            because <code>exists</code> is OR across its list and cannot
+            express "this <em>other</em> exact file is also present".
+          </p>
+        </div>
+        <p>
+          The same run also proved the port on the first attempt for
+          <code>typecheck-and-lint</code>, <code>test-unit</code>,
+          <code>test-api</code> and <code>test-extension-e2e</code> — which
+          between them cover every one of the four translation hazards above:
+          the service hostname, the readiness wait standing in for
+          <code>--health-cmd</code>, the Playwright image, and
+          <code>xvfb</code> without <code>sudo</code>.
+        </p>
+        <div class="callout">
+          <span class="callout-label">Verification when there is no CI to verify with</span>
+          <p>
+            Worth recording as a practice, since this branch spent real time
+            with no working pipeline: the commits made during that window
+            carry an explicit local-verification record in place of a green
+            check — every suite, every typecheck, lint, the production bundle,
+            and the full e2e run, <em>with the failures enumerated and
+            individually accounted for</em> (blocked outbound network to
+            xkcd, dictionaryapi.dev, Wikipedia and Hugging Face; the PDF text
+            layer not rendering in that sandbox at all). "104 passed, 12
+            failed, and here is why each of the twelve is not about this
+            change" is a usable substitute for CI. "Tests pass locally" is not.
+          </p>
+        </div>
+
+        <h3 id="deployment">Deployment &amp; Environment</h3>
+        <p>
+          Deployment (see <code>DEPLOYMENT.md</code>) is Docker-based — a
+          <code>Dockerfile</code> per app plus a
+          <code>docker-compose.yml</code>, verified by CI's own
+          build-and-smoke-test, but not yet pointed at a real production host
+          (no cloud account exists in this project's own development
+          environment). That gap is stated rather than papered over: what
+          follows is real and tested, but it has not yet met real traffic.
         </p>
         <p>
           The API image <strong>bakes Kokoro's ONNX weights in at build
@@ -2068,7 +3433,29 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             <td><code>TTS_CACHE_MAX_MB</code> (default 200)</td>
             <td>In-process cache ceiling, evicted LRU.</td>
           </tr>
+          <tr>
+            <td><code>SENTRY_DSN</code> (API)</td>
+            <td>Server-side error monitoring. Absent means monitoring is off, not an error — the same opt-in-by-environment pattern as <code>REDIS_URL</code>, <code>RESEND_API_KEY</code> and the OTLP endpoint.</td>
+          </tr>
+          <tr>
+            <td><code>NEXT_PUBLIC_SENTRY_DSN</code> (web, <strong>build arg</strong>)</td>
+            <td>Browser-side error monitoring — and the one entry in this table that is <em>not</em> a runtime variable. Next.js inlines <code>NEXT_PUBLIC_*</code> into the client bundle at build time, so supplying this through Compose's <code>environment:</code> would be too late to ever reach a browser: the container would start cleanly with error monitoring silently doing nothing. It's passed to the web image as a build <code>ARG</code>, defaulted empty so the stack still builds without one.</td>
+          </tr>
         </table>
+        <div class="callout warn">
+          <span class="callout-label">The general rule that hides behind that last row</span>
+          <p>
+            <strong>Anything a browser needs must be decided when the image is
+            built, not when the container starts.</strong> That is a real
+            operational constraint, not a quirk: it means the web image is
+            environment-specific, and pointing an existing image at a
+            different Sentry project or Datadog application requires a rebuild
+            rather than a restart. Worth knowing before designing a deployment
+            pipeline around it, and worth recognizing in the failure mode it
+            produces — everything comes up healthy and one feature is
+            invisibly inert.
+          </p>
+        </div>
 
         <h3 id="observability">Observability</h3>
         <p>
@@ -2289,13 +3676,56 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           <dd>A pattern where repeated failures against a dependency cause it to be skipped outright for a cooling-off period, rather than every request continuing to pay a timeout to rediscover it's down. Used here so a degraded Redis can never make TTS slower than having no cache at all.</dd>
 
           <dt>L1 / L2 cache</dt>
-          <dd>Tiers of a layered cache, borrowed from CPU terminology: L1 is smaller and closer (here, in the server process's own memory), L2 is larger and slightly further away (here, Redis over the network). A miss in L1 falls through to L2; a hit in L2 is promoted into L1.</dd>
+          <dd>Tiers of a layered cache, borrowed from CPU terminology: L1 is smaller and closer (here, in the server process's own memory), L2 is larger and slightly further away (here, Redis over the network). A miss in L1 falls through to L2; a hit in L2 is promoted into L1. Since <a href="#tts-ch7">Chapter 7</a> there is effectively an L0 in front of both: the browser's own IndexedDB, where a hit costs no network at all.</dd>
+
+          <dt>LRU (least recently used)</dt>
+          <dd>An eviction policy: when a cache is over budget, discard whatever was used longest ago. Cheap and usually close to optimal — but only if "longest ago" is actually well-ordered, which is why the audio cache stamps records with a monotonic counter rather than <code>Date.now()</code>.</dd>
+
+          <dt>Lexeme / stemming</dt>
+          <dd>A lexeme is a word reduced to its root form; stemming is the process that does it. <code>running</code>, <code>runs</code> and <code>ran</code> all stem to <code>run</code>, which is why a full-text search for one finds the others and a substring match never will. See <a href="#tech-fts">How Postgres Full-Text Search Works</a>.</dd>
+
+          <dt><code>tsvector</code> / <code>tsquery</code> / GIN</dt>
+          <dd>Postgres's full-text machinery: a <code>tsvector</code> is a document pre-parsed into weighted, positioned lexemes; a <code>tsquery</code> is a boolean expression of lexemes to match against it; a GIN (Generalized Inverted) index maps lexeme &rarr; rows so that matching doesn't mean scanning the table.</dd>
+
+          <dt>Generated column</dt>
+          <dd>A column whose value the database computes from other columns and maintains itself on every write (<code>GENERATED ALWAYS AS (…) STORED</code>). Booklet's <code>searchVector</code> is one, which is why the search index can never drift out of sync with the article it describes — there is no application code that could forget to update it.</dd>
+
+          <dt>Span / trace / OTLP</dt>
+          <dd>A span is one timed, labelled operation; a trace is the tree of spans making up one end-to-end request; OTLP is the wire protocol OpenTelemetry uses to ship them to a backend. See <a href="#tech-otel">the tracing vocabulary</a>.</dd>
+
+          <dt>RUM (Real User Monitoring)</dt>
+          <dd>Telemetry gathered in real users' browsers rather than from servers or a synthetic benchmark — the only source for a number like "time to first audio on a real laptop over real wifi".</dd>
+
+          <dt>Image vs. container</dt>
+          <dd>An image is an immutable stack of filesystem layers plus metadata about how to run it; a container is one running instance of an image with a thin writable layer on top. Building is what produces an image; <code>docker run</code> is what produces a container.</dd>
+
+          <dt>Docker-in-Docker (dind)</dt>
+          <dd>Running a Docker daemon inside a container so a CI job can build images. Its practical consequence in this repo: the daemon is a <em>separate container</em>, so a published port lands in the daemon's network namespace rather than the job's — and every job gets a brand-new daemon with an empty layer cache, so nothing built in one job survives into another.</dd>
+
+          <dt>Service container</dt>
+          <dd>A supporting container (here, Postgres) that a CI system starts alongside a job. GitHub Actions maps its ports onto <code>localhost</code>; GitLab CI does not, exposing it under its own hostname instead — one of the four hazards in <a href="#gitlab-port">the GitLab port</a>.</dd>
+
+          <dt><code>xvfb</code></dt>
+          <dd>"X virtual framebuffer" — an X11 display server that renders to memory instead of a screen. It lets a program that insists on a real display run on a machine that has none, which is how the extension's e2e suite drives a <em>headed</em> Chromium in CI (a browser extension's background service worker does not register in headless mode).</dd>
+
+          <dt>Override (dependency)</dt>
+          <dd>A package-manager instruction forcing one version of a dependency across the whole tree regardless of what individual packages requested. A blunt tool, correct in exactly the case where the goal is "there must be only one of these" — see <a href="#tech-one-react">One React for the Workspace</a>.</dd>
+
+          <dt>Transitive dependency</dt>
+          <dd>A package you didn't declare but can reach because something you did declare depends on it. Importing one typechecks fine (<code>tsc</code> resolves through <code>node_modules</code> and never asks who declared what) and then breaks the production bundle — a real failure in this repo, and why the bundle now runs in the cheapest CI job.</dd>
+
+          <dt>Structured clone</dt>
+          <dd>The browser algorithm used to copy values across boundaries such as IndexedDB or <code>postMessage</code>. Richer than JSON (it handles <code>Date</code>, <code>Map</code>, <code>ArrayBuffer</code>, cycles) but with sharp edges — cloning a <code>Blob</code> stores a reference to browser-owned bytes, not the bytes themselves.</dd>
+
+          <dt>jsdom</dt>
+          <dd>A JavaScript implementation of the DOM that runs in Node. Real elements, real events, real <code>Range</code> objects — but <strong>no layout</strong>, so anything geometric measures as zero. It's both this project's server-side HTML parser (Readability needs a DOM) and its unit-test environment for browser logic.</dd>
         </dl>
       </section>
 
       <hr class="divider">
 
       <section id="part-9">
+        <a id="roads-not-taken"></a>
         <h2><span class="part-label">Part IX</span>Roads Not Taken</h2>
         <p>
           A dedicated index of real ideas that were tried, measured, and
@@ -2457,6 +3887,87 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             cache is the better route to zero-byte replays if that's ever
             needed.
           </p>
+          <p>
+            <strong>Update — that alternative was built.</strong> The
+            client-side IndexedDB cache this entry named as the better route
+            now exists (<a href="#tts-ch7">Chapter 7</a>), delivering the
+            zero-byte replay without putting anyone's reading material into a
+            URL. The rejection stands and is now cheaper than it was: the
+            thing it gave up has been recovered by other means.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">Storing the <code>fetch</code> <code>Blob</code> directly in IndexedDB</span>
+          <p>
+            The obvious implementation of the audio cache, and the one that
+            was written first, debugged for a while, and reverted for never
+            producing a single cache hit. A <code>Blob</code> is a handle to a
+            browser-owned backing store, not bytes; structured-cloning one can
+            store a reference that reads back as something which is no longer
+            the audio, with every layer reporting success throughout. Reading
+            <code>arrayBuffer()</code> before the write costs one ~96KB copy
+            per chunk and removes the entire class of problem. See
+            <a href="#tts-ch7">Chapter 7</a>.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label"><code>Date.now()</code> as the LRU recency stamp</span>
+          <p>
+            Small, but a good example of a correct-looking implementation of a
+            well-known algorithm that isn't one. A prefetch window writes
+            several audio chunks inside a single millisecond, giving them
+            identical timestamps — which leaves their relative order in the
+            index undefined, so eviction drops an arbitrary tied record rather
+            than the least-recently-used one. A monotonic counter replaced it.
+            Caught by the eviction test, which is the only reason it was
+            caught at all.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">A chunk index for the listening position</span>
+          <p>
+            The natural representation — the player already thinks in chunks —
+            and wrong in two independent ways. Chunk boundaries are a function
+            of the chunker's size constants, which are latency knobs that have
+            already moved once (200 &rarr; 140 characters); and re-extracting
+            an article changes the text underneath any index. Either would
+            silently resume at the wrong place, with no error and no way for a
+            reader to tell it had happened. A fraction over the article's text
+            survives both. See <a href="#tts-ch8">Chapter 8</a>.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">Resolver aliases to paper over three React copies</span>
+          <p>
+            <code>resolve.alias</code>, <code>resolve.dedupe</code> and
+            <code>server.deps.inline</code> were each tried to make Vitest
+            resolve a single React. None work — the renderer resolves React
+            through Node before Vite sees the import — but the deciding
+            argument is that a working version would have been
+            <em>worse</em>: it would make tests agree about React while the
+            application kept shipping three copies, hiding a real defect
+            behind a green suite. The dependency was fixed instead, with a
+            workspace-wide override. See
+            <a href="#tech-one-react">One React for the Workspace</a>.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">GitLab <code>rules:changes</code> as a docs-only pipeline skip</span>
+          <p>
+            The direct translation of Actions' <code>paths-ignore</code>, and
+            not expressible: <code>rules:changes</code> means "run <em>if</em>
+            these paths changed", which cannot state "skip only if nothing
+            <em>but</em> docs changed". The naive inversion skips CI on any
+            merge request that touches a doc alongside real code — which is
+            most of them. Left out entirely rather than approximated, because
+            wasting a runner on a prose-only change is a much cheaper mistake
+            than silently not testing a real one.
+          </p>
         </div>
 
         <div class="callout rejected">
@@ -2527,10 +4038,150 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <hr class="divider">
 
+      <section id="part-boundaries">
+        <h2><span class="part-label">Part X</span>Delivery Boundaries &amp; Known Gaps</h2>
+        <p>
+          An honest statement of where this project actually stops — merged
+          here from an earlier architecture document (July 2026) that this one
+          has otherwise superseded. Being able to answer "what isn't done, and
+          why" precisely is worth as much as describing what is.
+        </p>
+        <p>
+          The headline: <strong>what remains is mostly constrained by external
+          accounts, hosting choices and target hardware, not by missing core
+          reading behavior.</strong> The save → read → highlight → resurface
+          loop is complete and works signed out.
+        </p>
+
+        <h3 id="boundaries-production">The production critical path</h3>
+        <ul>
+          <li><strong>Hosting</strong> for the API, the web app and a real
+            PostgreSQL instance. The Docker images build and boot and are
+            smoke-tested in CI (see <a href="#deployment">Deployment</a>) —
+            they have simply never been pointed anywhere.</li>
+          <li><strong>Production OAuth redirect URIs</strong> registered with
+            Google and GitHub. Provider buttons only render once credentials
+            are configured, so this fails closed rather than visibly broken.</li>
+          <li><strong>Resend and Sentry credentials.</strong> Both integrations
+            are wired and both treat an absent key as "feature off" rather than
+            an error — the same opt-in pattern as <code>REDIS_URL</code> and
+            the OTLP endpoint. Note the browser-side Sentry DSN is a
+            <em>build</em> argument, not a runtime one.</li>
+        </ul>
+
+        <h3 id="boundaries-clients">Store publishing and mobile</h3>
+        <ul>
+          <li>Publishing needs Apple, Google Play, Chrome Web Store and
+            Mozilla developer accounts. Safari support additionally depends on
+            Apple's own tooling.</li>
+          <li>Mobile needs real device or simulator verification, and a
+            navigation layer once the screen count justifies one.</li>
+          <li>Native PDF/EPUB <em>page and CFI rendering</em> on mobile needs
+            either a WebView bridge back to the browser reader or a dedicated
+            native renderer. Displaying extracted text is deliberately
+            <strong>not</strong> presented as an equivalent substitute — see
+            <a href="#feat-mobile">Mobile App</a>.</li>
+        </ul>
+
+        <h3 id="boundaries-guardrails">Engineering guardrails for the next phase</h3>
+        <p>
+          Four recommendations recorded before any of this meets real users,
+          annotated with where each one now stands:
+        </p>
+        <table>
+          <tr><th>Guardrail</th><th>Status</th></tr>
+          <tr>
+            <td><strong>Define explicit backup/export and retention behavior before launch</strong>, particularly for local-only libraries.</td>
+            <td><span class="tag">open</span> — and the sharpest of the four. A local-only library lives in IndexedDB, which the browser may evict under storage pressure and which a user can destroy by clearing site data. Markdown and Anki export exist; a deliberate, stated retention and backup story does not.</td>
+          </tr>
+          <tr>
+            <td><strong>Introduce idempotency and conflict semantics before promising robust offline multi-device mutation.</strong></td>
+            <td><span class="tag">partial</span> — the listening position now has a stated rule (last-write-wins on a <em>server</em> timestamp, see <a href="#tts-ch8">Chapter 8</a>), and the local→account migration batches with resume-on-retry (<a href="#local-migration">Crossing the seam</a>). Neither generalizes to every mutation, and the highlights-have-no-unique-constraint finding recorded there is exactly the idempotency hole this warned about.</td>
+          </tr>
+          <tr>
+            <td><strong>Instrument extraction failures, blocked SSRF attempts, digest delivery outcomes and reader-render errors</strong> with privacy-conscious operational metrics.</td>
+            <td><span class="tag">partial</span> — <a href="#observability">Observability</a> covers TTS latency in real detail and Sentry catches errors, but none of these four specific signals is measured. TTS got the attention because a release was spent on its speed; these got none because nothing forced them.</td>
+          </tr>
+          <tr>
+            <td><strong>Document production secret rotation, database backup/restore, and refresh-token revocation procedures</strong> alongside deployment.</td>
+            <td><span class="tag">open</span> — revocation <em>works</em> (that's what the <code>Session</code> table is for), but a runbook is not a feature and none exists. Rightly blocked on there being a production host to write one against.</td>
+          </tr>
+        </table>
+        <div class="callout why">
+          <span class="callout-label">Why this section exists at all</span>
+          <p>
+            A technical document that only describes what works reads as
+            marketing. The useful version tells you where the edges are, so
+            the next person to touch it — including future-you — knows which
+            parts are load-bearing and which are a demo that hasn't been
+            asked a hard question yet. Everything above is a real gap, stated
+            before anyone had to discover it.
+          </p>
+        </div>
+      </section>
+
+      <hr class="divider">
+
       <section id="part-10">
-        <h2><span class="part-label">Part X</span>Changelog of This Document</h2>
+        <a id="part-11"></a>
+        <h2><span class="part-label">Part XI</span>Changelog of This Document</h2>
         <table>
           <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-07</td>
+            <td>
+              v5 — the largest revision so far, in two halves.
+              <strong>Depth on the tools themselves:</strong> Part III gained
+              beginner-grade but non-condescending explanations of what each
+              technology <em>is</em> and what it's for, plus five new
+              sections — <a href="#tech-fts">how Postgres full-text search
+              actually works</a> (lexeme, <code>tsvector</code>, the A/B/C/D
+              weights, GIN vs GiST, and MiniSearch as its client-side
+              counterpart), <a href="#tech-one-react">One React for the
+              Workspace</a>, <a href="#tech-bundling">bundling and why the
+              production execution path breaks differently from dev</a>,
+              <a href="#tech-onnx">ONNX Runtime, WASM and WebGPU</a>,
+              <a href="#tech-docker">Docker and containers</a>, and
+              <a href="#tech-otel">the vocabulary of tracing</a>. Node's event
+              loop, React's hooks, Tailwind's utility-first model, IndexedDB's
+              transaction and structured-clone semantics, and the
+              <code>NEXT_PUBLIC_</code> build-time substitution rule are now
+              explained where they're first relied on.
+              <strong>New work documented:</strong>
+              <a href="#tts-ch7">TTS Chapter 7</a> (the client-side IndexedDB
+              audio cache, and the reverted first attempt that stored a
+              <code>Blob</code> and never produced a hit) and
+              <a href="#tts-ch8">Chapter 8</a> (persisting and resuming the
+              listening position, and the three places that had assumed
+              playback starts at chunk 0); the
+              <a href="#part-4">listening-position trio</a> and
+              <code>searchVector</code> in the data model;
+              <a href="#feat-ocr">OCR failure containment</a>, where a 403 on
+              a trained-data download crashed the whole API through a callback
+              stack no <code>try/catch</code> could reach; a rewritten
+              <a href="#part-6">Part VI</a> around four test layers and
+              <a href="#web-unit-runner">the 19,000 lines that had no
+              runner</a>; and a rewritten
+              <a href="#part-7">Part VII</a> covering
+              <a href="#ci-cost">the exhausted Actions allowance</a>, the
+              <a href="#gitlab-port">GitLab port and its four translation
+              hazards</a>, <a href="#ci-gating">gating jobs on the tree rather
+              than a flag</a>, and the <code>NEXT_PUBLIC_SENTRY_DSN</code>
+              build-arg lesson. Six new entries in
+              <a href="#part-9">Roads Not Taken</a>, and the
+              <code>GET</code>-with-hash entry closed out now that the
+              client-side cache it named as the better route exists. Fixed a
+              broken <code>#roads-not-taken</code> link. Absorbed the
+              standalone <code>Booklet-Technical-Architecture-Expanded.html</code>
+              (July 2026) and deleted it: everything in it was covered here in
+              more depth except its delivery-boundaries and guardrails list,
+              which is now <a href="#part-boundaries">Part X</a>, annotated
+              with where each guardrail actually stands. Semantic search
+              (#156) is noted in <a href="#feat-search">Search</a> as
+              <span class="tag">in progress</span> — schema and shared ranking
+              logic only — rather than described as if it shipped.
+            </td>
+          </tr>
           <tr>
             <td>2026-08-07</td>
             <td>
@@ -2625,19 +4276,31 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           </tr>
         </table>
         <p>
-          <strong>Notes for the next editing pass</strong> — things worth
-          expanding when this document is next revisited: a walked-through
-          example of the highlight-anchoring algorithm's actual drift-
-          tolerant re-search logic; the extension's manifest/permission model
-          in more depth; a real deployment runbook once this project actually
-          has a production host; more of the extraction pipeline's edge
-          cases (SSRF hardening specifics, image-inlining limits).
+          <strong>Notes for the next editing pass</strong> — carried forward
+          from v4 and still outstanding: a walked-through example of the
+          highlight-anchoring algorithm's actual drift-tolerant re-search
+          logic; the extension's manifest/permission model in more depth; a
+          real deployment runbook once this project actually has a production
+          host; more of the extraction pipeline's edge cases (SSRF hardening
+          specifics, image-inlining limits).
+        </p>
+        <p>
+          <strong>Added in v5:</strong> the reading-activity heatmap and the
+          rename-article flow both exist on their own branches and are not
+          described anywhere here yet — they should be, once they land. The
+          sync engine (<code>apps/api/src/routes/sync.ts</code>) has never had
+          a section of its own despite being the mechanism the entire
+          offline-first model rests on; its conflict rules deserve the same
+          treatment the listening position just got. And
+          <a href="#tts-ch7">Chapter 7</a> records an open verification: that
+          a second play issues zero <code>/api/tts</code> requests still needs
+          confirming in a real browser against unstubbed audio.
         </p>
       </section>
 
       <footer class="doc-footer">
         <p>
-          Booklet — Technical Documentation, v1. Written collaboratively by
+          Booklet — Technical Documentation, v5. Written collaboratively by
           the project's owner and Claude (Anthropic), grounded in the real
           implementation and real development history rather than written
           from scratch after the fact. Keep it that way: when this file is
