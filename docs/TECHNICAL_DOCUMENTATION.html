@@ -389,8 +389,18 @@
           <li><a href="#feat-mobile">Mobile App</a></li>
         </ol>
       </li>
-      <li><a href="#part-6">VI. Testing Philosophy</a></li>
-      <li><a href="#part-7">VII. CI/CD &amp; Deployment</a></li>
+      <li>
+        <a href="#part-6">VI. Testing Philosophy</a>
+        <ol>
+          <li><a href="#e2e-fixtures">The e2e suite, switched off and back on</a></li>
+        </ol>
+      </li>
+      <li>
+        <a href="#part-7">VII. CI/CD &amp; Deployment</a>
+        <ol>
+          <li><a href="#observability">Observability</a></li>
+        </ol>
+      </li>
       <li><a href="#part-8">VIII. Glossary</a></li>
       <li><a href="#part-9">IX. Roads Not Taken</a></li>
       <li><a href="#part-10">X. Changelog of This Document</a></li>
@@ -1218,10 +1228,36 @@
         <p>
           The fix is a small pool of real child <strong>processes</strong>
           (<code>apps/api/src/services/tts-pool.ts</code>), each holding its
-          own Kokoro model instance, so multiple chunks generate at
-          genuinely the same wall-clock time. Confirmed by hand: 3 concurrent
-          generations finish in about the same time as 1, not 3x.
+          own Kokoro model instance, so multiple chunks can generate at
+          genuinely the same wall-clock time.
         </p>
+        <div class="callout reversed">
+          <span class="callout-label">Correction: how parallel the pool actually is depends on the host</span>
+          <p>
+            This document previously claimed three concurrent generations
+            finish in about the same wall-clock time as one. That was
+            measured on a developer machine with cores to spare, and it does
+            not generalize. Re-measured on CI's 2-vCPU runner, three
+            concurrent chunks took <strong>18,725&nbsp;ms against
+            6,542&nbsp;ms</strong> for one — <strong>2.86&times;</strong>, not
+            1&times;. At that size the pool is mostly <em>queueing</em>, not
+            parallelizing.
+          </p>
+          <p>
+            The cause is that each worker sizes its ONNX Runtime thread pool
+            to the whole machine, so three workers on two cores oversubscribe
+            and contend rather than share (tracked as issue #162). This also
+            invalidates the reasoning behind warming exactly two chunks
+            ahead, which assumed the extra work was close to free.
+          </p>
+          <p>
+            Worth recording as a correction rather than a quiet edit: the
+            original number was real, it just measured a machine nobody
+            deploys to. It is also precisely the kind of drift the
+            <a href="#observability">queue-wait vs. generation split</a> now
+            exists to catch without anyone reaching for a stopwatch.
+          </p>
+        </div>
         <div class="callout warn">
           <span class="callout-label">A real, hard-won bug: worker_threads crash</span>
           <p>
@@ -1414,6 +1450,27 @@
           <code>REDIS_URL</code> set, every L2 call is a no-op and behavior is
           byte-identical to the single-tier version.
         </p>
+        <div class="callout warn">
+          <span class="callout-label">"Optional" means degrades gracefully — not "leave it off"</span>
+          <p>
+            Worth stating plainly, because the wording invites the wrong
+            reading: <strong>production should run Redis.</strong>
+            <code>docker-compose.yml</code> already does. "Optional" here
+            describes the <em>failure</em> behavior — a down, slow, or absent
+            Redis degrades to "no cache", never to "slow app" — not a
+            recommendation to skip it.
+          </p>
+          <p>
+            Without it, L1 is lost on every restart <em>and every deploy</em>,
+            and is per-process, so nothing is shared between instances or
+            between a reader's own devices. Since generation costs seconds and
+            a cache hit costs milliseconds, that restart cliff is the single
+            largest remaining source of slow time-to-first-audio once warming
+            is in place: the first person to read anything after a release
+            pays full generation cost again for audio the previous instance
+            had already produced.
+          </p>
+        </div>
 
         <h5>Two chunker bugs that were quietly costing seconds</h5>
         <p>
@@ -1677,6 +1734,111 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           re-run to prove a failure predates a specific change — rather than
           guessing from the failure message alone.
         </p>
+
+        <h3 id="e2e-fixtures">The e2e suite was switched off, and why it is back on</h3>
+        <p>
+          The web e2e job spent a period disabled in CI (<code>if: false</code>)
+          for being too slow. The usual suspect was wrong: the two TTS specs
+          that generate real audio were <em>not</em> the cost.
+          <strong>31 of 47 specs were each fetching a real Wikipedia URL</strong>
+          and running a full extraction as <em>setup</em>, serialized behind
+          Playwright's single worker.
+        </p>
+        <p>
+          Almost none of those specs were testing extraction. They needed
+          <em>an article to exist</em> so they could test collections, trash,
+          highlights, or tags. So the suite now runs against a local fixture
+          HTTP server (<code>apps/web/e2e/fixture-server/server.mjs</code>),
+          started by Playwright's own <code>webServer</code> config. One
+          spec — <code>save-real-url.spec.ts</code>, tagged
+          <code>@live</code> — still fetches a genuine public URL so
+          real-world extraction stays covered.
+        </p>
+        <p>
+          Beyond speed, this bought <strong>determinism</strong>: a real
+          Wikipedia page can be edited out from under a test that asserts on
+          its text. The fixtures are generated from parameters rather than
+          stored as eight near-identical HTML files, because the interesting
+          variation between them is structural — how long, how many
+          paragraphs, what shape the opening sentence is.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Fixture HTML is not arbitrary — Readability rewrites it</span>
+          <p>
+            Two details in that generator exist because of specific failures,
+            and both look like noise until they bite:
+          </p>
+          <p>
+            Paragraphs are joined with a <strong>blank line</strong>, not a
+            newline. Extraction derives its plain text from the DOM's own
+            whitespace, and the paragraph-citation feature counts
+            <code>\n{2,}</code> boundaries to say which paragraph a highlight
+            is in — so tightly-packed source HTML makes every citation read
+            "Paragraph 1".
+          </p>
+          <p>
+            And the fixtures have <strong>no byline element at all</strong>.
+            Several specs highlight "the first paragraph" via
+            <code>[data-article-content] p:first</code>, and Readability
+            normalizes even a <code>&lt;div&gt;</code> byline into a
+            <code>&lt;p&gt;</code> in its cleaned output — so avoiding
+            <code>&lt;p&gt;</code> is not enough to keep the byline from
+            silently <em>becoming</em> the first paragraph. The author
+            reaches the app through <code>&lt;meta name="author"&gt;</code>,
+            which is where extraction reads it from anyway.
+          </p>
+        </div>
+        <p>
+          Re-enabling the job took several rounds, and the failures were
+          mostly <em>real</em> rather than test-harness noise: the API
+          refused to fetch loopback addresses (its SSRF guard, correctly —
+          relaxed for e2e by an environment variable that is ignored outright
+          under <code>NODE_ENV=production</code>); the whole suite hammering
+          one IP tripped the global rate limit; and the pool's three workers
+          all cold-missed the model cache simultaneously and raced writing
+          the same file, producing a truncated model and a
+          <em>"Protobuf parsing failed"</em> crash rather than merely wasted
+          bandwidth.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">The last failure was a product bug, not a slow test</span>
+          <p>
+            One spec kept failing on the read-along section bar
+            (<code>.reading-section-active</code>) never appearing. The
+            tempting fix — widen the timeout — would have buried a genuine
+            bug.
+          </p>
+          <p>
+            A TTS chunk that begins exactly where a text node ends resolves
+            to that <em>earlier</em> node. For a <code>Range</code> that is
+            the same document position, but the section indicator reads the
+            node's <code>parentElement</code> to decide which block to mark.
+            The shape that exposes it is completely ordinary: whitespace
+            sitting directly inside a wrapping element — an
+            <code>&lt;article&gt;</code>, a Readability page
+            <code>&lt;div&gt;</code> — just before its first real
+            <code>&lt;p&gt;</code>, which is what indented source HTML
+            produces. Chunk 0 starts at that paragraph's first character, so
+            it resolved to the whitespace, whose parent is the wrapper. The
+            wrapper contains every <em>other</em> paragraph too, so the
+            indicator's own "is this scoped to one section?" guard correctly
+            refused it — and nothing highlighted at all until playback
+            reached a chunk starting mid-paragraph, one full chunk of real
+            audio later.
+          </p>
+          <p>
+            The fix is scoped to the section indicator alone. The shared
+            offset-to-DOM-point helper was deliberately left unchanged:
+            highlight rendering uses it too, and there the <em>end</em> point
+            decides which text nodes get wrapped in <code>&lt;mark&gt;</code>,
+            so biasing it forward would have quietly changed what gets
+            highlighted.
+          </p>
+        </div>
+        <p>
+          Result: the suite runs green in about <strong>8.7 minutes</strong>,
+          with no dependency on Wikipedia being up or unedited.
+        </p>
       </section>
 
       <hr class="divider">
@@ -1752,6 +1914,176 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             <td>In-process cache ceiling, evicted LRU.</td>
           </tr>
         </table>
+
+        <h3 id="observability">Observability</h3>
+        <p>
+          Sentry has been wired for errors since early on. What did not exist
+          until recently was any way to measure <em>latency</em> — and after
+          an entire release spent on read-aloud speed, that was the gap that
+          mattered most. Every number in <a href="#feat-tts">TTS Chapter 6</a>
+          came from a local run or the CI benchmark, and
+          <strong>neither of those is a user</strong>: the benchmark never
+          pays a CORS preflight, real transfer time, or audio-element decode,
+          and it runs on a 2-vCPU runner that resembles nobody's laptop.
+        </p>
+        <p>
+          Tracing is <strong>OpenTelemetry, exported over OTLP</strong>
+          (<code>apps/api/src/lib/telemetry.ts</code>). Datadog is the
+          intended backend and is a first-class OTLP consumer, so which
+          backend receives the spans is a single environment variable rather
+          than a code change.
+        </p>
+        <div class="callout rejected">
+          <span class="callout-label">Considered and rejected: Datadog's own dd-trace SDK</span>
+          <p>
+            Marginally simpler to set up and slightly deeper on
+            Datadog-specific features. Rejected because it makes the vendor a
+            code dependency rather than a configuration value — moving to
+            Grafana/Tempo or Honeycomb later would mean re-instrumenting
+            rather than re-pointing. Since Datadog ingests OTLP natively,
+            nothing is actually given up for that portability.
+          </p>
+        </div>
+        <div class="callout rejected">
+          <span class="callout-label">Considered and rejected: auto-instrumentation</span>
+          <p>
+            <code>@opentelemetry/auto-instrumentations-node</code> would
+            trace Fastify, HTTP, and Prisma with no call sites. It works by
+            patching modules as they load, which under Node ESM requires a
+            loader hook installed <em>before</em> any instrumented module is
+            imported. This app is ESM <em>and</em> bundled by esbuild for
+            production (<code>scripts/build.mjs</code> flattens the whole
+            import graph into one file), so there is no reliable "before" for
+            such a hook to occupy.
+          </p>
+          <p>
+            The deciding argument is the failure mode, not the difficulty:
+            an auto-instrumentation that silently patches nothing is
+            <strong>worse than none at all</strong>, because traces still
+            appear — just missing the spans you were relying on, with nothing
+            announcing their absence. And the spans this app actually needs
+            are internal to the TTS pool, so no library-boundary hook could
+            have produced them regardless.
+          </p>
+        </div>
+        <p>
+          The span that carries the real information is
+          <code>tts.generate_pooled</code>. It records
+          <strong>queue wait and generation separately</strong> rather than
+          as one duration:
+        </p>
+        <table>
+          <tr><th>Attribute</th><th>What a bad value means</th></tr>
+          <tr>
+            <td><code>tts.queue_wait_ms</code></td>
+            <td>Time spent waiting for a free worker. High means the pool is undersized for the load, or speculative warming is competing with real playback — fixed by <code>TTS_POOL_SIZE</code> or by the priority split.</td>
+          </tr>
+          <tr>
+            <td><code>tts.generate_ms</code></td>
+            <td>Time the model was actually running. High means generation is slow on this hardware — a different problem, in a different place, with different fixes.</td>
+          </tr>
+          <tr>
+            <td><code>tts.cache_tier</code></td>
+            <td><code>l1</code> (in-process), <code>l2</code> (Redis), or <code>miss</code>. "Served instantly from this process" and "served after a Redis round trip" are different answers to why a chunk was fast, and a boolean hit/miss cannot tell them apart.</td>
+          </tr>
+        </table>
+        <div class="callout why">
+          <span class="callout-label">Why splitting these two numbers was not optional</span>
+          <p>
+            One end-to-end duration cannot distinguish "we waited" from "it
+            was slow", and that exact ambiguity is what let the pool's
+            parallelism shortfall sit unnoticed. The documented claim was
+            that three concurrent chunks cost roughly the same wall-clock as
+            one. Measured on a 2-vCPU runner, three cost
+            <strong>2.86&times;</strong> one — the pool queues far more than
+            it parallelizes at that size. That was found by hand, with a
+            stopwatch, because nothing in the system reported it. These two
+            attributes are what stop the next such regression needing to be
+            discovered the same way.
+          </p>
+        </div>
+        <p>
+          <code>/api/tts</code> also returns a <strong>
+          <code>Server-Timing</code></strong> header (<code>cache</code>,
+          <code>queue</code>, <code>gen</code>) on every successful response,
+          readable from the browser via
+          <code>PerformanceResourceTiming.serverTiming</code> whether or not
+          any tracing backend is configured.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Server-Timing is invisible cross-origin without Timing-Allow-Origin</span>
+          <p>
+            The API is always a different origin from the web app here. On a
+            cross-origin response a browser exposes <code>serverTiming</code>
+            as an <strong>empty array</strong> unless the response also
+            carries <code>Timing-Allow-Origin</code> — no error, no warning,
+            just no data, which makes the header pure overhead. Booklet
+            echoes the caller's own origin, gated by the same check CORS
+            uses, rather than <code>*</code>: a wildcard would hand these
+            timings to any site that fetched the route, and a bare
+            <code>WEB_ORIGIN</code> would miss both local development (any
+            localhost port) and the browser extension.
+          </p>
+        </div>
+        <p>
+          On the client, <strong>Datadog RUM</strong>
+          (<code>apps/web/src/lib/rum.ts</code>) reports the TTFA sample that
+          <code>tts-metrics.ts</code> was already measuring but had nowhere
+          to send. It goes out as a <code>tts.ttfa</code> action tagged with
+          <code>prewarm_hit</code> — warm and cold plays kept
+          <em>separable</em> rather than averaged, since averaging them
+          produces a number that describes neither, and moving readers from
+          the cold group into the warm one was the entire point of the
+          warming work. The SDK is imported dynamically, so a deployment
+          without RUM configured never downloads it at all. Session replay is
+          explicitly disabled: it would record whatever the reader is reading.
+        </p>
+        <p>
+          All of it is opt-in by environment variable and a complete no-op
+          without one, matching how <code>REDIS_URL</code>,
+          <code>SENTRY_DSN</code>, and <code>RESEND_API_KEY</code> already
+          behave — verified both ways, by running the API against a local
+          OTLP sink and confirming spans arrive with the expected attributes,
+          then unsetting the endpoint and confirming the server is healthy
+          and exports nothing.
+        </p>
+        <table>
+          <tr><th>Variable</th><th>What it's for</th></tr>
+          <tr>
+            <td><code>OTEL_EXPORTER_OTLP_ENDPOINT</code> (API)</td>
+            <td>Where traces go, e.g. <code>http://localhost:4318</code> for a local Datadog Agent or OpenTelemetry Collector. Unset means tracing is entirely off — no exporter, no background work, no spans.</td>
+          </tr>
+          <tr>
+            <td><code>OTEL_SERVICE_NAME</code> (API, default <code>booklet-api</code>)</td>
+            <td>The service name traces are grouped under.</td>
+          </tr>
+          <tr>
+            <td><code>NEXT_PUBLIC_DD_RUM_APPLICATION_ID</code> / <code>NEXT_PUBLIC_DD_RUM_CLIENT_TOKEN</code> (web)</td>
+            <td>Enables RUM and therefore real-world TTFA reporting. The RUM <strong>client token</strong> is publishable and write-only, which is what makes <code>NEXT_PUBLIC_</code> correct for it. A Datadog <strong>API key</strong> is neither, and must never reach the browser.</td>
+          </tr>
+          <tr>
+            <td><code>NEXT_PUBLIC_DD_SITE</code> (web, default <code>datadoghq.com</code>)</td>
+            <td>Set to the Datadog region's site (e.g. <code>datadoghq.eu</code>) if it isn't US1.</td>
+          </tr>
+        </table>
+
+        <div class="callout warn">
+          <span class="callout-label">A latent shutdown bug this work surfaced</span>
+          <p>
+            Flushing buffered spans on shutdown is asynchronous, and it did
+            not work — because <code>tts-pool.ts</code>'s own
+            <code>SIGINT</code>/<code>SIGTERM</code> handlers called
+            <code>process.exit(0)</code> themselves. Registering a listener
+            for those signals replaces Node's default terminate-on-signal
+            behavior, so whichever module happened to be imported first was
+            effectively deciding when the process died, silently cancelling
+            any shutdown work registered after it. The entry point owns the
+            exit now; the pool keeps its <code>process.on("exit")</code>
+            handler, which still covers every other way the process ends.
+            Worth noting because it was invisible until something else needed
+            to run at shutdown.
+          </p>
+        </div>
       </section>
 
       <hr class="divider">
@@ -2006,6 +2338,35 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
         <h2><span class="part-label">Part X</span>Changelog of This Document</h2>
         <table>
           <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-07</td>
+            <td>
+              v3 — added <a href="#observability">Observability</a> to
+              Part VII: OpenTelemetry over OTLP with Datadog as the intended
+              backend, why auto-instrumentation was rejected (an ESM +
+              esbuild-bundled app gives its loader hook no reliable "before",
+              and one that silently patches nothing is worse than none),
+              queue-wait and generation recorded as separate span attributes,
+              cache tier as <code>l1</code>/<code>l2</code>/<code>miss</code>,
+              <code>Server-Timing</code> and the
+              <code>Timing-Allow-Origin</code> that keeps it from being dead
+              weight cross-origin, and Datadog RUM finally giving real-world
+              TTFA somewhere to go. Recorded a latent shutdown bug found
+              along the way: the TTS pool's own signal handlers called
+              <code>process.exit</code>, so whichever module was imported
+              first decided when the process died and silently cancelled
+              anything registered later.
+              Added <a href="#e2e-fixtures">an e2e-strategy section</a> to
+              Part VI — the suite was slow because 31 specs each fetched a
+              real Wikipedia URL as <em>setup</em>, not because of TTS;
+              the local fixture server that replaced them, the two
+              Readability-driven fixture details that are not optional, and
+              the read-along section-bar bug that the last "flaky" failure
+              turned out to actually be. Clarified that Redis being
+              <strong>optional means degrades gracefully, not "leave it
+              off"</strong>.
+            </td>
+          </tr>
           <tr>
             <td>2026-08-06</td>
             <td>
