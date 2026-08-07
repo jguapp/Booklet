@@ -24,9 +24,24 @@ export const EMBEDDING_MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 export const EMBEDDING_DIMENSIONS = 384;
 
 export type EmbeddingRequest = { id: number; texts: string[] };
+
+/**
+ * Download progress, reported separately from any one request.
+ *
+ * It has to be its own message rather than part of a reply because the 25MB
+ * fetch happens *inside* the first embed call: without this, the UI has
+ * nothing to show for however long that takes, which is the one thing #156
+ * explicitly asks not to happen ("needs a real loading state"). `loaded` and
+ * `total` are summed across the model's files, so a single percentage covers
+ * the whole download rather than restarting per file.
+ */
+export type EmbeddingProgress = { kind: "model-progress"; loaded: number; total: number };
+
 export type EmbeddingResponse =
   | { id: number; ok: true; vectors: Float32Array[] }
   | { id: number; ok: false; error: string };
+
+export type EmbeddingMessage = EmbeddingResponse | EmbeddingProgress;
 
 // Fetch weights from the Hub rather than looking for a local copy first --
 // there is no local copy in a browser, and leaving this on would make every
@@ -42,7 +57,39 @@ let pipelinePromise: Promise<FeatureExtractionPipeline> | null = null;
  * of the session. */
 function loadPipeline(): Promise<FeatureExtractionPipeline> {
   if (!pipelinePromise) {
-    pipelinePromise = pipeline("feature-extraction", EMBEDDING_MODEL_ID).catch((err) => {
+    // Bytes per file, so the reported total is the whole model rather than
+    // whichever file is in flight -- several are fetched and a per-file
+    // percentage would visibly reset partway through.
+    const bytes = new Map<string, { loaded: number; total: number }>();
+    // The raw sum is not monotonic: files are discovered as the load
+    // proceeds, so each new one adds its whole size to the denominator before
+    // any of its bytes arrive, and the fraction dips. Reporting that directly
+    // means a progress indicator that visibly runs backwards, which reads as
+    // a bug. Held at its high-water mark instead -- it can stall, which is
+    // honest, but never reverses.
+    let reported = 0;
+
+    pipelinePromise = pipeline("feature-extraction", EMBEDDING_MODEL_ID, {
+      progress_callback: (event) => {
+        if (event.status !== "progress" || typeof event.total !== "number") return;
+        bytes.set(event.file, { loaded: event.loaded ?? 0, total: event.total });
+
+        let loaded = 0;
+        let total = 0;
+        for (const file of bytes.values()) {
+          loaded += file.loaded;
+          total += file.total;
+        }
+        if (total === 0) return;
+
+        const fraction = Math.max(reported, loaded / total);
+        if (fraction === reported) return; // nothing new to say
+        reported = fraction;
+
+        const progress: EmbeddingProgress = { kind: "model-progress", loaded: fraction * total, total };
+        self.postMessage(progress);
+      },
+    }).catch((err) => {
       pipelinePromise = null;
       throw err;
     });

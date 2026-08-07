@@ -17,7 +17,7 @@
 import type { Article } from "@booklet/shared";
 import { chunkForEmbedding, rankBySimilarity } from "@booklet/shared";
 import { type LocalArticleEmbedding, localEmbeddings } from "@/lib/local/db";
-import type { EmbeddingRequest, EmbeddingResponse } from "./embedding-worker";
+import type { EmbeddingMessage, EmbeddingRequest } from "./embedding-worker";
 
 const ENABLED_KEY = "booklet-semantic-search";
 
@@ -58,6 +58,18 @@ let worker: Worker | null = null;
 let nextRequestId = 1;
 const pending = new Map<number, { resolve: (v: Float32Array[]) => void; reject: (e: Error) => void }>();
 
+/** A single subscriber rather than a set: the only thing that shows download
+ * progress is the settings control, and it is the only place the download can
+ * be started from. */
+let onModelProgress: ((fraction: number) => void) | null = null;
+
+/** Reports 0..1 while the model downloads. #156 asks for the 25MB fetch to be
+ * visible; it happens inside the first embed call, so without this the UI has
+ * nothing to show for as long as it takes. */
+export function setModelProgressListener(listener: ((fraction: number) => void) | null): void {
+  onModelProgress = listener;
+}
+
 /**
  * Created on first use, never at import time -- constructing it eagerly would
  * spawn a worker (and, on its first message, start a 25MB download) for every
@@ -72,12 +84,17 @@ const pending = new Map<number, { resolve: (v: Float32Array[]) => void; reject: 
 function getWorker(): Worker {
   if (worker) return worker;
   worker = new Worker("/workers/embedding-worker.js", { type: "module" });
-  worker.addEventListener("message", (event: MessageEvent<EmbeddingResponse>) => {
-    const entry = pending.get(event.data.id);
+  worker.addEventListener("message", (event: MessageEvent<EmbeddingMessage>) => {
+    const message = event.data;
+    if ("kind" in message) {
+      onModelProgress?.(message.total > 0 ? message.loaded / message.total : 0);
+      return;
+    }
+    const entry = pending.get(message.id);
     if (!entry) return;
-    pending.delete(event.data.id);
-    if (event.data.ok) entry.resolve(event.data.vectors);
-    else entry.reject(new Error(event.data.error));
+    pending.delete(message.id);
+    if (message.ok) entry.resolve(message.vectors);
+    else entry.reject(new Error(message.error));
   });
   worker.addEventListener("error", (event) => {
     // A worker-level error (the module failed to load at all) never produces
