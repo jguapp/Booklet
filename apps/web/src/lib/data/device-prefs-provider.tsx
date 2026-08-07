@@ -10,6 +10,7 @@ import { loadShowReadingStats, saveShowReadingStats } from "./stats-prefs";
 import { loadAutoDeletePrefs, saveAutoDeletePrefs, type AutoDeletePrefs } from "./auto-delete-prefs";
 import { loadNavOrder, saveNavOrder } from "./nav-order-prefs";
 import { loadSidebarCompact, saveSidebarCompact } from "./sidebar-prefs";
+import { loadSemanticSearchEnabled, saveSemanticSearchEnabled } from "@/lib/search/local-embeddings";
 
 /**
  * Every device-local (not account-synced) preference in one place, reactive
@@ -31,6 +32,7 @@ interface DevicePrefsState {
   autoDelete: AutoDeletePrefs;
   navOrder: string[];
   sidebarCompact: boolean;
+  semanticSearch: boolean;
 }
 
 interface DevicePrefsContextValue extends DevicePrefsState {
@@ -46,6 +48,7 @@ interface DevicePrefsContextValue extends DevicePrefsState {
   setAutoDelete: (prefs: AutoDeletePrefs) => void;
   setNavOrder: (order: string[]) => void;
   setSidebarCompact: (compact: boolean) => void;
+  setSemanticSearch: (enabled: boolean) => void;
 }
 
 const DevicePrefsContext = createContext<DevicePrefsContextValue | null>(null);
@@ -69,6 +72,7 @@ const SERVER_DEFAULTS: DevicePrefsState = {
   autoDelete: { enabled: false, days: 90 },
   navOrder: [],
   sidebarCompact: false,
+  semanticSearch: false,
 };
 
 export function DevicePrefsProvider({ children }: { children: React.ReactNode }) {
@@ -83,6 +87,7 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
         autoDelete: loadAutoDeletePrefs(),
         navOrder: loadNavOrder(),
         sidebarCompact: loadSidebarCompact(),
+        semanticSearch: loadSemanticSearchEnabled(),
       });
     }
     syncFromStorage();
@@ -169,6 +174,11 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
     setState((prev) => ({ ...prev, sidebarCompact: compact }));
   }, []);
 
+  const setSemanticSearch = useCallback((enabled: boolean) => {
+    saveSemanticSearchEnabled(enabled);
+    setState((prev) => ({ ...prev, semanticSearch: enabled }));
+  }, []);
+
   return (
     <DevicePrefsContext.Provider
       value={{
@@ -185,6 +195,7 @@ export function DevicePrefsProvider({ children }: { children: React.ReactNode })
         setAutoDelete,
         setNavOrder,
         setSidebarCompact,
+        setSemanticSearch,
       }}
     >
       {children}

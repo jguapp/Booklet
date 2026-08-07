@@ -15,17 +15,44 @@ const DB_NAME = "booklet";
 // added to it). Bumping the version forces that upgrade to run for
 // everyone; the `if (!contains(...))` guards below mean this only adds
 // what's missing, never touches existing data in any other store.
-const DB_VERSION = 5;
+// Bumped 5 -> 6 to add `embeddings` for local semantic search (#156). Same
+// additive shape as every bump before it: the guards below only create what
+// is missing, so no existing store is touched.
+const DB_VERSION = 6;
 const ARTICLES_STORE = "articles";
 const HIGHLIGHTS_STORE = "highlights";
 const COLLECTIONS_STORE = "collections";
 const ARTICLE_COLLECTIONS_STORE = "articleCollections";
 const FILES_STORE = "files";
 const FEEDS_STORE = "feeds";
+const EMBEDDINGS_STORE = "embeddings";
 
 interface LocalFile {
   id: string; // articleId
   blob: Blob;
+}
+
+/**
+ * One record per article rather than one per chunk (#156).
+ *
+ * The server splits chunks into rows because SQL wants them that way; here
+ * the whole set is written and replaced as a unit, which is what makes a
+ * re-index atomic without needing a transaction spanning many keys -- an
+ * article can never be left indexed by a mixture of two versions of its text.
+ *
+ * `textHash` is what makes rebuilding incremental: an article whose text has
+ * not changed is skipped, so re-opening the app does not re-embed a library
+ * that is already done.
+ *
+ * Vectors stay Float32Array, not number[]. IndexedDB's structured clone
+ * stores typed arrays natively, so this is ~4 bytes per dimension instead of
+ * ~8 plus per-element array overhead -- across a real library that is the
+ * difference between tens and hundreds of megabytes.
+ */
+export interface LocalArticleEmbedding {
+  id: string; // articleId
+  textHash: string;
+  vectors: Float32Array[];
 }
 
 export interface LocalArticleCollection {
@@ -69,6 +96,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(FEEDS_STORE)) {
         db.createObjectStore(FEEDS_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(EMBEDDINGS_STORE)) {
+        db.createObjectStore(EMBEDDINGS_STORE, { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -210,6 +240,14 @@ export const localFiles = {
   put: (articleId: string, blob: Blob) => put(FILES_STORE, { id: articleId, blob } satisfies LocalFile),
   delete: (articleId: string) => remove(FILES_STORE, articleId),
   clear: () => clear(FILES_STORE),
+};
+
+export const localEmbeddings = {
+  getAll: () => getAll<LocalArticleEmbedding>(EMBEDDINGS_STORE),
+  get: (articleId: string) => getOne<LocalArticleEmbedding>(EMBEDDINGS_STORE, articleId),
+  put: (record: LocalArticleEmbedding) => put(EMBEDDINGS_STORE, record),
+  delete: (articleId: string) => remove(EMBEDDINGS_STORE, articleId),
+  clear: () => clear(EMBEDDINGS_STORE),
 };
 
 export const localArticleCollections = {
