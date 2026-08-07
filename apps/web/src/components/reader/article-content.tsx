@@ -116,6 +116,32 @@ function nearestSectionEl(node: Node, container: HTMLElement): HTMLElement | nul
   return isReasonablyScoped(current) ? current : null;
 }
 
+// A chunk that begins exactly where a text node ends resolves to that
+// *earlier* node -- the same document position as the start of the next
+// one, and interchangeable for a Range, but not for nearestSectionEl, which
+// reads the node's parentElement to decide which block to mark. The shape
+// that exposes it: whitespace sitting directly inside a wrapping element
+// (an <article>, a Readability page <div>) just before its first real <p>,
+// which is ordinary output for indented source HTML. A chunk starting at
+// that paragraph's first character resolved to the whitespace, whose parent
+// is the wrapper -- and since the wrapper contains every *other* paragraph
+// too, nearestSectionEl's own "is this scoped to one section" guard
+// correctly refused it, so no section highlighted at all until playback
+// reached a chunk starting mid-paragraph.
+//
+// Only the section indicator needs this. The offset finder itself is
+// deliberately left alone: it's shared with highlight rendering, where the
+// *end* point decides which text nodes get wrapped in <mark>, and biasing
+// that forward would change what gets wrapped.
+function sectionAnchorNode(point: { node: Text; offset: number }, container: HTMLElement): Node {
+  if (point.offset < point.node.data.length) return point.node;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  walker.currentNode = point.node;
+  let next = walker.nextNode() as Text | null;
+  while (next && next.data.length === 0) next = walker.nextNode() as Text | null;
+  return next ?? point.node;
+}
+
 interface WordRect {
   top: number;
   left: number;
@@ -383,7 +409,7 @@ export function ArticleContent({
     // section an earlier chunk already highlighted (common for a longer
     // paragraph spanning several chunks), where re-adding the class and
     // re-triggering scrollIntoView would just be a redundant, jumpy no-op.
-    const sectionEl = nearestSectionEl(startPoint.node, container);
+    const sectionEl = nearestSectionEl(sectionAnchorNode(startPoint, container), container);
     if (sectionEl && sectionEl !== activeSectionElRef.current) {
       activeSectionElRef.current?.classList.remove("reading-section-active");
       sectionEl.classList.add("reading-section-active");
