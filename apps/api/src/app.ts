@@ -21,6 +21,7 @@ import { registerTtsRoute } from "./routes/tts.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { captureException, initErrorMonitoring } from "./lib/error-monitoring.js";
 import { isAllowedOrigin } from "./lib/cors.js";
+import { ttsPoolStatus } from "./services/tts-pool.js";
 
 /**
  * Builds a fully-configured Fastify instance without binding a port -- the
@@ -124,7 +125,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await setupAuthContext(app);
 
   app.get("/api/health", async (): Promise<HealthResponse> => {
-    return { status: "ok", timestamp: new Date().toISOString() };
+    return { status: "ok", timestamp: new Date().toISOString(), tts: ttsPoolStatus() };
   });
 
   await registerAuthRoutes(app);
