@@ -181,6 +181,19 @@ test-api:
 
 test-web-e2e:
   stage: test
+  # Only where the suite is actually runnable. On the Actions side this job
+  # carried a hard `if: false` -- it was too slow to gate merges on, because
+  # 31 specs each did a live network fetch plus a full extraction just as
+  # setup. What made it viable again was the local article fixture server, so
+  # gating on that file is the same decision expressed as a fact about the
+  # tree rather than a flag someone has to remember to flip: branches without
+  # it skip the job, and it switches itself on the moment the fixture server
+  # merges. Confirmed the hard way -- this job was cherry-picked to a branch
+  # that has none of it and failed on a missing module, which is the
+  # bad-but-loud version of the same mismatch.
+  rules:
+    - exists:
+        - apps/web/e2e/fixture-server/server.mjs
   # Playwright's own image rather than node + `playwright install
   # --with-deps`: the browser and its ~100 system packages are already
   # baked in, which is a couple of minutes of apt per run that this repo no
@@ -214,7 +227,15 @@ test-web-e2e:
     # race writing it, which produced a corrupt model and left read-aloud
     # non-functional for a whole run (tts-player.spec.ts timing out at 60s
     # waiting for playback). Fetch it once, single-process, first. See #161.
-    - node apps/api/scripts/prefetch-tts-model.mjs
+    - |
+      # Belt-and-braces alongside the `exists` rules above: this script came
+      # in with the TTS pool work, and a branch without it has no cache to
+      # prime rather than a reason to fail.
+      if [ -f apps/api/scripts/prefetch-tts-model.mjs ]; then
+        node apps/api/scripts/prefetch-tts-model.mjs
+      else
+        echo "prefetch-tts-model.mjs is not on this branch -- skipping the model pre-fetch"
+      fi
     - pnpm --filter @booklet/api dev &
     - pnpm --filter @booklet/web dev &
     - npx wait-on http://localhost:4000/api/health http://localhost:3000 --timeout 60000
@@ -292,11 +313,20 @@ bench-tts-ttfa:
   # still runs on the default branch (where the trend line is what matters)
   # and can be asked for on any branch by running the pipeline from the UI
   # -- which is exactly how #162's before/after numbers were taken.
+  #
+  # The `exists` clauses are not decoration: the benchmark script itself
+  # arrived with the TTFA work, so on a branch predating it this job used to
+  # fail on a missing module rather than sit out. A job that cannot run
+  # should not exist, not fail.
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - apps/api/scripts/bench-tts-ttfa.ts
     - if: $CI_PIPELINE_SOURCE == "web"
+      exists:
+        - apps/api/scripts/bench-tts-ttfa.ts
   script:
     # Fetch the model once, in a single process, before the pool starts.
     # Without this the benchmark's three worker processes all cold-miss the
@@ -305,7 +335,15 @@ bench-tts-ttfa:
     # crash, not merely wasted bandwidth. The Docker image avoids this by
     # baking the weights in at build time (see apps/api/Dockerfile); this
     # job runs tsx directly, so it needs the equivalent step.
-    - node apps/api/scripts/prefetch-tts-model.mjs
+    - |
+      # Belt-and-braces alongside the `exists` rules above: this script came
+      # in with the TTS pool work, and a branch without it has no cache to
+      # prime rather than a reason to fail.
+      if [ -f apps/api/scripts/prefetch-tts-model.mjs ]; then
+        node apps/api/scripts/prefetch-tts-model.mjs
+      else
+        echo "prefetch-tts-model.mjs is not on this branch -- skipping the model pre-fetch"
+      fi
     - pnpm --filter @booklet/api exec tsx scripts/bench-tts-ttfa.ts
 
 docker-build:
