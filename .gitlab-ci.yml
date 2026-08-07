@@ -1,0 +1,333 @@
+# GitLab CI/CD for Booklet.
+#
+# A port of .github/workflows/ci.yml, not a copy: GitLab differs from Actions
+# in three ways that actually change the config rather than just its spelling,
+# and each is called out at the point it bites.
+#
+#   1. Services are reachable by hostname, not on localhost. Postgres lives at
+#      `postgres:5432` here, where Actions mapped it to `localhost:5432`.
+#   2. There is no `--health-cmd` for services. GitLab starts the container and
+#      moves on, so readiness has to be waited for explicitly.
+#   3. Docker builds need Docker-in-Docker, and a published port lands on the
+#      dind host rather than in this job's container -- so the smoke test talks
+#      over a docker network instead of to localhost.
+#
+# Every substantive comment from the Actions workflow is kept, because those
+# record real bugs (a corrupted TTS model from three workers racing the same
+# download, a rate limit tripping mid-suite, an esbuild failure that typecheck
+# could never catch). Losing them in the move would mean relearning them.
+
+stages: [check, test, build]
+
+default:
+  image: node:22-bookworm
+  # A superseded pipeline is worth nothing, so let GitLab kill it. This is the
+  # `concurrency: cancel-in-progress` from the Actions workflow -- but note it
+  # only takes effect with "Auto-cancel redundant pipelines" enabled under
+  # Settings -> CI/CD -> General pipelines. The flag here is necessary and not
+  # sufficient; without the project setting, pushing five times still runs five
+  # pipelines.
+  interruptible: true
+  before_script:
+    - corepack enable
+    # Uses the `packageManager` field in package.json (pnpm@11.17.0) rather
+    # than pinning the version a second time here, where it would drift.
+    - corepack prepare --activate
+    # GitLab can only cache paths inside the project directory, so the pnpm
+    # store is moved there. Without this the cache below silently stores
+    # nothing and every job re-downloads the whole dependency tree.
+    - pnpm config set store-dir "$CI_PROJECT_DIR/.pnpm-store"
+    - pnpm install --frozen-lockfile
+
+variables:
+  # Dummy value -- signing access tokens is the only thing that reads this in a
+  # way that matters for typecheck/lint/test, and none of those need a real
+  # secret.
+  JWT_ACCESS_SECRET: ci-test-secret-not-for-production
+  # Every job triggers apps/api's postinstall (pnpm install runs it for the
+  # whole workspace, not just jobs that filter to @booklet/api) -- prisma
+  # generate resolves DATABASE_URL just to load prisma.config.ts, even though
+  # pure codegen never connects. Jobs that need a real database override this.
+  DATABASE_URL: "postgresql://user:password@postgres:5432/db?schema=public"
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DB: booklet
+  # Shallow clones are fine for everything here; nothing inspects history.
+  GIT_DEPTH: "20"
+
+# Skips a pipeline for a commit that only touches prose. Expressed as "run when
+# code changed" rather than "skip when only docs changed", because GitLab's
+# `changes:` matches *any* listed path -- so a docs-ignore list would also skip
+# a merge request that touched docs and code together, which is the common
+# case and exactly the wrong outcome.
+#
+# Caveat, same as the Actions version: a docs-only merge request then has no
+# pipeline at all. If a pipeline is ever made a required check for merging,
+# this must become a job that runs and no-ops, or such an MR can never merge.
+.code-changes: &code-changes
+  - "apps/**/*"
+  - "packages/**/*"
+  - "package.json"
+  - "pnpm-lock.yaml"
+  - "pnpm-workspace.yaml"
+  - "turbo.json"
+  - ".gitlab-ci.yml"
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: *code-changes
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web" # a run asked for by hand
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+cache:
+  key:
+    files: [pnpm-lock.yaml]
+  paths: [.pnpm-store]
+
+.postgres-service: &postgres-service
+  - name: postgres:16
+    alias: postgres
+
+typecheck-and-lint:
+  stage: check
+  script:
+    - pnpm --filter @booklet/shared build
+    - pnpm --filter @booklet/api exec tsc --noEmit
+    - pnpm --filter @booklet/web exec tsc --noEmit
+    - pnpm --filter @booklet/web lint
+    - pnpm --filter @booklet/extension exec tsc --noEmit
+    - pnpm --filter @booklet/mobile exec tsc --noEmit
+    # The production bundle, without waiting for a Docker layer to say so.
+    # tsc resolves imports through node_modules and never asks who *declared* a
+    # package, so importing a transitive dependency typechecks cleanly and then
+    # fails in esbuild -- which is exactly how a direct
+    # @huggingface/transformers import broke the Docker build with "No loader
+    # is configured for '.node' files" while every other job stayed green.
+    # docker-build still covers the full build+run path; this just moves the
+    # cheapest half of that signal several minutes earlier.
+    - pnpm --filter @booklet/api exec node scripts/build.mjs
+
+# Unit tests that need nothing but Node: @booklet/shared and apps/web.
+test-unit:
+  stage: test
+  script:
+    - pnpm --filter @booklet/shared test
+    # apps/web's unit tests run here rather than in their own job: they need no
+    # database, no browser and no built artifacts, and the whole suite is ~2s
+    # -- a dedicated job would spend more time on clone and install than on the
+    # tests. See apps/web/vitest.config.ts for what they cover and why the
+    # runner exists at all (#165).
+    - pnpm --filter @booklet/shared build
+    - pnpm --filter @booklet/web test
+
+test-api:
+  stage: test
+  services: *postgres-service
+  variables:
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/booklet?schema=public"
+    NODE_ENV: test
+  script:
+    # GitLab starts a service container and moves straight on -- there is no
+    # `--health-cmd` equivalent, so readiness is waited for here. A plain TCP
+    # wait is enough: the Prisma command that follows fails loudly if the
+    # server is listening but not actually ready.
+    - npx --yes wait-on tcp:postgres:5432 --timeout 60000
+    # A real Postgres service container, unlike the pglite dev database this
+    # repo also supports -- so the normal Prisma migration engine (which
+    # doesn't reliably talk to pglite) works fine here.
+    - pnpm --filter @booklet/api exec prisma migrate deploy
+    - pnpm --filter @booklet/api test
+
+test-web-e2e:
+  stage: test
+  services: *postgres-service
+  variables:
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/booklet?schema=public"
+    WEB_ORIGIN: "http://localhost:3000"
+    NEXT_PUBLIC_API_URL: "http://localhost:4000"
+    # Lets the API fetch the e2e fixture server on 127.0.0.1 instead of every
+    # article-saving spec hitting the real internet. Guarded in
+    # extraction-service.ts so it is ignored outright when NODE_ENV=production
+    # -- the SSRF protection it relaxes is not overridable where it matters.
+    EXTRACTION_ALLOW_PRIVATE_ADDRESSES: "true"
+    # The whole suite hits the API from one address in a couple of minutes,
+    # which is precisely the pattern the default limit is meant to catch.
+    # Without this it trips partway through and fails a spec that has nothing
+    # wrong with it.
+    GLOBAL_RATE_LIMIT_MAX: "100000"
+    TTS_RATE_LIMIT_MAX: "100000"
+  script:
+    # GitLab starts a service container and moves straight on -- there is no
+    # `--health-cmd` equivalent, so readiness is waited for here. A plain TCP
+    # wait is enough: the Prisma command that follows fails loudly if the
+    # server is listening but not actually ready.
+    - npx --yes wait-on tcp:postgres:5432 --timeout 60000
+    - pnpm --filter @booklet/api exec prisma migrate deploy
+    - pnpm --filter @booklet/web exec playwright install --with-deps chromium
+    # The API's TTS workers would otherwise all cold-miss the model cache at
+    # once and race writing it, which produced a corrupt model and left
+    # read-aloud non-functional for a whole run (tts-player.spec.ts timing out
+    # at 60s waiting for playback). Fetch it once, single-process, first. The
+    # pool now also stages its own cold start (#161); this stays because it
+    # additionally warms the cache before the pool exists at all.
+    - node apps/api/scripts/prefetch-tts-model.mjs
+    # Backgrounded in the same shell as the wait below -- unlike Actions, where
+    # each `run:` is its own shell, a GitLab `script:` is one continuous shell,
+    # so `&` and the wait genuinely belong together here.
+    - pnpm --filter @booklet/api dev &
+    - pnpm --filter @booklet/web dev &
+    - npx --yes wait-on http://localhost:4000/api/health http://localhost:3000 --timeout 60000
+    # Generate one small chunk before the suite starts, so the first TTS spec
+    # doesn't pay the pool's cold start inside its own assertion window.
+    # /api/health goes green while the pool is still spawning workers and
+    # loading a model into each, and on a small runner already busy with Next
+    # and Postgres that first generation can exceed the 60s the spec allows --
+    # which is exactly how it failed. `|| true`: this is a warm-up, not a gate.
+    - |
+      curl -sS -X POST http://localhost:4000/api/tts \
+        -H 'Content-Type: application/json' \
+        -d '{"text":"Warming up.","voice":"af_heart","speed":1}' \
+        --max-time 180 -o /dev/null -w 'warm-up HTTP %{http_code} in %{time_total}s\n' || true
+    # Playwright starts the article fixture server itself (see
+    # playwright.config.ts's webServer). One spec, save-real-url.spec.ts, still
+    # fetches a genuine public URL so real-world extraction stays covered -- if
+    # outbound network is ever restricted for this runner, exclude it with
+    # `--grep-invert @live` rather than dropping the whole job and losing
+    # everything else with it. (See #167: several other specs still reach the
+    # internet without that tag, so the exclusion is not yet a clean offline
+    # switch.)
+    - pnpm --filter @booklet/web test:e2e
+  artifacts:
+    when: on_failure
+    expire_in: 1 week
+    paths:
+      - apps/web/test-results/
+      - apps/web/playwright-report/
+
+test-extension-e2e:
+  stage: test
+  services: *postgres-service
+  variables:
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/booklet?schema=public"
+    WEB_ORIGIN: "http://localhost:3000"
+  script:
+    # GitLab starts a service container and moves straight on -- there is no
+    # `--health-cmd` equivalent, so readiness is waited for here. A plain TCP
+    # wait is enough: the Prisma command that follows fails loudly if the
+    # server is listening but not actually ready.
+    - npx --yes wait-on tcp:postgres:5432 --timeout 60000
+    - pnpm --filter @booklet/api exec prisma migrate deploy
+    - pnpm --filter @booklet/extension build
+    # Mozilla's own manifest validator -- catches Firefox-specific
+    # manifest.json regressions (an unsupported strict_min_version for a key
+    # actually in use, a missing required key like data_collection_permissions)
+    # that nothing else here would, since the e2e suite below only runs against
+    # Chromium.
+    - pnpm --filter @booklet/extension lint:firefox
+    - pnpm --filter @booklet/extension exec playwright install --with-deps chromium
+    # Loading a real extension needs an actual background service worker,
+    # which (confirmed empirically, see e2e/extension.spec.ts) doesn't register
+    # under Chromium's headless mode -- xvfb gives it a real display to run
+    # headed against. No `sudo` here, unlike the Actions version: this image
+    # already runs as root.
+    - apt-get update && apt-get install -y xvfb
+    - pnpm --filter @booklet/api dev &
+    - npx --yes wait-on http://localhost:4000/api/health --timeout 60000
+    - xvfb-run -a pnpm --filter @booklet/extension test:e2e
+  artifacts:
+    when: on_failure
+    expire_in: 1 week
+    paths:
+      - apps/extension/test-results/
+
+docker-build:
+  stage: build
+  # Docker-in-Docker. Needs a runner with privileged mode; on a self-hosted
+  # runner that is a config flag, and GitLab.com's shared runners have it.
+  image: docker:27-cli
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_CERT_PATH: "/certs/client"
+    DOCKER_TLS_VERIFY: "1"
+  # The shared before_script installs pnpm and dependencies, which this job has
+  # no use for -- everything happens inside the images being built.
+  before_script: []
+  script:
+    # Build only, no push -- this is here to catch exactly the kind of thing
+    # that can't be caught by typecheck/lint/test: the production build+run
+    # path (tsc/esbuild -> plain `node dist/index.js`, no tsx or bundler doing
+    # module-resolution favors at runtime) is a different execution environment
+    # than dev or these other jobs, and has broken silently before.
+    - docker build -f apps/api/Dockerfile -t booklet-api .
+    - docker build -f apps/web/Dockerfile -t booklet-web .
+    # Actually start the api image against a real throwaway Postgres and hit
+    # its health route -- confirms the built image doesn't just exist, it boots
+    # and Prisma actually connects.
+    #
+    # Everything talks over a docker network rather than published ports: under
+    # dind, `-p 4000:4000` publishes on the dind container, not on this job, so
+    # localhost:4000 here would refuse the connection. A throwaway curl
+    # container on the same network is the reliable way to ask.
+    - docker network create booklet-ci
+    - |
+      docker run -d --name booklet-postgres --network booklet-ci \
+        -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=booklet \
+        postgres:16
+    - |
+      for i in $(seq 1 30); do
+        docker exec booklet-postgres pg_isready -U postgres && break
+        sleep 2
+      done
+    - |
+      docker run -d --name booklet-api --network booklet-ci \
+        -e DATABASE_URL="postgresql://postgres:postgres@booklet-postgres:5432/booklet?schema=public" \
+        -e JWT_ACCESS_SECRET=ci-test-secret-not-for-production \
+        -e WEB_ORIGIN=http://localhost:3000 \
+        booklet-api \
+        sh -c "pnpm --filter @booklet/api exec prisma migrate deploy && node apps/api/dist/index.js"
+    - |
+      docker run --rm --network booklet-ci curlimages/curl:8.11.1 \
+        -sf --retry 30 --retry-delay 2 --retry-connrefused \
+        http://booklet-api:4000/api/health
+    - docker logs booklet-api
+  after_script:
+    - docker rm -f booklet-api booklet-postgres || true
+    - docker network rm booklet-ci || true
+
+bench-tts-ttfa:
+  stage: test
+  # Measures real Kokoro TTFA (cold pool, warm/uncached, cache hit, concurrent
+  # chunks, prewarm head-start) -- see apps/api/scripts/bench-tts-ttfa.ts.
+  # Needs real network access to fetch Kokoro's weights from Hugging Face, and
+  # no Postgres -- the TTS pipeline never touches the database.
+  #
+  # Not run on merge requests. It is a measurement, not a gate: it has no
+  # pass/fail criteria, so an author gains nothing from it blocking or from
+  # reading it on every push, while it costs runner time every time. It runs on
+  # the default branch (where the trend line is what matters) and is available
+  # manually on any branch -- which is how #162's before/after numbers were
+  # taken.
+  #
+  # Not interruptible: a half-finished benchmark is worthless, and cancelling
+  # one mid-run to start another wastes the model download too.
+  interruptible: false
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+  script:
+    # Fetch the model once, in a single process, before the pool starts.
+    # Without this the benchmark's worker processes all cold-miss the Hugging
+    # Face cache simultaneously and race writing the same file -- observed
+    # producing a truncated model and a "Protobuf parsing failed" crash, not
+    # merely wasted bandwidth. The Docker image avoids this by baking the
+    # weights in at build time; this job runs tsx directly, so it needs the
+    # equivalent step.
+    - node apps/api/scripts/prefetch-tts-model.mjs
+    - pnpm --filter @booklet/api exec tsx scripts/bench-tts-ttfa.ts
