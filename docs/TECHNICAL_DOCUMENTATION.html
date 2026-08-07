@@ -2523,17 +2523,64 @@
           worse than it was without it.
         </p>
         <div class="callout">
-          <span class="callout-label">What the 12 tests cover, and what they honestly don't</span>
+          <span class="callout-label">What the 12 unit tests cover</span>
           <p>
             Round-trip byte fidelity, key stability and separation,
             forged-collision safety, LRU eviction under a forced small budget,
             and graceful degradation — all over
-            <code>fake-indexeddb</code>. What they do <em>not</em> yet cover is
-            the issue's real acceptance criterion: that a second play issues
-            zero <code>/api/tts</code> requests, verified in a browser against
-            unstubbed audio. That is recorded as outstanding rather than
-            implied by the green suite, because it is precisely the check the
-            reverted first attempt got wrong.
+            <code>fake-indexeddb</code>.
+          </p>
+          <p>
+            What they structurally <em>cannot</em> answer is the feature's
+            actual acceptance criterion: that a real replay is served from
+            IndexedDB rather than the network. That needed a browser, and it
+            is now covered by a dedicated <code>@live</code> e2e spec — the
+            design of which is worth reading, because two obvious ways to
+            write it are both wrong.
+          </p>
+        </div>
+        <div class="callout why">
+          <span class="callout-label">Why that test is deliberately unstubbed, and asserts on texts rather than a count</span>
+          <p>
+            <strong>Unstubbed, on purpose.</strong> The reverted first attempt
+            was "verified" against a Playwright
+            <code>route.fulfill()</code>ed response — and the surviving
+            hypothesis for its failure was precisely that such a Blob may not
+            survive a structured clone into IndexedDB the way a real network
+            Blob does. That is to say: the harness may have been the broken
+            part. Stubbing the replacement test would have rebuilt that exact
+            blind spot, so it runs against real Kokoro weights, three loaded
+            pool workers and a real database.
+          </p>
+          <p>
+            <strong>It asserts on which chunk <em>texts</em> were requested,
+            not on a request count.</strong> A count cannot separate the two
+            things a replay legitimately does — re-fetching audio it should
+            have had cached (the bug) versus fetching chunks further into the
+            article than the first play ever reached (correct behavior). A
+            count-based version of this test failed with 4 requests that were
+            all legitimate prefetches past the cached region, and making a
+            bare count meaningful would mean playing an entire article to
+            completion, costing minutes of real generation per run. Comparing
+            texts tests the claim directly: <em>nothing already fetched is
+            fetched twice.</em>
+          </p>
+          <p>
+            <strong>And it was checked for discrimination, not just
+            greenness.</strong> With <code>readCachedAudio</code> patched to
+            always miss, the replay re-fetches 5 already-cached chunks and the
+            test fails. With the cache live it re-fetches 0, and replay TTFA
+            lands under 2 seconds against real generation of several. A test
+            that has never been observed failing is a hypothesis; this one has
+            been observed both ways.
+          </p>
+          <p>
+            One scoping note that is a real finding rather than a limitation:
+            the replay is same-session, never across a reload. Device
+            preferences hydrate from <code>localStorage</code> in an effect, so
+            a just-reloaded page is still on the <code>system</code> voice and
+            routes to <code>SpeechSynthesis</code> — exercising none of this
+            machinery.
           </p>
         </div>
 
@@ -4291,10 +4338,7 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           sync engine (<code>apps/api/src/routes/sync.ts</code>) has never had
           a section of its own despite being the mechanism the entire
           offline-first model rests on; its conflict rules deserve the same
-          treatment the listening position just got. And
-          <a href="#tts-ch7">Chapter 7</a> records an open verification: that
-          a second play issues zero <code>/api/tts</code> requests still needs
-          confirming in a real browser against unstubbed audio.
+          treatment the listening position just got.
         </p>
       </section>
 
