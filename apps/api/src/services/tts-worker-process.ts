@@ -23,9 +23,32 @@ interface TtsWorkerRequest {
   speed: number;
 }
 
-type TtsWorkerResponse = { id: number; buffer: Buffer } | { id: number; error: string };
+type TtsWorkerResponse =
+  | { id: number; buffer: Buffer }
+  | { id: number; error: string }
+  /** Sent exactly once, after the model load settles either way. The pool
+   * uses it to stage cold start: worker 0 has to finish loading before the
+   * rest are spawned, or all of them cold-miss the transformers.js cache at
+   * the same instant and race writing the same ~90MB file. That is not
+   * hypothetical -- it produced a truncated model and a "Protobuf parsing
+   * failed" crash in CI, leaving TTS dead for the whole run (#161). */
+  | { type: "ready"; ok: boolean; error?: string };
 
-void warmTtsModel();
+// `ok: false` is reported rather than thrown: a worker whose model failed to
+// load is still a live process that can retry on its next request (loadModel
+// deliberately doesn't cache a rejection), and the pool needs to hear
+// *something* so it isn't left waiting forever before starting the others.
+void warmTtsModel()
+  .then(() => {
+    process.send?.({ type: "ready", ok: true } satisfies TtsWorkerResponse);
+  })
+  .catch((err: unknown) => {
+    process.send?.({
+      type: "ready",
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    } satisfies TtsWorkerResponse);
+  });
 
 process.on("message", (req: TtsWorkerRequest) => {
   void (async () => {

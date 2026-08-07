@@ -39,7 +39,11 @@ const POOL_SIZE = Number(process.env.TTS_POOL_SIZE) || 3;
 // cases; only the extension and this module's own on-disk location
 // differ between dev (src/services/) and prod (bundled, inlined into
 // dist/index.js, whose import.meta.url resolves to dist/ itself).
-const workerEntry = path.join(dir, isDev ? "tts-worker-process.ts" : "tts-worker-process.js");
+// TTS_WORKER_ENTRY exists so the pool's own startup behaviour can be tested
+// without forking three processes that each download a 90MB model. Test-only
+// by convention; nothing in the app ever sets it.
+const workerEntry =
+  process.env.TTS_WORKER_ENTRY ?? path.join(dir, isDev ? "tts-worker-process.ts" : "tts-worker-process.js");
 
 interface PoolWorker {
   proc: ChildProcess;
@@ -48,6 +52,18 @@ interface PoolWorker {
    * crash (see the "exit" handler below) can reject *that specific*
    * caller instead of leaving its promise hanging forever. */
   currentRequestId: number | null;
+  /** Settles when this worker's model load finishes, either way. Used to
+   * stage cold start (see ensureStarted) and to report real readiness on
+   * /api/health. Never rejects -- a worker that failed to load is a fact to
+   * report, not an error to propagate. */
+  ready: Promise<{ ok: boolean; error?: string }>;
+  loaded: boolean;
+  /** Set when this worker was killed on purpose, so its "exit" isn't treated
+   * as a crash and respawned. Per-worker rather than a single module flag:
+   * exit events arrive asynchronously, so a pool restarted straight after a
+   * shutdown would otherwise see the *previous* pool's exits land after the
+   * flag had been cleared, and helpfully respawn workers nobody asked for. */
+  stopped: boolean;
 }
 
 interface QueuedTask {
@@ -61,10 +77,20 @@ interface QueuedTask {
   onStart: () => void;
 }
 
-interface WorkerMessage {
+interface TaskResultMessage {
   id: number;
   buffer?: Buffer;
   error?: string;
+}
+interface ReadyMessage {
+  type: "ready";
+  ok: boolean;
+  error?: string;
+}
+type WorkerMessage = TaskResultMessage | ReadyMessage;
+
+function isReadyMessage(msg: WorkerMessage): msg is ReadyMessage {
+  return (msg as ReadyMessage).type === "ready";
 }
 
 let workers: PoolWorker[] = [];
@@ -105,9 +131,26 @@ function spawnWorker(): PoolWorker {
     ? fork(require.resolve("tsx/cli"), [workerEntry], { serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"] })
     : fork(workerEntry, { serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"] });
 
-  const worker: PoolWorker = { proc, busy: false, currentRequestId: null };
+  let settleReady: (result: { ok: boolean; error?: string }) => void = () => {};
+  const worker: PoolWorker = {
+    proc,
+    busy: false,
+    currentRequestId: null,
+    loaded: false,
+    stopped: false,
+    ready: new Promise((resolve) => {
+      settleReady = resolve;
+    }),
+  };
 
   proc.on("message", (msg: WorkerMessage) => {
+    if (isReadyMessage(msg)) {
+      worker.loaded = msg.ok;
+      if (!msg.ok) console.error(`[tts-pool] worker reported a failed model load: ${msg.error}`);
+      settleReady({ ok: msg.ok, error: msg.error });
+      return;
+    }
+
     const task = inFlight.get(msg.id);
     if (!task) return;
     inFlight.delete(msg.id);
@@ -129,7 +172,13 @@ function spawnWorker(): PoolWorker {
   // strictly worse than a slow chunk, since a slow chunk at least
   // eventually finishes.
   proc.on("exit", (code) => {
+    if (worker.stopped) return; // deliberate shutdown, not a crash
     console.error(`[tts-pool] worker exited unexpectedly (code ${code}), respawning`);
+    // A worker that dies before reporting in must still settle its readiness,
+    // or a cold start staged behind it (ensureStarted) would wait forever and
+    // the pool would be permanently stuck at one worker.
+    worker.loaded = false;
+    settleReady({ ok: false, error: `worker exited with code ${code}` });
     if (worker.currentRequestId !== null) {
       const task = inFlight.get(worker.currentRequestId);
       inFlight.delete(worker.currentRequestId);
@@ -143,17 +192,69 @@ function spawnWorker(): PoolWorker {
   return worker;
 }
 
+/** Set while the staged cold start below is in flight, so a request arriving
+ * mid-startup doesn't spawn a second pool on top of the one being built. */
+let starting = false;
+
+/**
+ * Starts the pool, deliberately in two stages: worker 0 alone, then the rest
+ * once it has finished loading its model.
+ *
+ * All POOL_SIZE workers used to be spawned at the same instant. On a cold
+ * transformers.js cache that means every one of them cold-misses and starts
+ * downloading the same ~90MB model to the same path, and that cache write is
+ * not atomic across processes. It produced a truncated file and a "Protobuf
+ * parsing failed" crash in CI -- every worker then failed to load it, so TTS
+ * was dead for the entire run while /api/health still cheerfully returned ok
+ * (#161). Staging means the download happens exactly once and the other
+ * workers read a complete file off disk.
+ *
+ * This costs nothing on a warm cache (worker 0's load is a fast local read)
+ * and nothing meaningful on a cold one either -- the workers were contending
+ * for the same download anyway, so serializing the first is not additive.
+ *
+ * If worker 0 fails to load, the rest are spawned regardless: a broken model
+ * is a problem the workers report per-request, and refusing to build the pool
+ * would turn it into a permanent one-worker pool for the life of the process.
+ */
 function ensureStarted(): void {
-  if (workers.length === 0) {
-    workers = Array.from({ length: POOL_SIZE }, spawnWorker);
+  if (workers.length > 0 || starting) return;
+  starting = true;
+
+  const first = spawnWorker();
+  workers = [first];
+
+  if (POOL_SIZE <= 1) {
+    starting = false;
+    return;
   }
+
+  void first.ready.then(() => {
+    // Guard against the first worker having died and been replaced by the
+    // exit handler in the meantime -- that path already rebuilt the pool.
+    if (!starting) return;
+    for (let i = 1; i < POOL_SIZE; i++) workers.push(spawnWorker());
+    starting = false;
+    pump();
+  });
 }
 
-/** Warms the whole pool at server startup (all workers load their model
- * concurrently) rather than paying for it on the first real request -- see
- * index.ts. */
+/** Warms the pool at server startup rather than making the first real request
+ * pay for it -- see index.ts. */
 export function warmTtsPool(): void {
   ensureStarted();
+}
+
+/** Real readiness, for /api/health. The pool used to have no notion of this:
+ * health reported ok while every worker had failed to load a corrupt model
+ * and TTS was completely non-functional, which is precisely how #161 went
+ * unnoticed for a whole CI run. */
+export function ttsPoolStatus(): { started: boolean; workers: number; loaded: number } {
+  return {
+    started: workers.length > 0,
+    workers: workers.length,
+    loaded: workers.filter((w) => w.loaded).length,
+  };
 }
 
 /**
@@ -272,8 +373,20 @@ export function generateSpeechPooled(
   return generateSpeechWithTimings(text, voice, speed, options).then((result) => result.buffer);
 }
 
+/** Kills every worker and forgets the pool, without the exit handler treating
+ * it as a crash and respawning. Exported for tests, which need to start and
+ * stop the real pool repeatedly; the signal handlers below use it too. */
+export function stopTtsPool(): void {
+  starting = false;
+  for (const worker of workers) {
+    worker.stopped = true;
+    worker.proc.kill();
+  }
+  workers = [];
+}
+
 function shutdown(): void {
-  for (const worker of workers) worker.proc.kill();
+  stopTtsPool();
 }
 process.on("exit", shutdown);
 // Kill the workers on a signal, but deliberately do NOT exit here. These
