@@ -28,7 +28,7 @@ async function selectWord(page: import("@playwright/test").Page) {
   });
 }
 
-test("looking up a selected word shows a definition", async ({ page }) => {
+test("@live looking up a selected word shows a definition", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
   await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
