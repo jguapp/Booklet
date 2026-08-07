@@ -14,7 +14,7 @@
  * single-process version in tts-service.ts, just one per pool worker now
  * instead of one for the whole server.
  */
-import { generateSpeech, warmTtsModel } from "./tts-service.js";
+import { generateSpeech, loadTtsModel } from "./tts-service.js";
 
 interface TtsWorkerRequest {
   id: number;
@@ -38,7 +38,7 @@ type TtsWorkerResponse =
 // load is still a live process that can retry on its next request (loadModel
 // deliberately doesn't cache a rejection), and the pool needs to hear
 // *something* so it isn't left waiting forever before starting the others.
-void warmTtsModel()
+void loadTtsModel()
   .then(() => {
     process.send?.({ type: "ready", ok: true } satisfies TtsWorkerResponse);
   })

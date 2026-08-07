@@ -4,6 +4,29 @@ on:
   push:
     branches: [main]
   pull_request:
+    # A commit that only touches prose costs the same ~22 minutes of runner
+    # time as one that touches every app, and buys nothing -- there is no
+    # code in it to typecheck, bundle, or drive a browser against. Note this
+    # means a docs-only PR reports *no* checks at all; if required status
+    # checks are ever turned on for this repo, this needs to become a
+    # no-op job rather than a skipped workflow, or such a PR can never merge.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+  # So the benchmark (and a full run) can still be asked for by hand on a
+  # branch, now that bench-tts-ttfa no longer runs on every PR push.
+  workflow_dispatch:
+
+# Superseded runs are cancelled instead of racing the new one to the finish.
+# Pushing five times in an afternoon used to mean five concurrent full runs,
+# four of which nobody would ever read -- at ~22 minutes of billable runner
+# time each, that is where an Actions allowance actually goes. The final
+# push on a branch still gets a complete run; only the ones already obsolete
+# are dropped.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   # Dummy value -- signing access tokens is the only thing that reads this
@@ -178,11 +201,19 @@ jobs:
       - run: pnpm --filter @booklet/web test:e2e
 
   bench-tts-ttfa:
-    # One-off: measures real Kokoro TTFA (cold pool, warm/uncached, cache
-    # hit, concurrent chunks, prewarm head-start) -- see
+    # Measures real Kokoro TTFA (cold pool, warm/uncached, cache hit,
+    # concurrent chunks, prewarm head-start) -- see
     # apps/api/scripts/bench-tts-ttfa.ts. Needs real network access to fetch
     # Kokoro's weights from Hugging Face, and no Postgres -- the TTS
     # pipeline itself never touches the database.
+    #
+    # Not run on pull requests. It is a measurement, not a gate: it has no
+    # pass/fail criteria, so a PR author gains nothing from it blocking or
+    # from reading it on every push, while it costs a runner every time.
+    # It still runs on main (where the trend line is what matters) and can
+    # be asked for on any branch via workflow_dispatch -- which is exactly
+    # how #162's before/after numbers were taken.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

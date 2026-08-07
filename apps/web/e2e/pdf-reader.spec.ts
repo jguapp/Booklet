@@ -15,6 +15,15 @@ import { waitForSaveModalToClose } from "./helpers";
 const SAMPLE_PDF = path.join(process.cwd(), "e2e", "fixtures", "sample.pdf");
 
 async function selectFirstTextLayerSpan(page: import("@playwright/test").Page) {
+  // pdf.js renders a page's canvas and its selectable text layer separately,
+  // so the text layer can lag whatever this spec waited on to decide the page
+  // was ready. Without waiting for a real span the evaluate below throws
+  // "no text layer span to select" on whichever run loses that race. Waiting
+  // rather than retrying: a reader cannot select text that hasn't rendered
+  // either, so there is nothing here for the product to do differently.
+  // (Same fix as highlight-citations.spec.ts -- this helper is duplicated
+  // across the PDF specs; see #167 for folding them into one.)
+  await page.locator('[class*="textLayer"] span').first().waitFor({ state: "attached", timeout: 15_000 });
   return page.evaluate(() => {
     const layer = document.querySelector('[class*="textLayer"]');
     const span = layer?.querySelector("span");
