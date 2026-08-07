@@ -34,6 +34,29 @@ services:
       timeout: 5s
       retries: 10
 
+  # Shared cache for generated speech (apps/api/src/services/tts-cache.ts).
+  # Optional everywhere -- the API drops to its in-process cache when
+  # REDIS_URL is unset -- but included here because this stack exists to
+  # mirror a real deployment, and without it every restart re-pays the
+  # multi-second generation cost for audio that was already produced.
+  #
+  # allkeys-lru with a real maxmemory rather than the default noeviction:
+  # audio entries are pure cache with a long TTL, so the correct behavior
+  # under pressure is to drop the coldest ones, not to start refusing
+  # writes (which is what noeviction does once memory fills).
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build:
       context: .
@@ -42,6 +65,7 @@ services:
       - "4000:4000"
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/booklet?schema=public
+      REDIS_URL: redis://redis:6379
       PORT: "4000"
       WEB_ORIGIN: http://localhost:3000
       API_ORIGIN: http://localhost:4000
@@ -55,6 +79,8 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     # Prisma's migrate deploy (not migrate dev -- no shadow DB, no
     # interactive prompts, the right one for a real deployment) before
@@ -76,3 +102,4 @@ services:
 
 volumes:
   postgres-data:
+  redis-data:

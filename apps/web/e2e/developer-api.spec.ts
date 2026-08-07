@@ -38,7 +38,7 @@ test("a generated token can create an article through /api/v1, and revoking it s
   const createRes = await fetch(`${API_URL}/api/v1/articles`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ url: "https://en.wikipedia.org/wiki/Application_programming_interface" }),
+    body: JSON.stringify({ url: "http://127.0.0.1:4321/article/api.html" }),
   });
   expect(createRes.status).toBe(201);
   const created = await createRes.json();
@@ -77,7 +77,7 @@ test("a read-only token can read but not write", async ({ page }) => {
   const writeRes = await fetch(`${API_URL}/api/v1/articles`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ url: "https://en.wikipedia.org/wiki/Scope_(computer_science)" }),
+    body: JSON.stringify({ url: "http://127.0.0.1:4321/article/scope.html" }),
   });
   expect(writeRes.status).toBe(403);
 });
@@ -112,7 +112,7 @@ test("a registered webhook receives a signed delivery when an article is created
   // proves webhooks fire regardless of which path created the article.
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Webhook");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/article/webhook.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await page.getByRole("heading", { name: /save an article/i }).waitFor({ state: "hidden", timeout: 20_000 });
 

@@ -251,6 +251,12 @@
   .callout.warn .callout-label { color: #8A6D1A; }
   :root[data-theme="dark"] .callout.warn .callout-label { color: var(--warn-border); }
   .callout.rejected .callout-label { color: var(--danger); }
+  /* A decision recorded here that was later revisited and reversed --
+     visually distinct from both "why" and "rejected", because the useful
+     thing to preserve is the reversal itself, not just the current answer. */
+  .callout.reversed { border-left-color: var(--warn-border); }
+  .callout.reversed .callout-label { color: #8A6D1A; }
+  :root[data-theme="dark"] .callout.reversed .callout-label { color: var(--warn-border); }
 
   .card-grid {
     display: grid;
@@ -383,8 +389,18 @@
           <li><a href="#feat-mobile">Mobile App</a></li>
         </ol>
       </li>
-      <li><a href="#part-6">VI. Testing Philosophy</a></li>
-      <li><a href="#part-7">VII. CI/CD &amp; Deployment</a></li>
+      <li>
+        <a href="#part-6">VI. Testing Philosophy</a>
+        <ol>
+          <li><a href="#e2e-fixtures">The e2e suite, switched off and back on</a></li>
+        </ol>
+      </li>
+      <li>
+        <a href="#part-7">VII. CI/CD &amp; Deployment</a>
+        <ol>
+          <li><a href="#observability">Observability</a></li>
+        </ol>
+      </li>
       <li><a href="#part-8">VIII. Glossary</a></li>
       <li><a href="#part-9">IX. Roads Not Taken</a></li>
       <li><a href="#part-10">X. Changelog of This Document</a></li>
@@ -618,6 +634,94 @@
           </p>
         </div>
 
+        <h4 id="local-migration">Crossing the seam: local &rarr; account</h4>
+        <p>
+          That migration is the single riskiest moment in the whole
+          offline-first design, and it is worth understanding why. The
+          instant <code>status</code> becomes <code>authenticated</code>,
+          <em>every</em> module in <code>lib/data/*</code> switches to reading
+          from the server. If the migration hasn't landed by then, the reader
+          sees an empty library — and from behind the screen "the import
+          failed" and "signing up deleted everything I saved" look exactly the
+          same.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">A real ship blocker: the silent empty library</span>
+          <p>
+            <code>migrateLocalDataToAccount()</code> used to POST the entire
+            local library — every article's full
+            <code>extractedHtml</code> included — as one JSON body. Fastify's
+            <code>bodyLimit</code> was never set, so it was the default
+            <strong>1&nbsp;MB</strong>, and the request was rejected with a
+            <code>413</code> before the route was even reached. The caller
+            wrapped it in <code>catch {}</code>: no toast, no log, no retry.
+            Signup carried on regardless.
+          </p>
+          <p>
+            This was not an edge case for large libraries. Extraction inlines
+            images as base64 data URIs up to 15&nbsp;MB an article, and base64
+            inflates bytes by about a third — so <strong>one ordinary
+            image-heavy save could exceed the limit on its own</strong>.
+          </p>
+          <p>
+            The data was never actually destroyed (IndexedDB is only cleared
+            after a <em>successful</em> import), which is exactly what made it
+            so easy to miss: nothing was lost, and nothing said so.
+          </p>
+        </div>
+        <p>
+          The fix has four parts, and the interesting thing is that only the
+          first is about the size limit:
+        </p>
+        <ul>
+          <li><strong>Batched by real serialized bytes</strong> (~4&nbsp;MB a
+            batch), with each batch dropped from IndexedDB only once the
+            server has accepted it. A failure part-way leaves the remainder
+            intact and a retry <em>resumes</em> rather than restarting. An
+            article larger than the target still goes alone, because an
+            article is the smallest thing the route can accept.</li>
+          <li><strong>A deliberate 32&nbsp;MB <code>bodyLimit</code></strong>,
+            scoped to that one route — sized for the largest single article
+            rather than left at an accidental default. Fastify parses bodies
+            before <code>preHandler</code>, so this buffer is reachable
+            pre-authentication; that exposure is bounded by the global rate
+            limit and confined to one route rather than raised app-wide.</li>
+          <li><strong>The failure is surfaced</strong>: the library says how
+            many articles are still on the device, states plainly that nothing
+            was lost, and offers a retry.</li>
+          <li><strong>The writes are batched server-side.</strong> The route
+            issued a <code>findUnique</code> + <code>create</code> per article
+            <em>and</em> per highlight — roughly 4,000 serialized round trips
+            for a 2,000-article Pocket import, inside one HTTP request. Ids
+            are generated up front so <code>createMany</code> can be used and
+            the localId&nbsp;&rarr;&nbsp;server-id mapping still comes back
+            without a per-row query. Measured on 502 articles and 501
+            highlights: <strong>6,754&nbsp;ms &rarr; 1,186&nbsp;ms</strong>.</li>
+        </ul>
+        <div class="callout">
+          <span class="callout-label">Batching exposed two more bugs</span>
+          <p>
+            Both were latent before and would have stayed invisible without
+            it. Two local articles sharing a URL tripped
+            <code>@@unique([userId, url])</code> and took the whole batch down
+            — fine when rows went in one at a time, fatal in a
+            <code>createMany</code>. And highlights have no unique constraint,
+            so <strong>any replay duplicated them</strong>. That second one
+            only became reachable <em>because</em> of the retry design: a
+            batch the server committed but whose response was lost gets sent
+            again, and would have silently doubled someone's notebook. Both
+            are now deduplicated and covered by tests.
+          </p>
+        </div>
+        <p>
+          One suggestion was deliberately <strong>not</strong> taken: dropping
+          <code>extractedHtml</code> for articles that have a
+          <code>url</code>, on the grounds that the server could re-extract
+          it. It could — but not for a page that has since changed or gone
+          offline, and keeping a readable copy of those is real value this app
+          otherwise provides. Sizing the limit honestly was the better trade.
+        </p>
+
         <h3 id="system-diagram">System Diagram</h3>
         <pre><code>┌─────────────┐   ┌──────────────────┐   ┌──────────────┐
 │   Web app   │   │ Browser extension│   │  Mobile app  │
@@ -635,17 +739,21 @@
               │  │ Highlights/    │ │
               │  │ Collections    │ │
               │  │ Kokoro TTS pool│ │   real child processes
+              │  │  + audio cache │ │   L1 in-memory (LRU)
               │  │ OCR (Tesseract)│ │
               │  │ /api/v1        │ │   tokens + webhooks
               │  └───────────────┘ │
               └─────────┬──────────┘
                          │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-   ┌─────────────┐ ┌───────────┐ ┌───────────┐
-   │ PostgreSQL  │ │ Local file│ │  Resend   │
-   │ (via Prisma)│ │  storage  │ │  (email)  │
-   └─────────────┘ └───────────┘ └───────────┘</code></pre>
+       ┌─────────────┬───┴────────┬──────────────┐
+       ▼             ▼            ▼              ▼
+┌─────────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐
+│ PostgreSQL  │ │ Local file│ │  Resend   │ │   Redis   │
+│ (via Prisma)│ │  storage  │ │  (email)  │ │ optional  │
+└─────────────┘ └───────────┘ └───────────┘ └───────────┘
+                                             L2 TTS audio
+                                             cache; absent
+                                             = L1 only</code></pre>
 
         <h3 id="request-lifecycle">Anatomy of Saving an Article</h3>
         <p>
@@ -1208,10 +1316,84 @@
         <p>
           The fix is a small pool of real child <strong>processes</strong>
           (<code>apps/api/src/services/tts-pool.ts</code>), each holding its
-          own Kokoro model instance, so multiple chunks generate at
-          genuinely the same wall-clock time. Confirmed by hand: 3 concurrent
-          generations finish in about the same time as 1, not 3x.
+          own Kokoro model instance, so multiple chunks can generate at
+          genuinely the same wall-clock time.
         </p>
+        <div class="callout reversed">
+          <span class="callout-label">Correction: how parallel the pool actually is depends on the host</span>
+          <p>
+            This document previously claimed three concurrent generations
+            finish in about the same wall-clock time as one. That was
+            measured on a developer machine with cores to spare, and it does
+            not generalize. Re-measured on CI's 2-vCPU runner, three
+            concurrent chunks took <strong>18,725&nbsp;ms against
+            6,542&nbsp;ms</strong> for one — <strong>2.86&times;</strong>, not
+            1&times;. At that size the pool is mostly <em>queueing</em>, not
+            parallelizing.
+          </p>
+          <p>
+            The cause is that each worker sizes its ONNX Runtime thread pool
+            to the whole machine, so three workers on two cores oversubscribe
+            and contend rather than share. This also invalidated the
+            reasoning behind warming exactly two chunks ahead, which assumed
+            the extra work was close to free.
+          </p>
+          <p>
+            <strong>Fixed since (#162).</strong> Each worker's ONNX session
+            now gets an explicit thread budget —
+            <code>cores / pool size</code> — instead of being left to claim
+            the machine, and the pool is sized from real cores rather than a
+            fixed three, so a 2-vCPU host runs two workers rather than three
+            fighting over two cores.
+          </p>
+          <p>Re-measured on the same 2-vCPU runner:</p>
+          <table>
+            <tr><th>Scenario</th><th>Before</th><th>After</th></tr>
+            <tr><td>Cold start</td><td>11,838&nbsp;ms</td><td><strong>8,872&nbsp;ms</strong></td></tr>
+            <tr><td>Warm, uncached chunk</td><td>6,542&nbsp;ms</td><td><strong>5,661&nbsp;ms</strong></td></tr>
+            <tr><td>3 concurrent chunks</td><td>18,725&nbsp;ms</td><td><strong>14,796&nbsp;ms</strong></td></tr>
+            <tr><td>Ratio vs. one</td><td>2.86&times;</td><td><strong>2.61&times;</strong></td></tr>
+          </table>
+          <div class="callout">
+            <span class="callout-label">Being honest about that ratio</span>
+            <p>
+              2.86&times; &rarr; 2.61&times; is a modest improvement, and it
+              would be easy to present it as more than it is. The larger
+              correction is that <strong>the target was never
+              1.00&times;</strong>. With more chunks than workers, the best
+              achievable result is <code>ceil(chunks / workers)</code>
+              rounds — three chunks on a two-worker host cannot beat
+              <strong>2.00&times;</strong> however well threading is tuned.
+              Measured against that floor, the pool is now at about
+              <strong>77%</strong> of the parallelism the hardware allows,
+              where before it was contending for cores it didn't have.
+            </p>
+            <p>
+              The benchmark prints the floor and that percentage rather than
+              a bare ratio, because the bare ratio is what made a
+              hardware-bound result look like a broken pool. The real
+              user-visible win here is the absolute numbers: every scenario
+              got 10–25% faster, on the same machine, from doing less
+              fighting.
+            </p>
+          </div>
+          <p>
+            The warm-ahead count stayed at two, but its justification did
+            not. It is no longer "the extra chunks are free because the pool
+            is parallel"; it is that speculative work runs on a
+            <a href="#feat-tts">low-priority queue tier</a> that only ever
+            consumes capacity which would otherwise sit idle, so it cannot
+            push back the chunk a listener is actually waiting for even when
+            the pool is effectively serial.
+          </p>
+          <p>
+            Worth recording as a correction rather than a quiet edit: the
+            original number was real, it just measured a machine nobody
+            deploys to. It is also precisely the kind of drift the
+            <a href="#observability">queue-wait vs. generation split</a> now
+            exists to catch without anyone reaching for a stopwatch.
+          </p>
+        </div>
         <div class="callout warn">
           <span class="callout-label">A real, hard-won bug: worker_threads crash</span>
           <p>
@@ -1231,7 +1413,7 @@
           On the client, <code>tts-player-provider.tsx</code> keeps a
           sliding window of chunks prefetched (matching the pool's size, not
           just one chunk ahead) so every worker stays busy. The first chunk
-          also gets a much smaller character cap (80 vs. the normal 200)
+          also gets a much smaller character cap (80 vs. the normal 140)
           than every chunk after it — nothing can overlap with the very
           first chunk's generation time, since there's no previous chunk
           playing yet to hide behind, so only that one pays for a faster
@@ -1287,6 +1469,229 @@
           differentiated voice per real gender/accent/character combination,
           with labels describing actual character ("Fenrir — deep &amp;
           gravelly") instead of just accent and gender.
+        </p>
+
+        <h4>Chapter 6 — Time to first audio, and the limit of making it faster</h4>
+        <p>
+          Every chapter above is about the gap <em>between</em> chunks. The
+          remaining problem was the gap before the <em>first</em> one: the
+          wait between pressing "Read aloud" and hearing a word. That number
+          has its own name here — <strong>TTFA</strong>, time to first audio
+          — and it's the one a user actually experiences as "is this app
+          fast."
+        </p>
+        <p>
+          The investigation started by establishing the ceiling, which turned
+          out to settle the entire design question:
+          <strong>Kokoro on CPU generates at roughly 1-2&times; realtime.</strong>
+          An 80-character first chunk is about five seconds of speech, so
+          producing it genuinely costs two-and-a-half to five seconds. ONNX
+          Runtime session tuning, a different quantization, a bigger pool —
+          none of these change that by more than about 2&times;. Generation
+          cannot be made negligible on a CPU.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">The reframing that made the problem solvable</span>
+          <p>
+            If generation can't be fast enough, then the audio has to already
+            exist before it's asked for. A cache hit costs one network round
+            trip — on the order of 50-150ms. That is not a consolation prize:
+            it's <em>faster than the commercial streaming TTS APIs</em>
+            (Cartesia's real-world median is ~188ms, ElevenLabs Flash ~288ms),
+            so a self-hosted model with warm audio in front of it is the
+            lowest-latency option available, not a compromise for staying
+            open-source.
+          </p>
+        </div>
+        <p>
+          Which means the work isn't "make the model faster." It's:
+          <strong>make the cache hit the common case, and make the fixed
+          overheads around it disappear.</strong>
+        </p>
+
+        <h5>Warming the opening on reader open</h5>
+        <p>
+          Opening an article now starts generating its beginning before
+          anyone asks for it. Chunk one is fetched and held by the player
+          client-side; chunks two and three are generated into the server's
+          cache via a dedicated <code>POST /api/tts/warm</code> that returns
+          <code>202</code> immediately without sending any audio back.
+        </p>
+        <p>
+          The split is deliberate. The player needs chunk one <em>in hand</em>
+          to start instantly, but chunks two and three only need to be cache
+          <em>hits</em> by the time playback reaches them — several seconds
+          later. Fetching them up front would mean a reader who opens an
+          article and never presses play has downloaded most of a megabyte of
+          audio for nothing. It also means the fragile one-shot logic that
+          adopts a warmed chunk at play time never had to learn about
+          multiple indices.
+        </p>
+        <p>
+          Two extra chunks, specifically, because the pool has exactly three
+          workers: chunk one's real fetch plus these two fill it once, so all
+          three finish in roughly the wall-clock time of a single generation.
+          Warming more would queue behind them and delay the only chunk whose
+          timing anyone can perceive.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why speculative work can't hurt</span>
+          <p>
+            The pool gained a second, low-priority queue, drained only when
+            the normal one is empty. Warming enqueues there. This is what
+            makes speculation safe to be generous with — it can only ever
+            consume capacity that would otherwise sit idle, and can never
+            push back a chunk somebody is actually waiting on. Without the
+            split, speculating would sometimes make the very thing it was
+            speculating about slower.
+          </p>
+        </div>
+
+        <h5>A cache that survives the thing that kept emptying it</h5>
+        <p>
+          The generated-speech cache was in-process only: lost on every
+          restart <em>and every deploy</em>, and not shared between
+          instances. Since generation costs seconds and a hit costs
+          milliseconds, that restart cliff was the largest remaining source
+          of slow starts — the first person to read anything after a release
+          paid full price again for audio the previous instance had already
+          produced.
+        </p>
+        <p>
+          There are now two tiers: the existing in-memory LRU as L1, and an
+          optional Redis as L2 behind it. L1 stays in front because a Redis
+          round trip, while far cheaper than generating, isn't free, and one
+          listening session asks the same process for the same chunks
+          repeatedly.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">A cache is only worth having if it's reliably faster than the thing it caches</span>
+          <p>
+            This is the part that's easy to get wrong. A Redis that is slow,
+            or down, or reachable-but-unresponsive must never make a request
+            slower than simply generating would have been. Two mechanisms
+            enforce that, and both are load-bearing rather than defensive
+            decoration: every read races a <strong>150ms timeout</strong>
+            (past which it's abandoned and treated as a miss), and a
+            <strong>circuit breaker</strong> skips Redis entirely for 30
+            seconds after any failure. Without the breaker, a down Redis
+            makes every subsequent request pay the connect timeout before
+            falling through — converting the cache into a pure latency tax at
+            exactly the moment it's providing no value.
+          </p>
+        </div>
+        <p>
+          Redis stays genuinely optional, in the same sense as
+          <code>RESEND_API_KEY</code> and <code>SENTRY_DSN</code>: with no
+          <code>REDIS_URL</code> set, every L2 call is a no-op and behavior is
+          byte-identical to the single-tier version.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">"Optional" means degrades gracefully — not "leave it off"</span>
+          <p>
+            Worth stating plainly, because the wording invites the wrong
+            reading: <strong>production should run Redis.</strong>
+            <code>docker-compose.yml</code> already does. "Optional" here
+            describes the <em>failure</em> behavior — a down, slow, or absent
+            Redis degrades to "no cache", never to "slow app" — not a
+            recommendation to skip it.
+          </p>
+          <p>
+            Without it, L1 is lost on every restart <em>and every deploy</em>,
+            and is per-process, so nothing is shared between instances or
+            between a reader's own devices. Since generation costs seconds and
+            a cache hit costs milliseconds, that restart cliff is the single
+            largest remaining source of slow time-to-first-audio once warming
+            is in place: the first person to read anything after a release
+            pays full generation cost again for audio the previous instance
+            had already produced.
+          </p>
+        </div>
+
+        <h5>Two chunker bugs that were quietly costing seconds</h5>
+        <p>
+          The 80-character first-chunk cap exists entirely to bound TTFA.
+          It turned out chunk one routinely ignored it, in two separate ways:
+        </p>
+        <ul>
+          <li>
+            The hard-wrap loop measured against the 320-character
+            hard-wrap threshold rather than the current cap, so a long
+            opening sentence produced a ~320-character chunk one —
+            <strong>four times the intended budget</strong>.
+          </li>
+          <li>
+            The accumulator only ever flushed <em>before</em> appending a
+            sentence and never split one, so any single opening sentence
+            between 80 and 320 characters became an unsplit chunk one.
+          </li>
+        </ul>
+        <p>
+          Both are now governed by the real cap. Splitting an opening
+          sentence costs one clause-boundary seam (the wrap logic prefers
+          commas and semicolons, so it reads as an ordinary breath) — a
+          deliberate trade made for chunk one <em>only</em>. Every later
+          sentence still keeps the whole-sentence prosody guarantee that
+          <code>HARD_WRAP_MAX_CHARS</code> exists to protect.
+        </p>
+
+        <h5>The fixed overheads</h5>
+        <table>
+          <tr><th>Overhead</th><th>Fix</th></tr>
+          <tr>
+            <td>Every chunk request paid a <strong>CORS preflight</strong> round trip — <code>/api/tts</code> is a JSON POST with credentials, so never a "simple" request, and with no <code>Access-Control-Max-Age</code> the browser re-preflighted every ~5 seconds.</td>
+            <td>Set <code>maxAge</code>. One line, directly in front of chunk one.</td>
+          </tr>
+          <tr>
+            <td>Audio shipped as <strong>32-bit float WAV</strong> at 24kHz — 96KB per second of speech.</td>
+            <td>Transcode to 16-bit PCM. Halves the bytes over IPC, in both cache tiers, and on the wire, with no audible difference for speech.</td>
+          </tr>
+          <tr>
+            <td><strong>Duplicate generation.</strong> Nothing is written to the cache until the first request <em>finishes</em>, so concurrent identical requests all missed and all occupied a worker — and warming plus the play loop race for the same chunks by design.</td>
+            <td>An in-flight map keyed identically to the cache, so the second caller rides along on the first. It wraps the L2 lookup too, or the duplicates would each still pay their own Redis round trip.</td>
+          </tr>
+          <tr>
+            <td>Chunking ran over the <strong>entire article at least twice</strong> per play, synchronously on the main thread — and again on every re-render that re-fired the warm effect.</td>
+            <td>A single-entry memo, plus moving the warm path's identity check to <em>before</em> chunking instead of after, so the common no-op case costs nothing.</td>
+          </tr>
+        </table>
+
+        <div class="callout warn">
+          <span class="callout-label">Two ship blockers found on the way, neither of them about speed</span>
+          <p>
+            <strong>Fastify ran without <code>trustProxy</code>.</strong>
+            <code>@fastify/rate-limit</code> keys on <code>request.ip</code>,
+            which behind any reverse proxy — Fly, Railway, Render, nginx,
+            Cloudflare, i.e. every real deployment — resolves to the proxy's
+            address. Every user in the world would have shared a single
+            rate-limit bucket, and read-aloud would have stopped working for
+            everyone within minutes of real traffic. It's invisible locally
+            and in <code>docker-compose</code>, because neither has a proxy
+            in front. Now opt-in via <code>TRUST_PROXY</code>, because
+            trusting <code>X-Forwarded-For</code> with nothing in front to
+            overwrite it is its own hole.
+          </p>
+          <p>
+            <strong>The TTS rate limit was an order of magnitude too low.</strong>
+            60 requests per 10 minutes covers about 8,400 characters — a
+            normal article exhausted it mid-playback, and the client's failure
+            path caught the 429 and silently went idle, so playback just
+            stopped with no explanation. Raised, and failures now surface as
+            a toast instead of silence.
+          </p>
+        </div>
+
+        <p>
+          Finally, none of this was measurable from the client before: the
+          only signal was a spinner. There's now real instrumentation — User
+          Timing marks around warm-issued, play-clicked, first-bytes, and
+          first-audible, with the last few runs kept on
+          <code>window.__ttsMetrics</code> and a summary logged when
+          <code>localStorage["booklet:tts-debug"]</code> is set. The
+          server-side benchmark (<code>apps/api/scripts/bench-tts-ttfa.ts</code>)
+          covers generation, cache tiers, and de-duplication, but it never
+          sees CORS, transfer, or audio-element decode — which is exactly why
+          the browser-side numbers have to exist too.
         </p>
 
         <h3 id="feat-resurface">Resurfacing (SM-2)</h3>
@@ -1465,6 +1870,111 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           re-run to prove a failure predates a specific change — rather than
           guessing from the failure message alone.
         </p>
+
+        <h3 id="e2e-fixtures">The e2e suite was switched off, and why it is back on</h3>
+        <p>
+          The web e2e job spent a period disabled in CI (<code>if: false</code>)
+          for being too slow. The usual suspect was wrong: the two TTS specs
+          that generate real audio were <em>not</em> the cost.
+          <strong>31 of 47 specs were each fetching a real Wikipedia URL</strong>
+          and running a full extraction as <em>setup</em>, serialized behind
+          Playwright's single worker.
+        </p>
+        <p>
+          Almost none of those specs were testing extraction. They needed
+          <em>an article to exist</em> so they could test collections, trash,
+          highlights, or tags. So the suite now runs against a local fixture
+          HTTP server (<code>apps/web/e2e/fixture-server/server.mjs</code>),
+          started by Playwright's own <code>webServer</code> config. One
+          spec — <code>save-real-url.spec.ts</code>, tagged
+          <code>@live</code> — still fetches a genuine public URL so
+          real-world extraction stays covered.
+        </p>
+        <p>
+          Beyond speed, this bought <strong>determinism</strong>: a real
+          Wikipedia page can be edited out from under a test that asserts on
+          its text. The fixtures are generated from parameters rather than
+          stored as eight near-identical HTML files, because the interesting
+          variation between them is structural — how long, how many
+          paragraphs, what shape the opening sentence is.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Fixture HTML is not arbitrary — Readability rewrites it</span>
+          <p>
+            Two details in that generator exist because of specific failures,
+            and both look like noise until they bite:
+          </p>
+          <p>
+            Paragraphs are joined with a <strong>blank line</strong>, not a
+            newline. Extraction derives its plain text from the DOM's own
+            whitespace, and the paragraph-citation feature counts
+            <code>\n{2,}</code> boundaries to say which paragraph a highlight
+            is in — so tightly-packed source HTML makes every citation read
+            "Paragraph 1".
+          </p>
+          <p>
+            And the fixtures have <strong>no byline element at all</strong>.
+            Several specs highlight "the first paragraph" via
+            <code>[data-article-content] p:first</code>, and Readability
+            normalizes even a <code>&lt;div&gt;</code> byline into a
+            <code>&lt;p&gt;</code> in its cleaned output — so avoiding
+            <code>&lt;p&gt;</code> is not enough to keep the byline from
+            silently <em>becoming</em> the first paragraph. The author
+            reaches the app through <code>&lt;meta name="author"&gt;</code>,
+            which is where extraction reads it from anyway.
+          </p>
+        </div>
+        <p>
+          Re-enabling the job took several rounds, and the failures were
+          mostly <em>real</em> rather than test-harness noise: the API
+          refused to fetch loopback addresses (its SSRF guard, correctly —
+          relaxed for e2e by an environment variable that is ignored outright
+          under <code>NODE_ENV=production</code>); the whole suite hammering
+          one IP tripped the global rate limit; and the pool's three workers
+          all cold-missed the model cache simultaneously and raced writing
+          the same file, producing a truncated model and a
+          <em>"Protobuf parsing failed"</em> crash rather than merely wasted
+          bandwidth.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">The last failure was a product bug, not a slow test</span>
+          <p>
+            One spec kept failing on the read-along section bar
+            (<code>.reading-section-active</code>) never appearing. The
+            tempting fix — widen the timeout — would have buried a genuine
+            bug.
+          </p>
+          <p>
+            A TTS chunk that begins exactly where a text node ends resolves
+            to that <em>earlier</em> node. For a <code>Range</code> that is
+            the same document position, but the section indicator reads the
+            node's <code>parentElement</code> to decide which block to mark.
+            The shape that exposes it is completely ordinary: whitespace
+            sitting directly inside a wrapping element — an
+            <code>&lt;article&gt;</code>, a Readability page
+            <code>&lt;div&gt;</code> — just before its first real
+            <code>&lt;p&gt;</code>, which is what indented source HTML
+            produces. Chunk 0 starts at that paragraph's first character, so
+            it resolved to the whitespace, whose parent is the wrapper. The
+            wrapper contains every <em>other</em> paragraph too, so the
+            indicator's own "is this scoped to one section?" guard correctly
+            refused it — and nothing highlighted at all until playback
+            reached a chunk starting mid-paragraph, one full chunk of real
+            audio later.
+          </p>
+          <p>
+            The fix is scoped to the section indicator alone. The shared
+            offset-to-DOM-point helper was deliberately left unchanged:
+            highlight rendering uses it too, and there the <em>end</em> point
+            decides which text nodes get wrapped in <code>&lt;mark&gt;</code>,
+            so biasing it forward would have quietly changed what gets
+            highlighted.
+          </p>
+        </div>
+        <p>
+          Result: the suite runs green in about <strong>8.7 minutes</strong>,
+          with no dependency on Wikipedia being up or unedited.
+        </p>
       </section>
 
       <hr class="divider">
@@ -1486,12 +1996,230 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           Docker-based — a <code>Dockerfile</code> per app, verified by CI's
           own build-and-smoke-test, but not yet pointed at a real production
           host (no cloud account exists in this project's own development
-          environment). <code>TTS_POOL_SIZE</code> (default 3) is the one
-          real production-sizing knob the TTS architecture introduced — each
-          worker process holds a real model instance in memory for its whole
-          lifetime, a genuine memory/CPU tradeoff to size against the actual
-          host's headroom.
+          environment).
         </p>
+        <p>
+          The API image <strong>bakes Kokoro's ONNX weights in at build
+          time</strong>. Without that, the ~90MB model downloads from Hugging
+          Face on the first read-aloud in every fresh container — three times
+          over, since the pool starts three processes that all cold-miss at
+          once — making the first request after a deploy a 10-60 second wait
+          and putting a core feature at the mercy of a third party being
+          reachable at request time.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Don't "fix" the model cache with an environment variable</span>
+          <p>
+            The installed <code>@huggingface/transformers</code> reads
+            <em>no</em> cache environment variables at all — not
+            <code>HF_HOME</code>, not <code>TRANSFORMERS_CACHE</code>, not
+            <code>HF_HUB_CACHE</code>. Verified against its own
+            <code>env.js</code>, which hardcodes the path and allows
+            overriding it only programmatically via <code>env.cacheDir</code>.
+            It caches into <code>node_modules</code>, which the runtime stage
+            copies wholesale — so running the prefetch during the build is
+            sufficient on its own, and adding an <code>ENV HF_HOME</code>
+            would be silently ignored.
+          </p>
+        </div>
+        <p><strong>Production-sizing and safety knobs:</strong></p>
+        <table>
+          <tr><th>Variable</th><th>What it's for</th></tr>
+          <tr>
+            <td><code>TRUST_PROXY</code></td>
+            <td>Set to <code>true</code> if — and only if — a reverse proxy you control sits in front. Rate limiting keys on the client IP; without this, behind a proxy, that resolves to the proxy and every user shares one bucket. With nothing in front, leaving it unset is what stops clients spoofing <code>X-Forwarded-For</code>. Invisible in local dev and <code>docker-compose</code>, so test it against the real deployment.</td>
+          </tr>
+          <tr>
+            <td><code>TTS_POOL_SIZE</code> (default 3)</td>
+            <td>Worker processes, each holding a real model instance in memory for its whole lifetime — a genuine memory/CPU tradeoff to size against the host's headroom.</td>
+          </tr>
+          <tr>
+            <td><code>REDIS_URL</code></td>
+            <td>Optional shared, persistent cache for generated speech. Without it the app uses only its in-process cache. Set <code>maxmemory</code> and <code>allkeys-lru</code> on the Redis itself — these entries are pure cache with a long TTL, so the right behavior under pressure is evicting the coldest, not Redis's default of refusing writes.</td>
+          </tr>
+          <tr>
+            <td><code>TTS_REDIS_TTL_DAYS</code> (default 30)</td>
+            <td>How long cached audio survives unread; refreshed on every hit.</td>
+          </tr>
+          <tr>
+            <td><code>TTS_RATE_LIMIT_MAX</code> (default 600 in production)</td>
+            <td>Requests per IP per 10 minutes against <code>/api/tts</code> — roughly 80 minutes of generated audio. Read together with <code>TRUST_PROXY</code>: set that wrong and no value here is large enough.</td>
+          </tr>
+          <tr>
+            <td><code>TTS_CACHE_MAX_MB</code> (default 200)</td>
+            <td>In-process cache ceiling, evicted LRU.</td>
+          </tr>
+        </table>
+
+        <h3 id="observability">Observability</h3>
+        <p>
+          Sentry has been wired for errors since early on. What did not exist
+          until recently was any way to measure <em>latency</em> — and after
+          an entire release spent on read-aloud speed, that was the gap that
+          mattered most. Every number in <a href="#feat-tts">TTS Chapter 6</a>
+          came from a local run or the CI benchmark, and
+          <strong>neither of those is a user</strong>: the benchmark never
+          pays a CORS preflight, real transfer time, or audio-element decode,
+          and it runs on a 2-vCPU runner that resembles nobody's laptop.
+        </p>
+        <p>
+          Tracing is <strong>OpenTelemetry, exported over OTLP</strong>
+          (<code>apps/api/src/lib/telemetry.ts</code>). Datadog is the
+          intended backend and is a first-class OTLP consumer, so which
+          backend receives the spans is a single environment variable rather
+          than a code change.
+        </p>
+        <div class="callout rejected">
+          <span class="callout-label">Considered and rejected: Datadog's own dd-trace SDK</span>
+          <p>
+            Marginally simpler to set up and slightly deeper on
+            Datadog-specific features. Rejected because it makes the vendor a
+            code dependency rather than a configuration value — moving to
+            Grafana/Tempo or Honeycomb later would mean re-instrumenting
+            rather than re-pointing. Since Datadog ingests OTLP natively,
+            nothing is actually given up for that portability.
+          </p>
+        </div>
+        <div class="callout rejected">
+          <span class="callout-label">Considered and rejected: auto-instrumentation</span>
+          <p>
+            <code>@opentelemetry/auto-instrumentations-node</code> would
+            trace Fastify, HTTP, and Prisma with no call sites. It works by
+            patching modules as they load, which under Node ESM requires a
+            loader hook installed <em>before</em> any instrumented module is
+            imported. This app is ESM <em>and</em> bundled by esbuild for
+            production (<code>scripts/build.mjs</code> flattens the whole
+            import graph into one file), so there is no reliable "before" for
+            such a hook to occupy.
+          </p>
+          <p>
+            The deciding argument is the failure mode, not the difficulty:
+            an auto-instrumentation that silently patches nothing is
+            <strong>worse than none at all</strong>, because traces still
+            appear — just missing the spans you were relying on, with nothing
+            announcing their absence. And the spans this app actually needs
+            are internal to the TTS pool, so no library-boundary hook could
+            have produced them regardless.
+          </p>
+        </div>
+        <p>
+          The span that carries the real information is
+          <code>tts.generate_pooled</code>. It records
+          <strong>queue wait and generation separately</strong> rather than
+          as one duration:
+        </p>
+        <table>
+          <tr><th>Attribute</th><th>What a bad value means</th></tr>
+          <tr>
+            <td><code>tts.queue_wait_ms</code></td>
+            <td>Time spent waiting for a free worker. High means the pool is undersized for the load, or speculative warming is competing with real playback — fixed by <code>TTS_POOL_SIZE</code> or by the priority split.</td>
+          </tr>
+          <tr>
+            <td><code>tts.generate_ms</code></td>
+            <td>Time the model was actually running. High means generation is slow on this hardware — a different problem, in a different place, with different fixes.</td>
+          </tr>
+          <tr>
+            <td><code>tts.cache_tier</code></td>
+            <td><code>l1</code> (in-process), <code>l2</code> (Redis), or <code>miss</code>. "Served instantly from this process" and "served after a Redis round trip" are different answers to why a chunk was fast, and a boolean hit/miss cannot tell them apart.</td>
+          </tr>
+        </table>
+        <div class="callout why">
+          <span class="callout-label">Why splitting these two numbers was not optional</span>
+          <p>
+            One end-to-end duration cannot distinguish "we waited" from "it
+            was slow", and that exact ambiguity is what let the pool's
+            parallelism shortfall sit unnoticed. The documented claim was
+            that three concurrent chunks cost roughly the same wall-clock as
+            one. Measured on a 2-vCPU runner, three cost
+            <strong>2.86&times;</strong> one — the pool queues far more than
+            it parallelizes at that size. That was found by hand, with a
+            stopwatch, because nothing in the system reported it. These two
+            attributes are what stop the next such regression needing to be
+            discovered the same way.
+          </p>
+        </div>
+        <p>
+          <code>/api/tts</code> also returns a <strong>
+          <code>Server-Timing</code></strong> header (<code>cache</code>,
+          <code>queue</code>, <code>gen</code>) on every successful response,
+          readable from the browser via
+          <code>PerformanceResourceTiming.serverTiming</code> whether or not
+          any tracing backend is configured.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Server-Timing is invisible cross-origin without Timing-Allow-Origin</span>
+          <p>
+            The API is always a different origin from the web app here. On a
+            cross-origin response a browser exposes <code>serverTiming</code>
+            as an <strong>empty array</strong> unless the response also
+            carries <code>Timing-Allow-Origin</code> — no error, no warning,
+            just no data, which makes the header pure overhead. Booklet
+            echoes the caller's own origin, gated by the same check CORS
+            uses, rather than <code>*</code>: a wildcard would hand these
+            timings to any site that fetched the route, and a bare
+            <code>WEB_ORIGIN</code> would miss both local development (any
+            localhost port) and the browser extension.
+          </p>
+        </div>
+        <p>
+          On the client, <strong>Datadog RUM</strong>
+          (<code>apps/web/src/lib/rum.ts</code>) reports the TTFA sample that
+          <code>tts-metrics.ts</code> was already measuring but had nowhere
+          to send. It goes out as a <code>tts.ttfa</code> action tagged with
+          <code>prewarm_hit</code> — warm and cold plays kept
+          <em>separable</em> rather than averaged, since averaging them
+          produces a number that describes neither, and moving readers from
+          the cold group into the warm one was the entire point of the
+          warming work. The SDK is imported dynamically, so a deployment
+          without RUM configured never downloads it at all. Session replay is
+          explicitly disabled: it would record whatever the reader is reading.
+        </p>
+        <p>
+          All of it is opt-in by environment variable and a complete no-op
+          without one, matching how <code>REDIS_URL</code>,
+          <code>SENTRY_DSN</code>, and <code>RESEND_API_KEY</code> already
+          behave — verified both ways, by running the API against a local
+          OTLP sink and confirming spans arrive with the expected attributes,
+          then unsetting the endpoint and confirming the server is healthy
+          and exports nothing.
+        </p>
+        <table>
+          <tr><th>Variable</th><th>What it's for</th></tr>
+          <tr>
+            <td><code>OTEL_EXPORTER_OTLP_ENDPOINT</code> (API)</td>
+            <td>Where traces go, e.g. <code>http://localhost:4318</code> for a local Datadog Agent or OpenTelemetry Collector. Unset means tracing is entirely off — no exporter, no background work, no spans.</td>
+          </tr>
+          <tr>
+            <td><code>OTEL_SERVICE_NAME</code> (API, default <code>booklet-api</code>)</td>
+            <td>The service name traces are grouped under.</td>
+          </tr>
+          <tr>
+            <td><code>NEXT_PUBLIC_DD_RUM_APPLICATION_ID</code> / <code>NEXT_PUBLIC_DD_RUM_CLIENT_TOKEN</code> (web)</td>
+            <td>Enables RUM and therefore real-world TTFA reporting. The RUM <strong>client token</strong> is publishable and write-only, which is what makes <code>NEXT_PUBLIC_</code> correct for it. A Datadog <strong>API key</strong> is neither, and must never reach the browser.</td>
+          </tr>
+          <tr>
+            <td><code>NEXT_PUBLIC_DD_SITE</code> (web, default <code>datadoghq.com</code>)</td>
+            <td>Set to the Datadog region's site (e.g. <code>datadoghq.eu</code>) if it isn't US1.</td>
+          </tr>
+        </table>
+
+        <div class="callout warn">
+          <span class="callout-label">A latent shutdown bug this work surfaced</span>
+          <p>
+            Flushing buffered spans on shutdown is asynchronous, and it did
+            not work — because <code>tts-pool.ts</code>'s own
+            <code>SIGINT</code>/<code>SIGTERM</code> handlers called
+            <code>process.exit(0)</code> themselves. Registering a listener
+            for those signals replaces Node's default terminate-on-signal
+            behavior, so whichever module happened to be imported first was
+            effectively deciding when the process died, silently cancelling
+            any shutdown work registered after it. The entry point owns the
+            exit now; the pool keeps its <code>process.on("exit")</code>
+            handler, which still covers every other way the process ends.
+            Worth noting because it was invisible until something else needed
+            to run at shutdown.
+          </p>
+        </div>
       </section>
 
       <hr class="divider">
@@ -1528,6 +2256,21 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
           <dt>SM-2</dt>
           <dd>SuperMemo 2, a 1987 spaced-repetition scheduling algorithm by Piotr Wozniak — see <a href="#feat-resurface">Resurfacing</a>.</dd>
+
+          <dt>TTFA (time to first audio)</dt>
+          <dd>The wait between pressing "Read aloud" and hearing the first word. Distinct from throughput or the gap between chunks: it's the one latency a user directly experiences as the feature being fast or slow, and the thing <a href="#feat-tts">Chapter 6</a> is entirely about.</dd>
+
+          <dt>Realtime factor</dt>
+          <dd>How fast a speech model generates relative to the duration of the audio it produces. 1&times; realtime means one second of synthesis per second of speech; 2&times; means half that. Kokoro on CPU runs at roughly 1-2&times;, which is the constraint that shaped the whole caching architecture — below about 10&times;, generating on demand can never feel instant.</dd>
+
+          <dt>CORS preflight</dt>
+          <dd>An automatic <code>OPTIONS</code> request a browser sends before certain cross-origin requests (anything that isn't a "simple" GET/POST — including any JSON POST) to ask the server whether the real request is allowed. It costs a full extra round trip, and without an <code>Access-Control-Max-Age</code> the result is cached for only a few seconds, so it repeats constantly.</dd>
+
+          <dt>Circuit breaker</dt>
+          <dd>A pattern where repeated failures against a dependency cause it to be skipped outright for a cooling-off period, rather than every request continuing to pay a timeout to rediscover it's down. Used here so a degraded Redis can never make TTS slower than having no cache at all.</dd>
+
+          <dt>L1 / L2 cache</dt>
+          <dd>Tiers of a layered cache, borrowed from CPU terminology: L1 is smaller and closer (here, in the server process's own memory), L2 is larger and slightly further away (here, Redis over the network). A miss in L1 falls through to L2; a hit in L2 is promoted into L1.</dd>
         </dl>
       </section>
 
@@ -1563,19 +2306,45 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           </p>
         </div>
 
-        <div class="callout rejected">
-          <span class="callout-label">Redis</span>
+        <div class="callout reversed">
+          <span class="callout-label">Redis — rejected, then adopted</span>
           <p>
-            Explored directly in response to a real question ("would this
-            fix our latency issues?"). It wouldn't have: every reported
-            slowness was either real model-generation latency or an actual
-            logic bug in a specific code path, not a caching-shaped problem.
-            Adding it would have meant real infrastructure complexity — and
-            a real philosophical departure from this app's "nothing external
-            required" architecture — for no concrete win. Revisit if the API
-            ever needs to scale horizontally (Redis-backed rate limiting) or
-            if literally-repeated TTS requests become common enough to be
-            worth caching.
+            <strong>The original rejection:</strong> explored in response to
+            a real question ("would this fix our latency issues?"). It
+            wouldn't have — every reported slowness at the time was either
+            real model-generation latency or an actual logic bug in a
+            specific code path, not a caching-shaped problem. Adding it would
+            have meant real infrastructure complexity, and a departure from
+            this app's "nothing external required" architecture, for no
+            concrete win. The entry closed by naming the conditions under
+            which to revisit: horizontal scaling, or repeated TTS requests
+            becoming common enough to cache.
+          </p>
+          <p>
+            <strong>What changed:</strong> the second condition arrived, from
+            an unexpected direction. Once the time-to-first-audio work
+            established that Kokoro on CPU simply cannot generate fast enough
+            to matter (see <a href="#feat-tts">Chapter 6</a>), the cache
+            stopped being an optimization and became <em>the mechanism</em> —
+            the only way for playback to start quickly is for the audio to
+            already exist. And the in-process cache's real weakness turned
+            out not to be capacity but <strong>lifetime</strong>: it was
+            wiped by every restart and every deploy, so the first reader
+            after a release always paid full price for audio that had already
+            been generated.
+          </p>
+          <p>
+            Adopted as a second tier <em>behind</em> the existing in-memory
+            cache, not as a replacement, and strictly optional — with no
+            <code>REDIS_URL</code> the app behaves exactly as it did before.
+            The "nothing external required" principle is intact; what's new
+            is that something external can now make it better.
+          </p>
+          <p>
+            <strong>The lesson worth keeping:</strong> the original rejection
+            was correct <em>and</em> the reversal was correct. What made the
+            reversal cheap was that the first entry wrote down its own
+            revisit conditions instead of just saying no.
           </p>
         </div>
 
@@ -1592,6 +2361,82 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             generated audio), which wasn't judged worth the cost against the
             estimate's real accuracy once its own logic bug — see
             <a href="#feat-tts">Chapter 4</a> — was fixed.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">A commercial streaming TTS API (Cartesia, ElevenLabs, Deepgram)</span>
+          <p>
+            The obvious answer to "make read-aloud start instantly," and the
+            one that turns out to be <em>worse</em> on the metric it would be
+            bought for. Their best-case figures (~40-90ms) are marketing
+            numbers; real-world medians land around 188ms (Cartesia Sonic)
+            to 288ms (ElevenLabs Flash). A warm cache hit from this app's own
+            server is 50-150ms — faster, free, and with no per-character
+            billing or hard third-party dependency for a core feature.
+            Rejected on measurement, not principle, which is the useful part:
+            self-hosting isn't costing anything here.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">GPU inference (CUDA execution provider)</span>
+          <p>
+            <code>onnxruntime-node</code> already ships the CUDA and TensorRT
+            providers — the repo simply never passes a <code>device</code>,
+            so it always runs on CPU. Wiring it up would genuinely deliver
+            10-30&times; and make even uncached generation sub-second. Not
+            taken because it requires deploying the API to a GPU host, which
+            is a real recurring cost for a personal-scale reading app, and
+            because warming plus caching gets TTFA to a network round trip
+            without it. This is the right lever if the app ever serves enough
+            simultaneous readers that cache misses stop being rare.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">ONNX Runtime session tuning</span>
+          <p>
+            The repo passes <em>no</em> session options at all, which means
+            each of the three worker processes spins up a thread pool sized
+            to the whole machine — roughly 3&times; CPU oversubscription on a
+            small host. Genuinely real, and worth perhaps 2&times;. Deliberately
+            deferred: 2&times; on a path that caching removes entirely isn't
+            worth the regression risk immediately before shipping. Revisit
+            together with the dtype question — <code>q8</code> is hardcoded,
+            and q8 is not reliably faster than fp32 for this model shape on
+            CPU, so that deserves a real benchmark rather than an assumption.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">Opus/MP3 audio instead of WAV</span>
+          <p>
+            Would be 10-20&times; smaller than even the 16-bit PCM the server
+            now sends. Rejected for now because it needs a native or WASM
+            encoder dependency plus a container format, adds 50-150ms of
+            server CPU <em>on the critical path</em>, and its benefit only
+            materializes on slow connections and only for the first chunk
+            (later chunks hide behind playback). The 32-bit float → 16-bit
+            PCM change captured the free half of this win with no new
+            dependency.
+          </p>
+        </div>
+
+        <div class="callout rejected">
+          <span class="callout-label">A <code>GET</code> TTS route with a content hash, for real HTTP caching</span>
+          <p>
+            A <code>GET</code> with no custom headers is a "simple" request —
+            it would skip the CORS preflight entirely <em>and</em> become
+            genuinely HTTP-cacheable with
+            <code>immutable, max-age</code>, unlike the current POST.
+            Rejected because it puts the text of whatever the user is reading
+            into URLs, where it lands in server access logs, any intermediate
+            proxy's logs, and browser history. That's a bad trade for a
+            reading app. The preflight cost was solved with
+            <code>maxAge</code> instead, and a client-side IndexedDB audio
+            cache is the better route to zero-byte replays if that's ever
+            needed.
           </p>
         </div>
 
@@ -1629,6 +2474,83 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
         <h2><span class="part-label">Part X</span>Changelog of This Document</h2>
         <table>
           <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-07</td>
+            <td>
+              v4 — added
+              <a href="#local-migration">Crossing the seam: local &rarr;
+              account</a> to Part III, on the ship blocker that made signing
+              up look like it deleted your library: the whole local library
+              went up as one JSON body against an unset 1&nbsp;MB
+              <code>bodyLimit</code>, and the client caught the resulting
+              <code>413</code> and did nothing with it. Covers the batching
+              that replaced it, why batches are cleared only once accepted
+              (so a retry resumes), the two latent bugs batching exposed — a
+              duplicate URL taking down a whole <code>createMany</code>, and
+              highlights having no unique constraint, so a lost response
+              would have doubled someone's notebook — and the suggestion
+              deliberately not taken. Closed out the
+              <a href="#part-9">ONNX Runtime session tuning</a> entry: the
+              pool's "three concurrent generations &asymp; one" claim was a
+              real measurement of a machine nobody deploys to, corrected with
+              an explicit per-worker thread budget, core-derived pool sizing,
+              and a benchmark that now prints the host's core count and the
+              concurrency ratio so it can't drift back into folklore. The
+              warm-ahead count kept its value and lost its justification.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-08-07</td>
+            <td>
+              v3 — added <a href="#observability">Observability</a> to
+              Part VII: OpenTelemetry over OTLP with Datadog as the intended
+              backend, why auto-instrumentation was rejected (an ESM +
+              esbuild-bundled app gives its loader hook no reliable "before",
+              and one that silently patches nothing is worse than none),
+              queue-wait and generation recorded as separate span attributes,
+              cache tier as <code>l1</code>/<code>l2</code>/<code>miss</code>,
+              <code>Server-Timing</code> and the
+              <code>Timing-Allow-Origin</code> that keeps it from being dead
+              weight cross-origin, and Datadog RUM finally giving real-world
+              TTFA somewhere to go. Recorded a latent shutdown bug found
+              along the way: the TTS pool's own signal handlers called
+              <code>process.exit</code>, so whichever module was imported
+              first decided when the process died and silently cancelled
+              anything registered later.
+              Added <a href="#e2e-fixtures">an e2e-strategy section</a> to
+              Part VI — the suite was slow because 31 specs each fetched a
+              real Wikipedia URL as <em>setup</em>, not because of TTS;
+              the local fixture server that replaced them, the two
+              Readability-driven fixture details that are not optional, and
+              the read-along section-bar bug that the last "flaky" failure
+              turned out to actually be. Clarified that Redis being
+              <strong>optional means degrades gracefully, not "leave it
+              off"</strong>.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-08-06</td>
+            <td>
+              v2 — added <a href="#feat-tts">TTS Chapter 6</a>, on
+              time-to-first-audio: the 1-2&times;-realtime ceiling that makes
+              generation-side optimization a dead end, speculative warming on
+              reader open, the two-tier cache with its timeout and circuit
+              breaker, the two chunker bugs that were inflating the first
+              chunk up to 4&times; its intended size, and the fixed overheads
+              (CORS preflight, 32-bit audio, duplicate generation, repeated
+              chunking). Recorded two ship blockers found along the way that
+              had nothing to do with speed — a missing <code>trustProxy</code>
+              that would have put every user in one rate-limit bucket, and a
+              rate limit an order of magnitude too low that failed silently.
+              Flipped the <strong>Redis</strong> entry in
+              <a href="#part-9">Roads Not Taken</a> from rejected to adopted,
+              keeping both the original reasoning and what changed. Added
+              rejected entries for commercial TTS APIs, GPU inference, ONNX
+              Runtime tuning, Opus audio, and a <code>GET</code>-with-hash
+              route. Expanded deployment with the full environment-variable
+              table and the model-baking finding.
+            </td>
+          </tr>
           <tr>
             <td>2026-08-05</td>
             <td>
