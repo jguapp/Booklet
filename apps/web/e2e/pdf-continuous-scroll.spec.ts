@@ -1,6 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { waitForSaveModalToClose } from "./helpers";
+import { selectFirstTextLayerSpan, waitForSaveModalToClose } from "./helpers";
 
 /**
  * The PDF reader's continuous-scroll mode (pdf-reader.tsx's PdfScrollPageSlot)
@@ -13,31 +13,6 @@ import { waitForSaveModalToClose } from "./helpers";
  */
 
 const MULTI_PAGE_PDF = path.join(process.cwd(), "e2e", "fixtures", "multi-page.pdf");
-
-async function selectFirstTextLayerSpanIn(page: import("@playwright/test").Page, containerSelector: string) {
-  // pdf.js renders a page's canvas and its selectable text layer separately,
-  // so the text layer can lag whatever this spec waited on to decide the page
-  // was ready. Without waiting for a real span the evaluate below throws
-  // "no text layer span to select" on whichever run loses that race. Waiting
-  // rather than retrying: a reader cannot select text that hasn't rendered
-  // either, so there is nothing here for the product to do differently.
-  // (Same fix as highlight-citations.spec.ts -- this helper is duplicated
-  // across the PDF specs; see #167 for folding them into one.)
-  await page.locator(`${containerSelector} [class*="textLayer"] span`).first().waitFor({ state: "attached", timeout: 15_000 });
-  return page.evaluate((selector) => {
-    const container = document.querySelector(selector);
-    const span = container?.querySelector('[class*="textLayer"] span');
-    if (!span?.firstChild) throw new Error("no text layer span to select");
-    const range = document.createRange();
-    range.setStart(span.firstChild, 0);
-    range.setEnd(span.firstChild, span.firstChild.textContent!.length);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    container!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    return range.toString();
-  }, containerSelector);
-}
 
 async function enableScrollMode(page: import("@playwright/test").Page) {
   await page.goto("/settings/reading");
@@ -114,7 +89,7 @@ test("highlighting works in scroll mode, positioned over the right page", async 
     timeout: 10_000,
   });
 
-  const selectedText = await selectFirstTextLayerSpanIn(page, '[data-pdf-scroll-page="1"]');
+  const selectedText = await selectFirstTextLayerSpan(page, '[data-pdf-scroll-page="1"]');
   expect(selectedText.length).toBeGreaterThan(0);
 
   const yellowSwatch = page.getByTitle("Yellow");

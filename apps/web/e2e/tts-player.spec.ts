@@ -18,7 +18,7 @@ import { waitForSaveModalToClose } from "./helpers";
  * model download.
  */
 
-test("selecting a Kokoro voice and pressing play actually generates and plays real audio, with a persistent player bar and read-along highlighting", async ({
+test("@live selecting a Kokoro voice and pressing play actually generates and plays real audio, with a persistent player bar and read-along highlighting", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -87,7 +87,7 @@ test("the system voice is the default, and switching back to it needs no generat
   await expect(page.getByRole("combobox", { name: "Read-aloud voice" })).toHaveValue("system");
 });
 
-test("a real, full-length article with dense infobox/citation content doesn't blow up the chunk count", async ({
+test("@live a real, full-length article with dense infobox/citation content doesn't blow up the chunk count", async ({
   page,
 }) => {
   test.setTimeout(120_000);
