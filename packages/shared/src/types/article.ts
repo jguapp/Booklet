@@ -47,6 +47,19 @@ export interface Article {
   progressFraction: number; // 0.0-1.0, normalized regardless of sourceType
   activeReadingSeconds: number; // actual time spent, not an estimate -- see the reading-stats feature
 
+  /** Read-aloud position, 0.0-1.0 over the article's text -- the listening
+   * sibling of progressFraction. A fraction rather than a chunk index because
+   * chunk boundaries move whenever the TTS length caps are tuned; see
+   * schema.prisma. Null means never listened, which is deliberately distinct
+   * from 0 (listened, at the start) -- only the latter should be offered as a
+   * resume point. */
+  listeningFraction: number | null;
+  listeningUpdatedAt: string | null;
+  /** Opaque id of the browser that wrote the position, so a resume prompt can
+   * tell "you left off here on another device" from "this tab wrote this two
+   * seconds ago". Identifies a browser, not a person. */
+  listeningDeviceId: string | null;
+
   tags: string[]; // free-form, lighter-weight than Collection -- no separate entity, no color
 
   status: ArticleStatus;
@@ -109,6 +122,12 @@ export interface UpdateArticleRequest {
    * atomic increment server-side, not an overwrite, so concurrent
    * flushes (e.g. two tabs) can't clobber each other. */
   activeReadingSecondsDelta?: number;
+  /** Read-aloud position, 0-1. Last-write-wins, explicitly: two devices
+   * listening to one article at once is rare, and reconciling two positions
+   * into one correct answer isn't possible anyway -- whoever stopped last is
+   * as good a guess as exists. Sent with listeningDeviceId. */
+  listeningFraction?: number;
+  listeningDeviceId?: string;
 }
 
 export interface ArticleListResponse {
