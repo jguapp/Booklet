@@ -21,6 +21,8 @@
  * be read back after the fact without having had logging on beforehand.
  */
 
+import { reportTtfa } from "../rum";
+
 const DEBUG_KEY = "booklet:tts-debug";
 const RING_SIZE = 20;
 
@@ -102,6 +104,11 @@ export function markFirstAudio(bytes: number): void {
     ring.push(sample);
     if (ring.length > RING_SIZE) ring.shift();
   }
+
+  // Off unless RUM is configured (see lib/rum.ts). This is the only path by
+  // which real-world TTFA leaves the browser at all -- everything above it
+  // stays local to the tab.
+  reportTtfa(sample);
 
   if (debugEnabled()) {
     console.debug(

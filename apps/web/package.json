@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@booklet/shared": "workspace:*",
+    "@datadog/browser-rum": "^7.7.0",
     "@sentry/browser": "^10.68.0",
     "epubjs": "^0.3.93",
     "jszip": "^3.10.1",

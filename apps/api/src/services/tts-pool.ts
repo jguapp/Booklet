@@ -17,7 +17,8 @@ import { fork, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getCachedSpeech, setCachedSpeech, speechCacheKey } from "./tts-cache.js";
+import { withSpan } from "../lib/telemetry.js";
+import { getCachedSpeech, setCachedSpeech, speechCacheKey, type CacheTier } from "./tts-cache.js";
 
 const require = createRequire(import.meta.url);
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -55,6 +56,9 @@ interface QueuedTask {
   speed: number;
   resolve: (buffer: Buffer) => void;
   reject: (err: Error) => void;
+  /** Called when this task is actually handed to a worker, which is what
+   * divides "waiting for capacity" from "generating". */
+  onStart: () => void;
 }
 
 interface WorkerMessage {
@@ -91,6 +95,7 @@ function pump(): void {
     const id = nextRequestId++;
     inFlight.set(id, task);
     worker.currentRequestId = id;
+    task.onStart();
     worker.proc.send({ id, text: task.text, voice: task.voice, speed: task.speed });
   }
 }
@@ -168,14 +173,28 @@ export function warmTtsPool(): void {
  * duplicate requests would each still pay their own Redis round trip before
  * discovering they were redundant.
  */
-const inFlightByKey = new Map<string, Promise<Buffer>>();
+const inFlightByKey = new Map<string, Promise<PooledSpeech>>();
 
-export function generateSpeechPooled(
+/** Where the time went, for the route's Server-Timing header and the span
+ * attributes. Carried back with the audio rather than stashed in a module
+ * variable: several chunks are generated concurrently by design (that is the
+ * entire point of the pool), so a single "most recent timings" slot would be
+ * clobbered by whichever request happened to finish next. */
+export interface PooledSpeech {
+  buffer: Buffer;
+  cacheTier: CacheTier;
+  /** Milliseconds spent waiting for a free worker. Zero on a cache hit. */
+  queueMs: number;
+  /** Milliseconds spent in the worker actually generating. Zero on a hit. */
+  generateMs: number;
+}
+
+export function generateSpeechWithTimings(
   text: string,
   voice: string,
   speed: number,
   { speculative = false }: { speculative?: boolean } = {},
-): Promise<Buffer> {
+): Promise<PooledSpeech> {
   const key = speechCacheKey(text, voice, speed);
 
   // A speculative request that collides with a real one already in flight
@@ -185,18 +204,50 @@ export function generateSpeechPooled(
   const existing = inFlightByKey.get(key);
   if (existing) return existing;
 
-  const work = (async () => {
-    const cached = await getCachedSpeech(text, voice, speed);
-    if (cached) return cached;
+  const work = withSpan(
+    "tts.generate_pooled",
+    { "tts.voice": voice, "tts.speed": speed, "tts.text_length": text.length, "tts.speculative": speculative },
+    async (span): Promise<PooledSpeech> => {
+      const cached = await getCachedSpeech(text, voice, speed);
+      span.setAttribute("tts.cache_tier", cached.tier);
+      if (cached.buffer) {
+        span.setAttribute("tts.audio_bytes", cached.buffer.length);
+        return { buffer: cached.buffer, cacheTier: cached.tier, queueMs: 0, generateMs: 0 };
+      }
 
-    ensureStarted();
-    const buffer = await new Promise<Buffer>((resolve, reject) => {
-      (speculative ? lowPriorityQueue : queue).push({ text, voice, speed, resolve, reject });
-      pump();
-    });
-    setCachedSpeech(text, voice, speed, buffer);
-    return buffer;
-  })();
+      ensureStarted();
+      // Queue wait and generation are recorded separately because they fail
+      // for different reasons and are fixed in different places: queue wait
+      // means the pool is too small (or warming is taking capacity from real
+      // playback), generation means the model itself is slow on this
+      // hardware. One end-to-end duration cannot tell those apart -- and it
+      // was exactly that ambiguity that let the pool's parallelism shortfall
+      // (#162) sit unnoticed until it was measured by hand.
+      const enqueuedAt = Date.now();
+      let startedAt = enqueuedAt;
+      const buffer = await new Promise<Buffer>((resolve, reject) => {
+        (speculative ? lowPriorityQueue : queue).push({
+          text,
+          voice,
+          speed,
+          resolve,
+          reject,
+          onStart: () => {
+            startedAt = Date.now();
+          },
+        });
+        pump();
+      });
+      const queueMs = startedAt - enqueuedAt;
+      const generateMs = Date.now() - startedAt;
+      span.setAttribute("tts.queue_wait_ms", queueMs);
+      span.setAttribute("tts.generate_ms", generateMs);
+      span.setAttribute("tts.audio_bytes", buffer.length);
+
+      setCachedSpeech(text, voice, speed, buffer);
+      return { buffer, cacheTier: cached.tier, queueMs, generateMs };
+    },
+  );
 
   inFlightByKey.set(key, work);
   // Cleared on rejection as well as success -- leaving a failed promise in
@@ -209,15 +260,28 @@ export function generateSpeechPooled(
   return work;
 }
 
+/** The audio on its own, for callers with no use for the timings (the warm
+ * route, the benchmark). Shares the de-duplication map with the timed
+ * version, so mixing the two never generates anything twice. */
+export function generateSpeechPooled(
+  text: string,
+  voice: string,
+  speed: number,
+  options: { speculative?: boolean } = {},
+): Promise<Buffer> {
+  return generateSpeechWithTimings(text, voice, speed, options).then((result) => result.buffer);
+}
+
 function shutdown(): void {
   for (const worker of workers) worker.proc.kill();
 }
 process.on("exit", shutdown);
-process.on("SIGINT", () => {
-  shutdown();
-  process.exit(0);
-});
-process.on("SIGTERM", () => {
-  shutdown();
-  process.exit(0);
-});
+// Kill the workers on a signal, but deliberately do NOT exit here. These
+// handlers used to call process.exit(0) themselves, which made this module --
+// whichever one happens to be imported first -- the thing that decides when
+// the process dies, and silently cancelled any other shutdown work registered
+// later. index.ts owns the exit now (it needs to flush buffered telemetry
+// spans first, which is async and cannot survive a synchronous exit); the
+// `process.on("exit")` above still covers every other way the process ends.
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
