@@ -9,11 +9,26 @@
  * *slower* than the resulting audio's own playback duration -- meaning no
  * amount of client-side prefetching could keep the player fed; the
  * shortfall just compounded, chunk after chunk, into exactly the "long
- * pause after every sentence" this pool exists to fix. Three concurrent
- * processes measured at ~1x a single generation's wall-clock time for all
- * three, not 3x -- real parallelism, not just queuing.
+ * pause after every sentence" this pool exists to fix.
+ *
+ * This header used to claim, flatly, that three concurrent processes finish
+ * in ~1x a single generation's wall-clock time. That was measured on a
+ * developer machine with cores to spare, and stated without saying so. The
+ * first real CI benchmark, on a 2-vCPU runner, measured 2.86x -- very nearly
+ * fully serialized (#162). The pool was not providing the parallelism this
+ * comment promised, because each worker created its ONNX session with no
+ * options and therefore sized its intra-op thread pool to the whole machine:
+ * three processes each trying to use every core, on two cores, is
+ * contention, not concurrency.
+ *
+ * Two things follow, and both are now done rather than assumed: the pool is
+ * sized from real cores (see POOL_SIZE below), and each worker's session is
+ * given an explicit thread budget (see tts-service.ts's intraOpThreads).
+ * The benchmark prints the host's core count and the concurrency ratio, so
+ * the claim is a measurement with a context attached rather than folklore.
  */
 import { fork, type ChildProcess } from "node:child_process";
+import { availableParallelism } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,10 +40,21 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== "production";
 
 // Each worker holds one quantized (q8) 82M-param model in memory --
-// moderate, not free, hence configurable rather than scaling with
-// however many CPU cores happen to be available. 3 comfortably beats
-// real-time for normal narration without assuming a beefy deployment.
-const POOL_SIZE = Number(process.env.TTS_POOL_SIZE) || 3;
+// moderate, not free -- and, more importantly, competes for CPU with every
+// other worker. A fixed 3 was wrong on a small host: on a 2-vCPU runner
+// three workers each sized their ONNX intra-op pool to the whole machine
+// and three concurrent generations took 2.86x a single one rather than the
+// ~1x the header claimed (#162). Sizing from real cores, and capping at
+// them, is what keeps a "pool" from being a queue with extra memory.
+//
+// Capped at 3 above that: beyond three concurrent chunks the player has
+// nothing useful to do with the extra capacity (it reads ahead a bounded
+// number of chunks), so more workers would only cost memory.
+const MAX_POOL_SIZE = 3;
+/** Exported so the benchmark can report the pool it actually measured --
+ * the numbers are meaningless without it (#162). */
+export const POOL_SIZE =
+  Number(process.env.TTS_POOL_SIZE) || Math.max(1, Math.min(MAX_POOL_SIZE, availableParallelism()));
 
 // Dev runs this file as TypeScript straight from src/ via tsx (same
 // pattern as dev-db.ts forking migrate-pglite.ts through tsx/cli, for the
@@ -127,9 +153,20 @@ function pump(): void {
 }
 
 function spawnWorker(): PoolWorker {
+  // TTS_POOL_SIZE is passed down explicitly rather than relied on being set
+  // in the environment: the pool's size is now derived from core count when
+  // the variable is absent, and the worker divides cores by that same number
+  // to size its ONNX thread pool. If it inherited an unset variable it would
+  // fall back to a different default and oversubscribe again (#162).
+  const env = { ...process.env, TTS_POOL_SIZE: String(POOL_SIZE) };
+  const forkOptions: import("node:child_process").ForkOptions = {
+    serialization: "advanced",
+    stdio: ["ignore", "inherit", "inherit", "ipc"],
+    env,
+  };
   const proc = isDev
-    ? fork(require.resolve("tsx/cli"), [workerEntry], { serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"] })
-    : fork(workerEntry, { serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"] });
+    ? fork(require.resolve("tsx/cli"), [workerEntry], forkOptions)
+    : fork(workerEntry, forkOptions);
 
   let settleReady: (result: { ok: boolean; error?: string }) => void = () => {};
   const worker: PoolWorker = {

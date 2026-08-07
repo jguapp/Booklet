@@ -45,9 +45,19 @@ const TtsPlayerContext = createContext<TtsPlayerContextValue | null>(null);
 
 /**
  * How many chunks past the first to have the server generate into its cache
- * when an article is opened (see prewarmFirstChunk). Two, because the server
- * pool runs three workers: the first chunk's real fetch plus these two fill
- * it exactly once, so all three finish in roughly the wall-clock time of one.
+ * when an article is opened (see prewarmFirstChunk).
+ *
+ * This used to be justified by "the pool runs three workers, so all three
+ * finish in roughly the wall-clock time of one" -- which turned out to be
+ * false on a small host, where three concurrent generations measured 2.86x a
+ * single one rather than ~1x (#162). Warming was not free; it was competing.
+ *
+ * Two is still the right number, but for a different reason: speculative
+ * work goes on the pool's low-priority queue tier, which is only ever
+ * drained when nothing is actually waiting. That makes warming safe even
+ * when the pool is effectively serial -- it can consume idle capacity and
+ * nothing else -- so the bound is about how much speculative work is worth
+ * doing, not about how much the pool can absorb for free.
  *
  * These cover the window between "chunk one finishes playing" and "the play
  * loop's own prefetch has caught up" -- without them a listener gets a fast
@@ -233,11 +243,9 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       // latency benefit, and waste it entirely for a reader who opens an
       // article and never presses play.
       //
-      // Bounded at two because the pool runs three workers: chunk one (the
-      // real fetch above) plus these two saturate it exactly once, so all
-      // three generate in about the wall-clock time of a single one.
-      // Warming more would queue behind them and delay the only chunk whose
-      // timing the listener can actually perceive.
+      // Bounded at two -- see PREWARM_SERVER_CHUNKS for why that bound is
+      // about how much speculation is worth doing rather than, as it once
+      // claimed, about the pool absorbing three generations for free.
       warmKokoroChunks(chunks.slice(1, 1 + PREWARM_SERVER_CHUNKS), reader.ttsVoice, reader.ttsRate, controller.signal);
 
       prewarmedRef.current = {

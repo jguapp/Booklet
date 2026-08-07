@@ -9,7 +9,8 @@
 //   pnpm --filter @booklet/api exec tsx scripts/bench-tts-ttfa.ts
 // or via CI's bench-tts-ttfa job, which has the real network access this
 // sandbox doesn't (Kokoro's weights are fetched from Hugging Face).
-import { generateSpeechPooled } from "../src/services/tts-pool.js";
+import { availableParallelism } from "node:os";
+import { generateSpeechPooled, POOL_SIZE } from "../src/services/tts-pool.js";
 import { closeRedis, isRedisConfigured } from "../src/services/redis-client.js";
 
 const VOICE = "af_heart";
@@ -28,21 +29,28 @@ const CONCURRENT_TEXTS = [
   "The old clock tower struck seven, and the market square slowly filled.",
 ];
 
-async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<{ result: T; ms: number }> {
   const start = performance.now();
   const result = await fn();
-  console.log(`${label}: ${(performance.now() - start).toFixed(0)}ms`);
-  return result;
+  const ms = performance.now() - start;
+  console.log(`${label}: ${ms.toFixed(0)}ms`);
+  return { result, ms };
 }
 
 async function main(): Promise<void> {
-  console.log(`--- TTS TTFA benchmark (voice=${VOICE}, speed=${SPEED}) ---\n`);
+  // The host matters more than anything else here: the pool's parallelism is
+  // bounded by real cores, and the same numbers on a 2-vCPU runner and an
+  // 8-core laptop mean completely different things. Reporting it is what
+  // stopped #162 being invisible -- a "3 concurrent ~= 1x" claim measured on
+  // a big machine had been sitting in the pool's own header as fact.
+  console.log(`--- TTS TTFA benchmark (voice=${VOICE}, speed=${SPEED}) ---`);
+  console.log(`host: ${availableParallelism()} logical cores, pool size ${POOL_SIZE}\n`);
 
   // 1. Real cold start: the pool hasn't been touched yet, so this pays for
   // spawning the 3 worker processes and loading a Kokoro model in each --
   // mirrors a request landing before warmTtsPool() (see index.ts) has
   // finished, or a server that skipped startup warming entirely.
-  const cold = await timed("1. Cold (pool not yet started)", () =>
+  const { result: cold } = await timed("1. Cold (pool not yet started)", () =>
     generateSpeechPooled(FIRST_CHUNK_TEXT, VOICE, SPEED),
   );
   if (cold.length === 0) throw new Error("cold generation returned an empty buffer");
@@ -50,7 +58,9 @@ async function main(): Promise<void> {
   // 2. Warm pool (all 3 workers now loaded from #1), distinct uncached
   // text -- the realistic "server already warm, no prewarm head start"
   // case: a first chunk of a *different* article than #1 generated.
-  await timed("2. Warm pool, uncached chunk", () => generateSpeechPooled(SECOND_CHUNK_TEXT, VOICE, SPEED));
+  const { ms: singleMs } = await timed("2. Warm pool, uncached chunk", () =>
+    generateSpeechPooled(SECOND_CHUNK_TEXT, VOICE, SPEED),
+  );
 
   // 3. Cache hit -- rereading the same text (see tts-cache.ts).
   await timed("3. Cache hit (repeat of #2's text)", () => generateSpeechPooled(SECOND_CHUNK_TEXT, VOICE, SPEED));
@@ -58,8 +68,16 @@ async function main(): Promise<void> {
   // 4. 3 concurrent, distinct, previously-unseen chunks -- tts-pool.ts's
   // own comment claims ~1x a single generation's wall-clock time for all
   // three (real parallelism), not 3x (serialized).
-  await timed("4. 3 concurrent uncached chunks (pool of 3)", () =>
+  const { ms: concurrentMs } = await timed(`4. ${CONCURRENT_TEXTS.length} concurrent uncached chunks (pool of ${POOL_SIZE})`, () =>
     Promise.all(CONCURRENT_TEXTS.map((text) => generateSpeechPooled(text, VOICE, SPEED))),
+  );
+  // The number #162 is actually about. 1.0 would be perfect parallelism;
+  // CONCURRENT_TEXTS.length would be fully serialized. Printed as a ratio
+  // rather than left for a reader to divide, because the absolute figures
+  // move with the host and the ratio is the thing that regresses.
+  console.log(
+    `   -> ${(concurrentMs / singleMs).toFixed(2)}x a single generation ` +
+      `(1.00x = perfect parallelism, ${CONCURRENT_TEXTS.length.toFixed(2)}x = fully serialized)`,
   );
 
   // 5. Prewarm effectiveness -- simulate reader-view.tsx's

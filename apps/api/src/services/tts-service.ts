@@ -17,7 +17,9 @@
  * (Worker-based pipelining, quantization, threading) and none of it closed
  * the gap.
  */
+import { availableParallelism } from "node:os";
 import { KokoroTTS } from "kokoro-js";
+import { AutoTokenizer, StyleTextToSpeech2Model } from "@huggingface/transformers";
 import { toPcm16Wav } from "./wav-pcm16.js";
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
@@ -56,14 +58,51 @@ async function withOrtNoiseSuppressed<T>(fn: () => Promise<T>): Promise<T> {
 // concern, not something a request should ever wait on).
 let ttsPromise: Promise<KokoroTTS> | null = null;
 
+/**
+ * How many threads this worker's ONNX session may use for a single operator.
+ *
+ * Left to ORT's default, each session sizes its intra-op pool to the whole
+ * machine -- so N pool workers each try to use every core, and on a small
+ * host that is contention, not concurrency. Measured on a 2-vCPU CI runner
+ * with three unbounded workers: three concurrent generations took 2.86x a
+ * single one (18725ms vs 6542ms), i.e. very nearly fully serialized, against
+ * a pool header that claimed ~1x. See #162.
+ *
+ * Dividing the cores among the workers is what makes the pool's processes
+ * actually run alongside each other instead of fighting. TTS_POOL_SIZE is
+ * read here rather than imported to keep this module free of a dependency on
+ * the pool that forks it -- the worker process is started by tts-pool.ts and
+ * inherits its environment.
+ */
+function intraOpThreads(): number {
+  const explicit = Number(process.env.TTS_INTRA_OP_THREADS);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.floor(explicit);
+
+  const poolSize = Math.max(1, Number(process.env.TTS_POOL_SIZE) || 3);
+  const cores = Math.max(1, availableParallelism());
+  // At least 1: on a 2-core host with a pool of 3 the honest answer is one
+  // thread each and a pool larger than the machine, which tts-pool.ts's own
+  // sizing now avoids -- but this must never produce 0.
+  return Math.max(1, Math.floor(cores / poolSize));
+}
+
 function loadModel(): Promise<KokoroTTS> {
   if (!ttsPromise) {
-    ttsPromise = withOrtNoiseSuppressed(() => KokoroTTS.from_pretrained(MODEL_ID, { dtype: "q8" })).catch(
-      (err: unknown) => {
-        ttsPromise = null; // don't cache a permanent failure -- allow retry on the next call
-        throw err;
-      },
-    );
+    // KokoroTTS.from_pretrained doesn't forward session_options, so the model
+    // and tokenizer are constructed directly and handed to the constructor --
+    // the same thing from_pretrained does internally, just with the ORT
+    // session actually configured.
+    ttsPromise = withOrtNoiseSuppressed(async () => {
+      const session_options = { intraOpNumThreads: intraOpThreads(), interOpNumThreads: 1 };
+      const [model, tokenizer] = await Promise.all([
+        StyleTextToSpeech2Model.from_pretrained(MODEL_ID, { dtype: "q8", session_options }),
+        AutoTokenizer.from_pretrained(MODEL_ID),
+      ]);
+      return new KokoroTTS(model, tokenizer);
+    }).catch((err: unknown) => {
+      ttsPromise = null; // don't cache a permanent failure -- allow retry on the next call
+      throw err;
+    });
   }
   return ttsPromise;
 }
