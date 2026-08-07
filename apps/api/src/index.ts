@@ -1,4 +1,5 @@
 import { buildApp } from "./app.js";
+import { initTelemetry, shutdownTelemetry } from "./lib/telemetry.js";
 import { warmTtsPool } from "./services/tts-pool.js";
 
 // .env loading happens via the "dev"/"start" scripts' own --env-file-if-
@@ -16,6 +17,14 @@ import { warmTtsPool } from "./services/tts-pool.js";
 // the process even begins evaluating module code at all, which is the
 // only place in this pipeline that's actually early enough.
 
+// Before anything serves a request, so the first one is already traced.
+// Unlike auto-instrumentation this has no "must run before the instrumented
+// module is imported" constraint -- every span in this app is created
+// explicitly by our own code (see lib/telemetry.ts for why it's manual), and
+// the tracer those call sites resolve is looked up per call, not captured at
+// import time.
+initTelemetry();
+
 const app = await buildApp();
 const port = Number(process.env.PORT ?? 4000);
 
@@ -32,3 +41,19 @@ app.listen({ port, host: "0.0.0.0" }).catch((err) => {
 // child processes or trigger a real model download just from building an
 // app instance.
 warmTtsPool();
+
+// Adding any listener for these signals replaces Node's default
+// terminate-on-signal behavior, so once tts-pool.ts registers its own (to
+// kill its worker processes) something has to actually end the process --
+// this is that something, and it is deliberately the entry point rather than
+// whichever module got imported first.
+//
+// Spans are exported in batches (see lib/telemetry.ts), so without flushing
+// first the last few seconds are dropped, which are usually the interesting
+// ones given something just caused the process to exit. The flush is async;
+// exiting is what happens after it, however it goes.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    void shutdownTelemetry().finally(() => process.exit(0));
+  });
+}

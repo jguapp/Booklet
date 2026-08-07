@@ -90,7 +90,7 @@ test("dragging a nav item reorders the sidebar, and the order persists across re
 test("auto-delete moves unread articles older than the selected period to Trash", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
   await expect(page.locator("a[href^='/reader/']").first()).toBeVisible();

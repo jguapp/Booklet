@@ -16,7 +16,7 @@ async function saveUrl(page: import("@playwright/test").Page, url: string) {
 
 test("favoriting an article surfaces it on the Favorites page, unfavoriting removes it", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Readability");
+  await saveUrl(page, "http://127.0.0.1:4321/readability.html");
 
   const card = page.locator("a[href^='/reader/']").first();
   await expect(card).toBeVisible();
@@ -31,7 +31,7 @@ test("favoriting an article surfaces it on the Favorites page, unfavoriting remo
 
 test("deleting an article moves it to Trash, where it can be restored or deleted forever", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Full-text_search");
+  await saveUrl(page, "http://127.0.0.1:4321/article/full-text-search.html");
 
   const card = page.locator("a[href^='/reader/']").first();
   const title = await card.locator("h3").textContent();
@@ -60,7 +60,7 @@ test("deleting an article moves it to Trash, where it can be restored or deleted
 
 test("empty trash clears everything at once, behind a confirm", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Tag_(metadata)");
+  await saveUrl(page, "http://127.0.0.1:4321/tagging.html");
   await page.locator("a[href^='/reader/']").first().getByTitle("Move to trash").click();
 
   await page.goto("/trash");

@@ -13,14 +13,14 @@ import { waitForSaveModalToClose } from "./helpers";
 test("saving a tracking-param variant of an already-saved URL is rejected as a duplicate", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 
   await page.getByRole("button", { name: /save article/i }).click();
   await page
     .getByPlaceholder(/example\.com/)
-    .fill("https://en.wikipedia.org/wiki/Readability?utm_source=twitter&utm_medium=social");
+    .fill("http://127.0.0.1:4321/readability.html?utm_source=twitter&utm_medium=social");
   await page.getByRole("button", { name: /^save$/i }).click();
 
   await expect(page.getByText(/already saved this article/i)).toBeVisible({ timeout: 10_000 });

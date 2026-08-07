@@ -69,7 +69,7 @@ test("a saved collection shows up and navigates to it", async ({ page }) => {
 test("free text falls through to a live article search", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await page.getByRole("heading", { name: /save an article/i }).waitFor({ state: "hidden", timeout: 20_000 });
 

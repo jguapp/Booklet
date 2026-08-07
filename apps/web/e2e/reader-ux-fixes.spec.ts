@@ -22,7 +22,7 @@ test("the highlight popover appears right above the selected text, not offset by
   page,
 }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Readability");
+  await saveUrl(page, "http://127.0.0.1:4321/readability.html");
 
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);
@@ -58,7 +58,7 @@ test("the highlight popover appears right above the selected text, not offset by
 
 test("reaching the end of an article automatically archives it", async ({ page }) => {
   await page.goto("/library");
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Tag_(metadata)"); // long article -- actually scrollable
+  await saveUrl(page, "http://127.0.0.1:4321/tagging.html"); // long article -- actually scrollable
 
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);
