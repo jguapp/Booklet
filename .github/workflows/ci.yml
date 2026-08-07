@@ -4,6 +4,29 @@ on:
   push:
     branches: [main]
   pull_request:
+    # A commit that only touches prose costs the same ~22 minutes of runner
+    # time as one that touches every app, and buys nothing -- there is no
+    # code in it to typecheck, bundle, or drive a browser against. Note this
+    # means a docs-only PR reports *no* checks at all; if required status
+    # checks are ever turned on for this repo, this needs to become a
+    # no-op job rather than a skipped workflow, or such a PR can never merge.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+  # So the benchmark (and a full run) can still be asked for by hand on a
+  # branch, now that bench-tts-ttfa no longer runs on every PR push.
+  workflow_dispatch:
+
+# Superseded runs are cancelled instead of racing the new one to the finish.
+# Pushing five times in an afternoon used to mean five concurrent full runs,
+# four of which nobody would ever read -- at ~22 minutes of billable runner
+# time each, that is where an Actions allowance actually goes. The final
+# push on a branch still gets a complete run; only the ones already obsolete
+# are dropped.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   # Dummy value -- signing access tokens is the only thing that reads this
@@ -35,8 +58,18 @@ jobs:
       - run: pnpm --filter @booklet/web lint
       - run: pnpm --filter @booklet/extension exec tsc --noEmit
       - run: pnpm --filter @booklet/mobile exec tsc --noEmit
+      # The production bundle, without waiting for a Docker layer to say so.
+      # tsc resolves imports through node_modules and never asks who *declared*
+      # a package, so importing a transitive dependency typechecks cleanly and
+      # then fails in esbuild -- which is exactly how a direct
+      # @huggingface/transformers import broke docker-build with "No loader is
+      # configured for '.node' files" while every other job stayed green.
+      # docker-build still covers the full build+run path; this just moves the
+      # cheapest half of that signal ~2 minutes earlier.
+      - run: pnpm --filter @booklet/api exec node scripts/build.mjs
 
-  test-shared:
+  # Unit tests that need nothing but Node: @booklet/shared and apps/web.
+  test-unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +80,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @booklet/shared test
+      # apps/web's unit tests run here rather than in their own job: they need
+      # no database, no browser and no built artifacts, and the whole suite is
+      # ~2s -- a dedicated job would spend more time on checkout and install
+      # than on the tests. See apps/web/vitest.config.ts for what they cover
+      # and why the runner exists at all (#165).
+      - run: pnpm --filter @booklet/shared build
+      - run: pnpm --filter @booklet/web test
 
   test-api:
     runs-on: ubuntu-latest
@@ -83,12 +123,6 @@ jobs:
       - run: pnpm --filter @booklet/api test
 
   test-web-e2e:
-    # Temporarily paused -- PR-merge turnaround was too slow (up to ~15min,
-    # dominated by Kokoro TTS's real, multi-minute model generation calls in
-    # kokoro-tts.spec.ts) while iterating on in-progress features. Test
-    # files are untouched; re-enable by deleting this line once ready to
-    # bring full e2e coverage back into the merge gate.
-    if: false
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -108,6 +142,18 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/booklet?schema=public
       WEB_ORIGIN: http://localhost:3000
       NEXT_PUBLIC_API_URL: http://localhost:4000
+      # Lets the API fetch the e2e fixture server on 127.0.0.1 instead of
+      # every article-saving spec hitting the real internet. Guarded in
+      # extraction-service.ts so it is ignored outright when
+      # NODE_ENV=production -- the SSRF protection it relaxes is not
+      # overridable where it matters.
+      EXTRACTION_ALLOW_PRIVATE_ADDRESSES: "true"
+      # The whole suite hits the API from one address in a couple of minutes,
+      # which is precisely the pattern the default limit is meant to catch.
+      # Without this it trips partway through and fails a spec that has
+      # nothing wrong with it.
+      GLOBAL_RATE_LIMIT_MAX: "100000"
+      TTS_RATE_LIMIT_MAX: "100000"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -118,16 +164,74 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @booklet/api exec prisma migrate deploy
       - run: pnpm --filter @booklet/web exec playwright install --with-deps chromium
+      # Same reason as the bench job: the API's three TTS workers all
+      # cold-miss the model cache at once and race writing it, which
+      # produced a corrupt model and left read-aloud non-functional for the
+      # whole run (tts-player.spec.ts timing out at 60s waiting for
+      # playback). Fetch it once, single-process, first. See #161 for the
+      # durable fix.
+      - run: node apps/api/scripts/prefetch-tts-model.mjs
       - run: pnpm --filter @booklet/api dev &
       - run: pnpm --filter @booklet/web dev &
       - name: Wait for API and web to be ready
         run: |
           npx wait-on http://localhost:4000/api/health http://localhost:3000 --timeout 60000
-      # Needs real network access -- it saves a real Wikipedia URL through
-      # the actual extraction service rather than a mocked one. If outbound
-      # network is ever restricted for this runner, this job needs a stub
-      # extraction endpoint instead of skipping coverage silently.
+      # Generate one small chunk before the suite starts, so the first TTS
+      # spec doesn't pay the pool's cold start inside its own assertion
+      # window. /api/health goes green while the pool is still spawning
+      # workers and loading a model into each, and on a 2-vCPU runner
+      # already busy with Next and Postgres that first generation can
+      # exceed the 60s the spec allows -- which is exactly how it failed.
+      # The second TTS spec passed in the same run, warm, which is what
+      # identified this as cold start rather than a broken pipeline.
+      # `|| true`: this is a warm-up, not a gate. If it fails the specs
+      # will report it far more legibly than a bare curl exit code.
+      - name: Warm the TTS pool
+        run: |
+          curl -sS -X POST http://localhost:4000/api/tts \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"Warming up.","voice":"af_heart","speed":1}' \
+            --max-time 180 -o /dev/null -w 'warm-up HTTP %{http_code} in %{time_total}s\n' || true
+      # Playwright starts the article fixture server itself (see
+      # playwright.config.ts's webServer). One spec, save-real-url.spec.ts,
+      # still fetches a genuine public URL so real-world extraction stays
+      # covered -- if outbound network is ever restricted for this runner,
+      # exclude it with `--grep-invert @live` rather than dropping the whole
+      # job and losing everything else with it.
       - run: pnpm --filter @booklet/web test:e2e
+
+  bench-tts-ttfa:
+    # Measures real Kokoro TTFA (cold pool, warm/uncached, cache hit,
+    # concurrent chunks, prewarm head-start) -- see
+    # apps/api/scripts/bench-tts-ttfa.ts. Needs real network access to fetch
+    # Kokoro's weights from Hugging Face, and no Postgres -- the TTS
+    # pipeline itself never touches the database.
+    #
+    # Not run on pull requests. It is a measurement, not a gate: it has no
+    # pass/fail criteria, so a PR author gains nothing from it blocking or
+    # from reading it on every push, while it costs a runner every time.
+    # It still runs on main (where the trend line is what matters) and can
+    # be asked for on any branch via workflow_dispatch -- which is exactly
+    # how #162's before/after numbers were taken.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Fetch the model once, in a single process, before the pool starts.
+      # Without this the benchmark's three worker processes all cold-miss the
+      # Hugging Face cache simultaneously and race writing the same file --
+      # observed producing a truncated model and a "Protobuf parsing failed"
+      # crash, not merely wasted bandwidth. The Docker image avoids this by
+      # baking the weights in at build time (see apps/api/Dockerfile); this
+      # job runs tsx directly, so it needs the equivalent step.
+      - run: node apps/api/scripts/prefetch-tts-model.mjs
+      - run: pnpm --filter @booklet/api exec tsx scripts/bench-tts-ttfa.ts
 
   docker-build:
     runs-on: ubuntu-latest

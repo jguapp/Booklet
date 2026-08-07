@@ -19,7 +19,7 @@ test("the item count reflects the current tab and updates as articles move betwe
   await page.getByRole("button", { name: "All", exact: true }).click();
   await expect(page.getByText("0 articles")).toBeVisible();
 
-  await saveUrl(page, "https://en.wikipedia.org/wiki/Readability");
+  await saveUrl(page, "http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: "All", exact: true }).click();
   await expect(page.getByText("1 article", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Unread", exact: true }).click();

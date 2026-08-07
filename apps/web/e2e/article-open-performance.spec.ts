@@ -13,7 +13,7 @@ import { waitForSaveModalToClose } from "./helpers";
  * this is testing.
  */
 
-const TEST_ARTICLE_URL = "https://en.wikipedia.org/wiki/Tag_(metadata)";
+const TEST_ARTICLE_URL = "http://127.0.0.1:4321/tagging.html";
 const HIGHLIGHT_COUNT = 250;
 // Generous relative to the fix's own benchmark (single-digit ms for the
 // pure DOM-walk portion at this scale) -- this just needs to catch a real

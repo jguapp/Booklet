@@ -8,10 +8,12 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
+    "test": "vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "@booklet/shared": "workspace:*",
+    "@datadog/browser-rum": "^7.7.0",
     "@sentry/browser": "^10.68.0",
     "epubjs": "^0.3.93",
     "jszip": "^3.10.1",
@@ -23,12 +25,18 @@
   "devDependencies": {
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.5",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^29.1.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

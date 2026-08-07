@@ -25,7 +25,7 @@ test("finishing an article updates streak, completion rate, and time spent", asy
 
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Tag_(metadata)"); // long -- actually scrollable
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/tagging.html"); // long -- actually scrollable
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 
@@ -71,8 +71,8 @@ test("Avg. per article shows a clean duration when the division doesn't come out
   // this is what actually exercises the avg-per-article division (dividing
   // by 1, as the test above does, is always a no-op and can't reproduce it).
   const articles = [
-    { url: "https://en.wikipedia.org/wiki/Tag_(metadata)", waitMs: 2_200 },
-    { url: "https://en.wikipedia.org/wiki/Metadata", waitMs: 3_900 },
+    { url: "http://127.0.0.1:4321/tagging.html", waitMs: 2_200 },
+    { url: "http://127.0.0.1:4321/article/metadata.html", waitMs: 3_900 },
   ];
 
   for (const { url, waitMs } of articles) {

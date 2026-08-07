@@ -31,7 +31,7 @@ test("importing a Pocket CSV export saves each URL for real", async ({ page }) =
 test("exporting produces a zip with one Markdown file per article, including its highlights", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 
@@ -51,13 +51,14 @@ test("exporting produces a zip with one Markdown file per article, including its
 
   const content = await zip.files[files[0]].async("string");
   expect(content).toContain("Readability");
-  expect(content).toContain("en.wikipedia.org/wiki/Readability");
+  // The exported markdown should carry the article's source URL through.
+  expect(content).toContain("127.0.0.1:4321/readability.html");
 });
 
 test("exporting to Anki produces a tab-separated file Anki's importer can read", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 

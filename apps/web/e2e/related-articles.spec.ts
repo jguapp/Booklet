@@ -32,8 +32,8 @@ async function saveAndTag(page: import("@playwright/test").Page, url: string, ta
 }
 
 test("finishing an article surfaces a tag-related one under 'More from your library'", async ({ page }) => {
-  await saveAndTag(page, "https://en.wikipedia.org/wiki/Readability", "shared-tag-test");
-  const secondId = await saveAndTag(page, "https://en.wikipedia.org/wiki/Tag_(metadata)", "shared-tag-test");
+  await saveAndTag(page, "http://127.0.0.1:4321/readability.html", "shared-tag-test");
+  const secondId = await saveAndTag(page, "http://127.0.0.1:4321/tagging.html", "shared-tag-test");
 
   // Re-open the first article (still UNREAD/READING) and read it to the end
   // -- go via Library rather than browser back, since back could resume a

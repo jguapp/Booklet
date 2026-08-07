@@ -252,11 +252,14 @@ test-web-e2e:
         -d '{"text":"Warming up.","voice":"af_heart","speed":1}' \
         --max-time 180 -o /dev/null -w 'warm-up HTTP %{http_code} in %{time_total}s\n' || true
     # Playwright starts the article fixture server itself (see
-    # playwright.config.ts's webServer). One spec, save-real-url.spec.ts,
-    # still fetches a genuine public URL so real-world extraction stays
-    # covered -- if outbound network is ever restricted for this runner,
-    # exclude it with `--grep-invert @live` rather than dropping the whole
-    # job and losing everything else with it.
+    # playwright.config.ts's webServer). Seven tests still reach the real
+    # internet on purpose -- real-world extraction, xkcd's RSS feed,
+    # dictionaryapi.dev and the Kokoro weights -- and every one of them is
+    # tagged @live. If outbound network is ever restricted for this runner,
+    # add `--grep-invert @live` here rather than dropping the whole job and
+    # losing the other 110 tests with it. That exclusion is only trustworthy
+    # because the tagging was made complete in #167; before that it named a
+    # single spec while six others quietly needed egress too.
     - pnpm --filter @booklet/web test:e2e
   artifacts:
     when: always

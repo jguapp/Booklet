@@ -26,7 +26,7 @@ test("enabling the toggle with a low limit asks before saving once at/over it", 
   // First save: 0 unread so far, under the limit of 1 -- goes straight through.
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { waitForSaveModalToClose } from "./helpers";
+import { selectFirstTextLayerSpan, waitForSaveModalToClose } from "./helpers";
 
 /**
  * highlightCitation() (lib/highlights/citation.ts) -- surfaces the page
@@ -14,21 +14,6 @@ import { waitForSaveModalToClose } from "./helpers";
 
 const SAMPLE_PDF = path.join(process.cwd(), "e2e", "fixtures", "sample.pdf");
 const LONG_CHAPTER_EPUB = path.join(process.cwd(), "e2e", "fixtures", "long-chapter.epub");
-
-async function selectFirstTextLayerSpan(page: import("@playwright/test").Page) {
-  return page.evaluate(() => {
-    const layer = document.querySelector('[class*="textLayer"]');
-    const span = layer?.querySelector("span");
-    if (!span?.firstChild) throw new Error("no text layer span to select");
-    const range = document.createRange();
-    range.setStart(span.firstChild, 0);
-    range.setEnd(span.firstChild, span.firstChild.textContent!.length);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    layer!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  });
-}
 
 test("a PDF highlight's citation shows the real page number", async ({ page }) => {
   await page.goto("/library");
@@ -86,7 +71,7 @@ test("an EPUB highlight's citation shows a section reference", async ({ page }) 
 test("an HTML highlight's citation shows which paragraph it's in, not just paragraph 1", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Tag_(metadata)"); // long -- multiple real paragraphs
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/long-article.html"); // ~40 paragraphs
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 
