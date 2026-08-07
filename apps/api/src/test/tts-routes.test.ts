@@ -1,6 +1,16 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildApp } from "../app.js";
+
+// Stubbed so the success-path cases below never load the ~90MB Kokoro model.
+// The header assertions are about how the route reports timings, not about
+// the audio, so real generation would only make them slow and flaky.
+const generateSpeechWithTimings = vi.fn();
+vi.mock("../services/tts-pool.js", () => ({
+  generateSpeechWithTimings: (...args: unknown[]) => generateSpeechWithTimings(...args),
+  generateSpeechPooled: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+}));
+
+const { buildApp } = await import("../app.js");
 
 /**
  * Validation-only coverage for the two TTS routes. Every case here is
@@ -48,6 +58,70 @@ describe("TTS routes", () => {
         expect(res.statusCode).toBe(400);
         expect(res.json().error).toBe("invalid_speed");
       }
+    });
+
+    // Server-Timing is how a slow chunk gets attributed in the field --
+    // queueing, generation, or neither -- from the browser, with no
+    // server-side log access. Worth asserting because it is silent when
+    // wrong: a malformed value, or a missing Timing-Allow-Origin, both
+    // surface as an empty serverTiming array rather than any kind of error.
+    it("reports where the time went via Server-Timing", async () => {
+      generateSpeechWithTimings.mockResolvedValueOnce({
+        buffer: Buffer.from("RIFF"),
+        cacheTier: "miss",
+        queueMs: 12,
+        generateMs: 3400,
+      });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/tts",
+        payload: { text: "hello", voice: "af_heart" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["server-timing"]).toBe('cache;desc="miss", queue;dur=12, gen;dur=3400');
+    });
+
+    it("reports a cache hit as zero queue and generation time", async () => {
+      generateSpeechWithTimings.mockResolvedValueOnce({
+        buffer: Buffer.from("RIFF"),
+        cacheTier: "l1",
+        queueMs: 0,
+        generateMs: 0,
+      });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/tts",
+        payload: { text: "hello", voice: "af_heart" },
+      });
+      expect(res.headers["server-timing"]).toBe('cache;desc="l1", queue;dur=0, gen;dur=0');
+    });
+
+    // Without this header the browser hides serverTiming entirely on a
+    // cross-origin response, which is every real request here -- the web app
+    // and the API are always different origins.
+    it("allows its own front end to read those timings, and nobody else", async () => {
+      generateSpeechWithTimings.mockResolvedValue({
+        buffer: Buffer.from("RIFF"),
+        cacheTier: "l1",
+        queueMs: 0,
+        generateMs: 0,
+      });
+
+      const allowed = await app.inject({
+        method: "POST",
+        url: "/api/tts",
+        headers: { origin: "http://localhost:3000" },
+        payload: { text: "hello", voice: "af_heart" },
+      });
+      expect(allowed.headers["timing-allow-origin"]).toBe("http://localhost:3000");
+
+      const stranger = await app.inject({
+        method: "POST",
+        url: "/api/tts",
+        headers: { origin: "https://example.com" },
+        payload: { text: "hello", voice: "af_heart" },
+      });
+      expect(stranger.headers["timing-allow-origin"]).toBeUndefined();
     });
   });
 

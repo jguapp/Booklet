@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { KOKORO_VOICE_IDS } from "@booklet/shared";
-import { generateSpeechPooled } from "../services/tts-pool.js";
+import { isAllowedOrigin } from "../lib/cors.js";
+import { generateSpeechPooled, generateSpeechWithTimings } from "../services/tts-pool.js";
 
 /**
  * Public (no auth) -- same reasoning as /api/extract: TTS doesn't persist
@@ -95,14 +96,33 @@ export async function registerTtsRoute(app: FastifyInstance): Promise<void> {
     if (!checked.ok) return reply.code(400).send({ error: checked.error, message: checked.message });
 
     try {
-      const wav = await generateSpeechPooled(text, checked.voice, checked.speed);
+      const result = await generateSpeechWithTimings(text, checked.voice, checked.speed);
+
+      // Where the server's share of TTFA actually went, readable in the
+      // browser via PerformanceResourceTiming#serverTiming -- so a slow chunk
+      // in the field can be attributed to queueing, generation, or neither (a
+      // cache hit) without needing server-side log access.
+      reply.header(
+        "Server-Timing",
+        [`cache;desc="${result.cacheTier}"`, `queue;dur=${result.queueMs}`, `gen;dur=${result.generateMs}`].join(", "),
+      );
+      // Without this the browser exposes serverTiming as an empty array on a
+      // cross-origin response, making the header above pure overhead -- and
+      // the API is always a different origin from the web app here. Echoes
+      // the caller's own origin, gated by the same check CORS uses, rather
+      // than "*": "*" would expose these timings to any site that fetched the
+      // route, and a bare WEB_ORIGIN would miss both dev (any localhost port)
+      // and the browser extension.
+      const origin = request.headers.origin;
+      if (origin && isAllowedOrigin(origin)) reply.header("Timing-Allow-Origin", origin);
+
       // `private, max-age` rather than `no-store`. Browsers don't HTTP-cache a
       // POST either way, so this changes nothing today -- but `no-store`
       // additionally *forbids* a Service Worker from cache.put()ing the
       // response, which would foreclose that option later. `private` keeps it
       // out of any shared/CDN cache, which matters because the response body
       // is derived from whatever the user happens to be reading.
-      return reply.header("Cache-Control", "private, max-age=86400").type("audio/wav").send(wav);
+      return reply.header("Cache-Control", "private, max-age=86400").type("audio/wav").send(result.buffer);
     } catch (err) {
       // Log the real error, return a fixed one: this route is public and
       // unauthenticated, and `err.message` here comes straight from

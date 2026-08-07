@@ -64,6 +64,50 @@ is read for the fallback behavior):
   restart -- it just repopulates as things get read again, not a real cost
   at this app's scale.
 
+## Observability
+
+Error tracking (Sentry) and performance tracing are separate, and both are
+optional. Sentry answers "what broke"; the tracing below answers "what was
+slow", which after a release's worth of read-aloud latency work is the
+question there was previously no way to ask about real users at all.
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (API) -- where to send traces, e.g.
+  `http://localhost:4318` for a local Datadog Agent or OpenTelemetry
+  Collector. Without it, tracing is entirely off: no exporter, no background
+  work, no spans (`apps/api/src/lib/telemetry.ts`). The instrumentation is
+  OpenTelemetry rather than Datadog's own SDK deliberately -- Datadog is a
+  first-class OTLP backend, so pointing this at Grafana/Tempo or Honeycomb
+  later is a change to this variable rather than to any code.
+
+  The spans worth knowing about are on `tts.generate_pooled`:
+  `tts.queue_wait_ms` (waiting for a free worker) and `tts.generate_ms` (the
+  model actually running) are recorded separately, because they mean
+  different things and are fixed in different places -- queue wait means the
+  pool is too small for the load, generation means the model is slow on this
+  hardware. `tts.cache_tier` is `l1` (in-process), `l2` (Redis), or `miss`.
+- `OTEL_SERVICE_NAME` (API, default `booklet-api`) -- the service name traces
+  are grouped under.
+- `NEXT_PUBLIC_DD_RUM_APPLICATION_ID` / `NEXT_PUBLIC_DD_RUM_CLIENT_TOKEN`
+  (web) -- enables Datadog RUM, which is what actually reports real-world
+  time-to-first-audio (`apps/web/src/lib/rum.ts`). Reported as a `tts.ttfa`
+  action tagged with `prewarm_hit`, so warm and cold plays can be read
+  separately rather than averaged into a number that describes neither.
+  Without both set, RUM is off and the SDK is never even downloaded.
+
+  The RUM **client token** is publishable and write-only, which is what makes
+  `NEXT_PUBLIC_` correct for it. A Datadog **API key** is not, and must never
+  be given to the web app. Session replay is explicitly disabled: it would
+  record whatever the reader is reading.
+- `NEXT_PUBLIC_DD_SITE` (web, default `datadoghq.com`) -- set to your
+  Datadog region's site (e.g. `datadoghq.eu`) if it isn't US1.
+
+`/api/tts` also returns a `Server-Timing` header (`cache`, `queue`, `gen`)
+on every successful response, readable in the browser regardless of whether
+any of the above is configured. It carries `Timing-Allow-Origin` for the
+requesting origin, without which a browser hides `Server-Timing` on a
+cross-origin response -- and the API is always a different origin from the
+web app here.
+
 ## Database
 
 ```bash

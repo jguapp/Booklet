@@ -27,17 +27,29 @@ describe("tts-cache (no Redis configured)", () => {
 
   it("round-trips a buffer through the in-memory tier", async () => {
     const { getCachedSpeech, setCachedSpeech } = await freshCache({ REDIS_URL: undefined });
-    expect(await getCachedSpeech("hello", "af_heart", 1)).toBeNull();
+    expect(await getCachedSpeech("hello", "af_heart", 1)).toEqual({ tier: "miss", buffer: null });
     setCachedSpeech("hello", "af_heart", 1, AUDIO(128));
-    expect(await getCachedSpeech("hello", "af_heart", 1)).toEqual(AUDIO(128));
+    expect(await getCachedSpeech("hello", "af_heart", 1)).toEqual({ tier: "l1", buffer: AUDIO(128) });
+  });
+
+  // The tier, not just hit/miss: it is reported as a span attribute and as
+  // the `cache` Server-Timing entry, and "served instantly from this
+  // process" and "served after a Redis round trip" are different answers to
+  // "why was that chunk fast?". With no Redis configured, l2 is unreachable
+  // by construction and every miss must say so rather than claiming a tier.
+  it("reports which tier answered, not merely whether one did", async () => {
+    const { getCachedSpeech, setCachedSpeech } = await freshCache({ REDIS_URL: undefined });
+    expect((await getCachedSpeech("x", "af_heart", 1)).tier).toBe("miss");
+    setCachedSpeech("x", "af_heart", 1, AUDIO(32));
+    expect((await getCachedSpeech("x", "af_heart", 1)).tier).toBe("l1");
   });
 
   it("keys on text, voice and speed independently", async () => {
     const { getCachedSpeech, setCachedSpeech } = await freshCache({ REDIS_URL: undefined });
     setCachedSpeech("hello", "af_heart", 1, AUDIO(16, 1));
-    expect(await getCachedSpeech("hello", "af_heart", 1.5)).toBeNull();
-    expect(await getCachedSpeech("hello", "bm_george", 1)).toBeNull();
-    expect(await getCachedSpeech("goodbye", "af_heart", 1)).toBeNull();
+    expect((await getCachedSpeech("hello", "af_heart", 1.5)).buffer).toBeNull();
+    expect((await getCachedSpeech("hello", "bm_george", 1)).buffer).toBeNull();
+    expect((await getCachedSpeech("goodbye", "af_heart", 1)).buffer).toBeNull();
   });
 
   it("does not let voice/speed/text run together into a colliding key", async () => {
@@ -60,13 +72,13 @@ describe("tts-cache (no Redis configured)", () => {
     setCachedSpeech("b", "v", 1, AUDIO(big, 2));
 
     // Touch "a" so "b" becomes the least-recently-used of the two.
-    expect(await getCachedSpeech("a", "v", 1)).not.toBeNull();
+    expect((await getCachedSpeech("a", "v", 1)).buffer).not.toBeNull();
 
     setCachedSpeech("c", "v", 1, AUDIO(big, 3));
 
-    expect(await getCachedSpeech("c", "v", 1)).not.toBeNull();
-    expect(await getCachedSpeech("a", "v", 1)).not.toBeNull();
-    expect(await getCachedSpeech("b", "v", 1)).toBeNull();
+    expect((await getCachedSpeech("c", "v", 1)).buffer).not.toBeNull();
+    expect((await getCachedSpeech("a", "v", 1)).buffer).not.toBeNull();
+    expect((await getCachedSpeech("b", "v", 1)).buffer).toBeNull();
   });
 
   it("overwrites rather than double-counting a repeated key", async () => {
@@ -78,7 +90,7 @@ describe("tts-cache (no Redis configured)", () => {
     for (let i = 0; i < 5; i++) setCachedSpeech("same", "v", 1, AUDIO(big, 9));
     // If currentBytes accumulated on every write instead of replacing, the
     // eviction loop would have thrown this entry out.
-    expect(await getCachedSpeech("same", "v", 1)).not.toBeNull();
+    expect((await getCachedSpeech("same", "v", 1)).buffer).not.toBeNull();
   });
 
   it("setCachedSpeech stays synchronous so it never delays the response", async () => {
