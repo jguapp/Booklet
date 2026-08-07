@@ -137,6 +137,13 @@ function normalizeArticle(article: Article): Article {
     activeReadingSeconds: article.activeReadingSeconds ?? 0,
     canonicalUrl: article.canonicalUrl ?? null,
     textSource: article.textSource ?? null,
+    // Anything saved before #152 has no listening fields at all. Backfilling
+    // to null rather than leaving them undefined keeps "never listened" a
+    // single representable value -- the resume check tests for null, and an
+    // undefined slipping through would read as a position of NaN downstream.
+    listeningFraction: article.listeningFraction ?? null,
+    listeningUpdatedAt: article.listeningUpdatedAt ?? null,
+    listeningDeviceId: article.listeningDeviceId ?? null,
   };
 }
 

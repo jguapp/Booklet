@@ -47,6 +47,8 @@ const EpubReader = dynamic(() => import("./epub-reader").then((m) => m.EpubReade
 });
 import { TtsControls } from "./tts-controls";
 import { useTtsPlayer } from "@/lib/reader/tts-player-provider";
+import { isKokoroVoice } from "@/lib/reader/kokoro-tts";
+import { TtsResumePrompt } from "./tts-resume-prompt";
 import { TagEditor } from "@/components/library/tag-editor";
 import { SourceIcon } from "@/components/library/source-icon";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
@@ -361,7 +363,8 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const tts = {
     status: ttsIsThisArticle ? ttsPlayer.status : ("idle" as const),
     supported: ttsPlayer.supported,
-    play: () => article && ttsPlayer.play(article.id, article.title ?? "Untitled", readableText),
+    play: (startFraction = 0) =>
+      article && ttsPlayer.play(article.id, article.title ?? "Untitled", readableText, startFraction),
     pause: ttsPlayer.pause,
     resume: ttsPlayer.resume,
     stop: ttsPlayer.stop,
@@ -552,6 +555,19 @@ export function ReaderView({ articleId }: { articleId: string }) {
           {article.readingTimeEstimate ? ` · ${formatReadingTime(article.readingTimeEstimate)}` : ""}
           {isTextRenderable && remainingMinutes !== null ? ` · ${formatMinutesLeft(remainingMinutes)}` : ""}
         </p>
+
+        {/* Offered, not forced (#152) -- renders nothing unless this article
+            has a stored listening position worth returning to. Only for
+            Kokoro voices: the native SpeechSynthesis path speaks the whole
+            text in one call and has no position to resume to. */}
+        {isKokoroVoice(reader.ttsVoice) ? (
+          <TtsResumePrompt
+            listeningFraction={article.listeningFraction}
+            listeningDeviceId={article.listeningDeviceId}
+            readingTimeEstimate={article.readingTimeEstimate}
+            onResume={(fraction) => tts.play(fraction)}
+          />
+        ) : null}
 
         <div className="mb-5 flex items-center justify-between gap-4">
           {/* Each label sizes to its own content instead of a shared
