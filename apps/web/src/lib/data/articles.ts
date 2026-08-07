@@ -140,6 +140,12 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     skippedImageCount: extracted?.skippedImageCount ?? 0,
     progressFraction: 0,
     activeReadingSeconds: 0,
+    // Null, not 0 -- a brand new article has never been listened to, which is
+    // a different thing from "listened to, and paused at the start". Only the
+    // latter is worth offering to resume from.
+    listeningFraction: null,
+    listeningUpdatedAt: null,
+    listeningDeviceId: null,
     tags: [],
     status: "UNREAD",
     savedAt: now,
@@ -198,6 +204,12 @@ export async function saveArticleFromFile(file: File, authenticated: boolean): P
     skippedImageCount: 0, // PDF/EPUB extraction doesn't inline images at all
     progressFraction: 0,
     activeReadingSeconds: 0,
+    // Null, not 0 -- a brand new article has never been listened to, which is
+    // a different thing from "listened to, and paused at the start". Only the
+    // latter is worth offering to resume from.
+    listeningFraction: null,
+    listeningUpdatedAt: null,
+    listeningDeviceId: null,
     tags: [],
     status: "UNREAD",
     savedAt: now,
@@ -254,6 +266,12 @@ export async function getOrCreateBookArticle(
     skippedImageCount: 0,
     progressFraction: 0,
     activeReadingSeconds: 0,
+    // Null, not 0 -- a brand new article has never been listened to, which is
+    // a different thing from "listened to, and paused at the start". Only the
+    // latter is worth offering to resume from.
+    listeningFraction: null,
+    listeningUpdatedAt: null,
+    listeningDeviceId: null,
     tags: [],
     status: "UNREAD",
     savedAt: now,
@@ -312,6 +330,46 @@ export async function updateArticleProgress(
     progressFraction,
     activeReadingSeconds: article.activeReadingSeconds + activeReadingSecondsDelta,
     updatedAt: new Date().toISOString(),
+  };
+  await localArticles.put(updated);
+  return updated;
+}
+
+/**
+ * Persists the read-aloud position (#152), the listening sibling of
+ * updateArticleProgress above and deliberately shaped the same way.
+ *
+ * Called on the player's periodic flush, not on every `timeupdate` -- a chunk
+ * fires those several times a second, and a network request per tick would
+ * cost more than the feature is worth.
+ *
+ * Last-write-wins. Two devices playing one article simultaneously is rare, and
+ * there's no reconciliation of two positions that is more correct than "the
+ * most recent one" -- see UpdateArticleRequest.
+ */
+export async function updateArticleListeningPosition(
+  article: Article,
+  listeningFraction: number,
+  deviceId: string,
+  authenticated: boolean,
+): Promise<Article> {
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ listeningFraction, listeningDeviceId: deviceId }),
+    });
+  }
+  // Local mode still records it: the position survives a reload on this
+  // device, which is most of the value even with nothing to sync to. The
+  // device id is stored too, so the resume prompt's "on another device" check
+  // is one code path rather than two.
+  const now = new Date().toISOString();
+  const updated: Article = {
+    ...article,
+    listeningFraction,
+    listeningUpdatedAt: now,
+    listeningDeviceId: deviceId,
+    updatedAt: now,
   };
   await localArticles.put(updated);
   return updated;

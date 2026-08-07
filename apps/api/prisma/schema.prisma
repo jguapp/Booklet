@@ -272,6 +272,28 @@ model Article {
   // anything that isn't an HTML save, or where nothing was skipped.
   skippedImageCount   Int   @default(0)
   progressFraction    Float @default(0) // 0.0-1.0, normalized regardless of sourceType (page/total, CFI/total, or scroll position)
+
+  // Read-aloud position, the listening sibling of progressFraction (#152).
+  //
+  // A fraction rather than a chunk index, deliberately. Chunk boundaries are a
+  // function of FIRST_CHUNK_MAX_CHARS/MAX_CHUNK_CHARS, which are latency tuning
+  // knobs that have already moved once (200 -> 140, see kokoro-tts.ts) -- an
+  // index stored under one chunking silently points at different audio under
+  // the next, and re-extracting an article changes the text underneath it too.
+  // A fraction over the article's text survives both, and matches how
+  // progressFraction already normalizes across wildly different source types.
+  //
+  // Nullable, unlike progressFraction: "never listened" has to be
+  // distinguishable from "listened, at the very start", or the resume prompt
+  // fires on every article nobody has ever played.
+  listeningFraction   Float?
+  listeningUpdatedAt  DateTime?
+  // Which device wrote the position above. The resume prompt says "last played
+  // on another device", and that claim needs somewhere to come from -- without
+  // this, the tab that just wrote the position would offer to resume from
+  // itself. Opaque client-generated id (see lib/reader/device-id.ts); it
+  // identifies a browser, not a person, and is never shown to the user.
+  listeningDeviceId   String?
   // Actual active reading time, seconds -- only accrues while the reader tab
   // is visible (reader-view.tsx). Written as an atomic increment (a delta
   // since the last flush), not an overwrite, same periodic timer as
