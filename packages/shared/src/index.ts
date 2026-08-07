@@ -22,3 +22,4 @@ export * from "./kindle-clippings";
 export * from "./highlight-colors";
 export * from "./tts-voices";
 export * from "./tts-chunking";
+export * from "./semantic-search";
