@@ -1741,15 +1741,34 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
         <h3 id="feat-search">Search</h3>
         <p>
-          Plain, case-insensitive <code>contains</code> matching across
-          title/excerpt/author/site/body-text/tags — deliberately not
-          Postgres <code>tsvector</code>/GIN full-text search, so signed-in
-          and local/anonymous mode behave identically (IndexedDB has no
-          full-text index at all to match against). This is a real,
-          consciously-accepted tradeoff for consistency over raw search
-          quality, revisitable if it stops being true at the scale this
-          project actually operates at (one person's library, not a
-          multi-tenant search product).
+          Real ranked full-text search, in both modes. Signed-in mode matches
+          against a weighted, generated <code>tsvector</code> column with a
+          GIN index — <code>ts_rank</code> orders results, so a title hit
+          outranks a passing mention in a long body;
+          <code>websearch_to_tsquery</code> makes a bare multi-word query mean
+          AND; <code>ts_headline</code> returns the snippet. Local/anonymous
+          mode builds a MiniSearch index with Porter stemming over the
+          IndexedDB articles, which already carry full
+          <code>extractedText</code>. Both return the same
+          <code>SearchResponse</code>, so <code>lib/data/search.ts</code>
+          remains the single swap point.
+        </p>
+        <p>
+          This replaced plain, case-insensitive <code>contains</code>
+          matching, which had a sharper failure than "unranked": the whole
+          query was one literal substring, so
+          <code>flow state attention</code> matched nothing unless those
+          words were adjacent. That version was chosen to keep the two modes
+          identical, on the belief that local mode could not have an index —
+          see <a href="#roads-not-taken">Roads Not Taken</a> for why that
+          premise was wrong and what replaced it. The consistency principle
+          was never relaxed; local mode was brought up to meet it.
+        </p>
+        <p>
+          The two rankers are comparable rather than identical — BM25-ish
+          against weighted lexeme position, Porter against Snowball — so
+          near-ties can order differently between modes. That is expected and
+          documented, not a latent bug.
         </p>
         <div class="callout">
           <span class="callout-label">A real, measured query-level fix</span>
@@ -2441,16 +2460,54 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
         </div>
 
         <div class="callout rejected">
-          <span class="callout-label">Postgres full-text search (tsvector/GIN)</span>
+          <span class="callout-label">Postgres full-text search (tsvector/GIN) — rejected, then adopted</span>
           <p>
-            Would give relevance-ranked results, real stemming, etc. — not
-            used because local/anonymous mode has no equivalent full-text
-            index over IndexedDB, and giving signed-in users meaningfully
-            better search than signed-out users contradicts this app's
-            "everything behaves the same either way" principle. Revisit if
-            that principle is ever consciously relaxed, or at a scale where
-            plain <code>contains</code> matching genuinely stops being
-            adequate.
+            <strong>The original rejection:</strong> it would give
+            relevance-ranked results and real stemming, but local/anonymous
+            mode has no equivalent full-text index over IndexedDB, and giving
+            signed-in users meaningfully better search than signed-out users
+            contradicts this app's "everything behaves the same either way"
+            principle. The entry closed by naming the conditions to revisit
+            under: that principle being consciously relaxed, or plain
+            <code>contains</code> matching genuinely ceasing to be adequate.
+          </p>
+          <p>
+            <strong>What changed:</strong> neither of those, as it turned
+            out — the reasoning had a false premise. The objection treated
+            "local mode cannot have an index" as fixed, when it was only
+            unbuilt. Local mode already holds full <code>extractedText</code>
+            for every article (there is no summary/full split for IndexedDB),
+            so it had everything a real index needs all along. The
+            <em>principle</em> was right and was never relaxed; what was
+            wrong was concluding that upholding it meant holding the server
+            back, rather than bringing local mode up.
+          </p>
+          <p>
+            The second condition was also arriving independently. Plain
+            <code>contains</code> was worse than "unranked": a multi-word
+            query was matched as one literal substring, so
+            <code>flow state attention</code> found nothing unless those
+            words happened to be adjacent — the failure looked like an empty
+            library rather than a weak search.
+          </p>
+          <p>
+            <strong>What was built:</strong> a weighted, generated
+            <code>tsvector</code> column with a GIN index server-side
+            (<code>ts_rank</code> for ordering, <code>ts_headline</code> for
+            snippets, <code>websearch_to_tsquery</code> so multi-word means
+            AND), and a MiniSearch index with Porter stemming client-side.
+            Both return the same <code>SearchResponse</code>, so
+            <code>lib/data/search.ts</code> stays the single swap point.
+          </p>
+          <p>
+            <strong>Comparable, not identical — and deliberately so.</strong>
+            MiniSearch scores BM25-ish while <code>ts_rank</code> scores by
+            weighted lexeme position, and Porter and Snowball disagree on a
+            handful of words, so the two modes will order near-ties
+            differently. That is a documented consequence, not a defect to be
+            filed later: what is held equal is everything a reader notices —
+            stemming, multi-word AND, title hits outranking body mentions,
+            and snippets showing why a result matched.
           </p>
         </div>
 
