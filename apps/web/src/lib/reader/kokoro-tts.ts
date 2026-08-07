@@ -17,6 +17,7 @@
  */
 import { KOKORO_VOICES, NATIVE_VOICE_ID, isKokoroVoice, type TtsVoiceOption } from "@booklet/shared";
 import { apiFetch, apiFetchBlob } from "@/lib/api/client";
+import { readCachedAudio, writeCachedAudio } from "./tts-audio-cache";
 
 export type { TtsVoiceOption as KokoroVoiceOption };
 export { KOKORO_VOICES, NATIVE_VOICE_ID, isKokoroVoice };
@@ -36,14 +37,34 @@ export { KOKORO_VOICES, NATIVE_VOICE_ID, isKokoroVoice };
  * ever play. Aborting the fetch closes the connection, which the server
  * can detect and use to free that capacity up immediately instead of
  * finishing pointless work. */
-export function generateKokoroChunk(text: string, voice: string, speed: number, signal?: AbortSignal): Promise<Blob> {
-  return apiFetchBlob("/api/tts", {
+export async function generateKokoroChunk(
+  text: string,
+  voice: string,
+  speed: number,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  // Client-side cache first (#150). A hit costs one indexed IndexedDB lookup
+  // -- single-digit milliseconds, well inside a network round trip -- and
+  // skips the request entirely, so a replay or a reload downloads nothing.
+  // A miss, or a cache that isn't usable at all, returns null rather than
+  // throwing: this must never be able to make playback worse than it was
+  // before the cache existed. See tts-audio-cache.ts.
+  const cached = await readCachedAudio(text, voice, speed);
+  if (cached) return cached;
+
+  const blob = await apiFetchBlob("/api/tts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, voice, speed }),
     auth: false,
     signal,
   });
+
+  // Not awaited: the caller has its audio and should start playing it now.
+  // The write is pure upside for a *later* play, so nothing about this
+  // playback should wait on it.
+  void writeCachedAudio(text, voice, speed, blob);
+  return blob;
 }
 
 /**
