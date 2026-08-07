@@ -1,6 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { waitForSaveModalToClose } from "./helpers";
+import { selectFirstTextLayerSpan, waitForSaveModalToClose } from "./helpers";
 
 /**
  * highlightCitation() (lib/highlights/citation.ts) -- surfaces the page
@@ -14,31 +14,6 @@ import { waitForSaveModalToClose } from "./helpers";
 
 const SAMPLE_PDF = path.join(process.cwd(), "e2e", "fixtures", "sample.pdf");
 const LONG_CHAPTER_EPUB = path.join(process.cwd(), "e2e", "fixtures", "long-chapter.epub");
-
-async function selectFirstTextLayerSpan(page: import("@playwright/test").Page) {
-  // pdf.js renders a page's canvas and its selectable text layer separately,
-  // and the page indicator this spec waits on updates before the text layer
-  // for the new page exists. Without waiting for a real span the evaluate
-  // below throws "no text layer span to select" on whichever run loses that
-  // race -- observed failing twice in a row in CI on a spec that had been
-  // passing. Waiting is the fix rather than a retry: a reader cannot select
-  // text that hasn't rendered either, so there is nothing here for the
-  // product to do differently.
-  await page.locator('[class*="textLayer"] span').first().waitFor({ state: "attached", timeout: 15_000 });
-  return page.evaluate(() => {
-    const layer = document.querySelector('[class*="textLayer"]');
-    const span = layer?.querySelector("span");
-    if (!span?.firstChild) throw new Error("no text layer span to select");
-    const range = document.createRange();
-    range.setStart(span.firstChild, 0);
-    range.setEnd(span.firstChild, span.firstChild.textContent!.length);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    layer!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  });
-}
-
 test("a PDF highlight's citation shows the real page number", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();

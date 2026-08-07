@@ -152,12 +152,54 @@ const SAMPLE_PNG = Buffer.from(
   "base64",
 );
 
+
+// A real RSS 2.0 feed. rss.spec.ts used to subscribe to xkcd's live feed on
+// the grounds that the point was exercising the real fetch -> SSRF-guarded
+// parse pipeline rather than a stub. That reasoning still holds for the
+// *parse* -- which is why this is a genuine, spec-shaped RSS document that
+// rss-service.ts parses for real, not a mock response injected into the page
+// -- but it does not require the feed to be on the public internet. Making it
+// local removes three specs from the set that silently need outbound network
+// (#167), and stops the suite depending on xkcd's publishing schedule for its
+// item titles.
+//
+// Each item's link points back at this server, so "save an item from a feed"
+// then exercises real extraction against a real article too.
+const RSS_FEED = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Booklet Test Feed</title>
+    <link>http://127.0.0.1:${port}/</link>
+    <description>A local feed for the e2e suite.</description>
+    <item>
+      <title>Readability, the first item</title>
+      <link>http://127.0.0.1:${port}/readability.html</link>
+      <guid>http://127.0.0.1:${port}/readability.html</guid>
+      <pubDate>Mon, 04 Aug 2026 09:00:00 GMT</pubDate>
+      <description>The workhorse article, reachable from the feed.</description>
+    </item>
+    <item>
+      <title>Tagging, the second item</title>
+      <link>http://127.0.0.1:${port}/tagging.html</link>
+      <guid>http://127.0.0.1:${port}/tagging.html</guid>
+      <pubDate>Sun, 03 Aug 2026 09:00:00 GMT</pubDate>
+      <description>A second, clearly distinct article.</description>
+    </item>
+  </channel>
+</rss>`;
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${port}`);
 
   if (url.pathname === "/images/sample.png") {
     res.writeHead(200, { "content-type": "image/png", "content-length": SAMPLE_PNG.length });
     res.end(SAMPLE_PNG);
+    return;
+  }
+
+  if (url.pathname === "/feed.xml") {
+    res.writeHead(200, { "content-type": "application/rss+xml; charset=utf-8" });
+    res.end(RSS_FEED);
     return;
   }
 
