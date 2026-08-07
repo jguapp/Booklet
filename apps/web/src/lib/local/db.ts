@@ -115,6 +115,34 @@ function promisify<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
+/**
+ * Resolves when the transaction has actually committed, not when its request
+ * reported success (#168).
+ *
+ * Those are not the same moment, and the gap is where writes went missing. A
+ * request's `onsuccess` fires as soon as the operation succeeds *within* the
+ * transaction; the data is not durable until `oncomplete`. Awaiting the
+ * request therefore returns while the write is still only pending, and
+ * anything that tears the page down in between -- a navigation, a reload,
+ * closing the tab -- takes the uncommitted transaction with it.
+ *
+ * That is not theoretical: marking an article Reading and immediately
+ * navigating lost the status on 4 of 5 runs, which had been read as a flaky
+ * test rather than a lost write. Every local-mode write goes through here --
+ * status, tags, favorites, reading progress, highlights, collections -- so
+ * the same race applied to all of them.
+ *
+ * Reads are unaffected and still await the request: their result is available
+ * at `onsuccess` and there is nothing to make durable.
+ */
+function commit(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+  });
+}
+
 async function getAll<T>(storeName: string): Promise<T[]> {
   if (!isBrowser()) return [];
   const db = await openDb();
@@ -131,21 +159,24 @@ async function getOne<T>(storeName: string, id: string): Promise<T | undefined> 
 
 async function put(storeName: string, value: unknown): Promise<void> {
   const db = await openDb();
-  const store = db.transaction(storeName, "readwrite").objectStore(storeName);
-  await promisify(store.put(value));
+  const tx = db.transaction(storeName, "readwrite");
+  tx.objectStore(storeName).put(value);
+  await commit(tx);
 }
 
 async function remove(storeName: string, id: string): Promise<void> {
   const db = await openDb();
-  const store = db.transaction(storeName, "readwrite").objectStore(storeName);
-  await promisify(store.delete(id));
+  const tx = db.transaction(storeName, "readwrite");
+  tx.objectStore(storeName).delete(id);
+  await commit(tx);
 }
 
 async function clear(storeName: string): Promise<void> {
   if (!isBrowser()) return;
   const db = await openDb();
-  const store = db.transaction(storeName, "readwrite").objectStore(storeName);
-  await promisify(store.clear());
+  const tx = db.transaction(storeName, "readwrite");
+  tx.objectStore(storeName).clear();
+  await commit(tx);
 }
 
 async function getAllByIndex<T>(storeName: string, indexName: string, value: string): Promise<T[]> {

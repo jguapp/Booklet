@@ -21,6 +21,11 @@ test("favoriting an article surfaces it on the Favorites page, unfavoriting remo
   const card = page.locator("a[href^='/reader/']").first();
   await expect(card).toBeVisible();
   await card.getByTitle("Add to favorites").click();
+  // The toggled button is the write's own visible confirmation. `click()`
+  // resolves when the event is dispatched, not when the IndexedDB write has
+  // committed, and a `goto` issued in that gap tears down the pending
+  // transaction -- same race, and same wait, as tags-search-progress.spec.ts.
+  await expect(card.getByTitle("Remove from favorites")).toBeVisible();
 
   await page.goto("/favorites");
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
@@ -50,6 +55,7 @@ test("deleting an article moves it to Trash, where it can be restored or deleted
 
   // Delete forever needs a real confirm, and is actually permanent.
   await page.locator("a[href^='/reader/']").first().getByTitle("Move to trash").click();
+  await expect(page.locator("a[href^='/reader/']")).toHaveCount(0);
   await page.goto("/trash");
   await page.getByRole("button", { name: "Delete forever" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Delete", exact: true }).click();
@@ -62,6 +68,7 @@ test("empty trash clears everything at once, behind a confirm", async ({ page })
   await page.goto("/library");
   await saveUrl(page, "http://127.0.0.1:4321/tagging.html");
   await page.locator("a[href^='/reader/']").first().getByTitle("Move to trash").click();
+  await expect(page.locator("a[href^='/reader/']")).toHaveCount(0);
 
   await page.goto("/trash");
   await expect(page.locator("button", { hasText: "Restore" })).toHaveCount(1);
