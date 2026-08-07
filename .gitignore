@@ -1,5 +1,8 @@
 # dependencies
 node_modules/
+# GitLab CI can only cache paths inside the project, so the pnpm store is
+# relocated here (see .gitlab-ci.yml). Never a tracked artifact.
+.pnpm-store/
 
 # build output
 dist/

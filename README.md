@@ -366,6 +366,13 @@ every package, the extension's e2e suite under `xvfb`, and a `docker-build`
 job that builds both production images and smoke-tests the API image
 against a real Postgres container — all green on every push to `main`.
 
+The same pipeline exists for GitLab in [`.gitlab-ci.yml`](.gitlab-ci.yml) —
+same seven jobs, ported rather than copied (service hostnames, service
+readiness, and Docker-in-Docker networking all differ). See
+[`docs/CI_GITLAB.md`](docs/CI_GITLAB.md) for what changed, the project
+settings the file cannot set itself, and a note on runner minutes worth
+reading before switching.
+
 ## Roadmap
 
 What's left is almost entirely things this environment genuinely cannot do
