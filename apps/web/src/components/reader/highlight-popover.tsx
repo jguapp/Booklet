@@ -20,6 +20,16 @@ function labelFor(color: string): string {
  * scroll handler below) and sub-pixel scrollY jitter. */
 const SCROLL_DISMISS_PX = 8;
 
+/**
+ * Whether the page has moved far enough since the popover opened to dismiss
+ * it. Extracted from the scroll handler purely so it can be unit-tested --
+ * the rule is subtle enough to have already been wrong once, and testing it
+ * through a rendered component is currently blocked (see #166).
+ */
+export function hasScrolledAway(openedAtScrollY: number, currentScrollY: number): boolean {
+  return Math.abs(currentScrollY - openedAtScrollY) > SCROLL_DISMISS_PX;
+}
+
 type Panel = "none" | "note" | "define";
 type DictStatus = "idle" | "loading" | "error" | "not-found" | "found";
 
@@ -69,7 +79,7 @@ export function HighlightPopover({ anchorRect, selectedText, onConfirm, onDismis
     // still moves scrollY and still dismisses.
     const openedAtScrollY = window.scrollY;
     function handleScroll() {
-      if (Math.abs(window.scrollY - openedAtScrollY) > SCROLL_DISMISS_PX) onDismiss();
+      if (hasScrolledAway(openedAtScrollY, window.scrollY)) onDismiss();
     }
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKey);
