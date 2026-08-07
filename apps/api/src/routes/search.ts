@@ -1,11 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { Prisma } from "../generated/prisma/client.js";
 import type { SearchResponse } from "@booklet/shared";
-import { SNIPPET_MARK_END, SNIPPET_MARK_START } from "@booklet/shared";
+import { SNIPPET_MARK_END, SNIPPET_MARK_START, reciprocalRankFusion } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { toSummary } from "./articles.js";
 import { toHighlight } from "./highlights.js";
+import { embedText } from "../services/embedding-service.js";
+import { searchByEmbedding } from "../services/article-embedding-service.js";
 
 const RESULT_LIMIT = 25;
 
@@ -80,7 +82,30 @@ export async function registerSearchRoute(app: FastifyInstance): Promise<void> {
       LIMIT ${RESULT_LIMIT}
     `;
 
-    const ids = ranked.map((r) => r.id);
+    // Semantic half (#156). Fused rather than replacing the keyword ranking:
+    // embeddings are worse than keywords at exactly the queries people are
+    // most confident about -- a name, an exact phrase, a code identifier --
+    // so a purely semantic search would feel broken in the cases where the
+    // user knows precisely what they typed.
+    //
+    // Best-effort by design. A failure here (model still downloading, no
+    // embeddings indexed yet, weights unreachable) must degrade to plain
+    // keyword search rather than failing the request: search working slightly
+    // less well is a far better outcome than a search box that errors.
+    let semanticIds: string[] = [];
+    try {
+      const queryVector = await embedText(q);
+      semanticIds = (await searchByEmbedding(userId, queryVector, RESULT_LIMIT)).map((r) => r.id);
+    } catch (err) {
+      request.log.warn({ err }, "semantic search unavailable, falling back to keyword-only");
+    }
+
+    const keywordIds = ranked.map((r) => r.id);
+    // With no semantic side, RRF over a single list preserves that list's
+    // order exactly -- so this is a no-op rather than a special case.
+    const ids = reciprocalRankFusion(semanticIds.length ? [keywordIds, semanticIds] : [keywordIds])
+      .map((r) => r.id)
+      .slice(0, RESULT_LIMIT);
 
     // Hydrated through Prisma rather than selected in the raw query above so
     // this keeps using toSummary -- one definition of the list DTO, including
