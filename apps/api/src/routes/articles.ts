@@ -19,6 +19,7 @@ import { deleteStoredFile, saveFile, streamStoredFile } from "../services/storag
 import { isAllowedOrigin } from "../lib/cors.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
 import { sendEmail } from "../services/email-service.js";
+import { indexArticleEmbeddings } from "../services/article-embedding-service.js";
 
 export type ArticleRow = Awaited<ReturnType<typeof prisma.article.findFirstOrThrow>>;
 
@@ -124,6 +125,23 @@ export function toSummary(row: Omit<ArticleRow, "extractedHtml" | "extractedText
   };
 }
 
+/**
+ * Indexes a freshly-saved article for semantic search (#156), without making
+ * the save wait for it.
+ *
+ * Deliberately not awaited: embedding a long article is seconds of CPU, and a
+ * reader who just pasted a URL should not watch a spinner for it. The article
+ * is fully usable without embeddings -- keyword search already covers it, and
+ * the search route degrades to keyword-only for anything unindexed -- so this
+ * is genuinely optional work. Failures are logged and dropped for the same
+ * reason; scripts/backfill-embeddings.ts re-attempts anything missed.
+ */
+function indexForSearchInBackground(articleId: string, userId: string, text: string | null): void {
+  void indexArticleEmbeddings(articleId, userId, text).catch((err: unknown) => {
+    console.error("[embeddings] failed to index article", articleId, err);
+  });
+}
+
 export async function registerArticleRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateArticleRequest }>(
     "/api/articles",
@@ -182,6 +200,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
 
       const body = toArticle(article);
+      indexForSearchInBackground(article.id, request.userId!, article.extractedText);
       fireWebhookEvent(request.userId!, "article.created", { id: body.id, url: body.url, title: body.title }).catch(
         () => undefined,
       );
@@ -299,6 +318,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
 
       const body = toArticle(article);
+      indexForSearchInBackground(article.id, request.userId!, article.extractedText);
       fireWebhookEvent(request.userId!, "article.created", { id: body.id, url: body.url, title: body.title }).catch(
         () => undefined,
       );

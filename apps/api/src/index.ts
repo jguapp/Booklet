@@ -1,6 +1,7 @@
 import { buildApp } from "./app.js";
 import { initTelemetry, shutdownTelemetry } from "./lib/telemetry.js";
 import { warmTtsPool } from "./services/tts-pool.js";
+import { warmEmbeddingModel } from "./services/embedding-service.js";
 
 // .env loading happens via the "dev"/"start" scripts' own --env-file-if-
 // exists flag (package.json), not here -- ES module static imports (both
@@ -41,6 +42,13 @@ app.listen({ port, host: "0.0.0.0" }).catch((err) => {
 // child processes or trigger a real model download just from building an
 // app instance.
 warmTtsPool();
+
+// Same shape as warmTtsPool above, and for the same reason: the ~25MB
+// MiniLM download is a one-time cost that belongs at startup rather than
+// inside whichever search request happens to be first. Not awaited, and it
+// swallows its own failures -- semantic search is optional (the search route
+// degrades to keyword-only), so it must never delay or block listen().
+warmEmbeddingModel();
 
 // Adding any listener for these signals replaces Node's default
 // terminate-on-signal behavior, so once tts-pool.ts registers its own (to
