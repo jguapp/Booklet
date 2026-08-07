@@ -71,14 +71,20 @@ async function main(): Promise<void> {
   const { ms: concurrentMs } = await timed(`4. ${CONCURRENT_TEXTS.length} concurrent uncached chunks (pool of ${POOL_SIZE})`, () =>
     Promise.all(CONCURRENT_TEXTS.map((text) => generateSpeechPooled(text, VOICE, SPEED))),
   );
-  // The number #162 is actually about. 1.0 would be perfect parallelism;
-  // CONCURRENT_TEXTS.length would be fully serialized. Printed as a ratio
-  // rather than left for a reader to divide, because the absolute figures
-  // move with the host and the ratio is the thing that regresses.
+  // The number #162 is actually about -- but stated against the right floor.
+  // "1.00x = perfect parallelism" is only true when the pool is at least as
+  // large as the batch. With more chunks than workers the best achievable
+  // result is ceil(chunks / workers) rounds, so on a 2-worker host three
+  // chunks cannot beat 2.00x however well threading is tuned. Reporting the
+  // raw ratio against 1.00x made a well-tuned pool look broken.
+  const rounds = Math.ceil(CONCURRENT_TEXTS.length / POOL_SIZE);
+  const ratio = concurrentMs / singleMs;
   console.log(
-    `   -> ${(concurrentMs / singleMs).toFixed(2)}x a single generation ` +
-      `(1.00x = perfect parallelism, ${CONCURRENT_TEXTS.length.toFixed(2)}x = fully serialized)`,
+    `   -> ${ratio.toFixed(2)}x a single generation ` +
+      `(floor for ${CONCURRENT_TEXTS.length} chunks on ${POOL_SIZE} worker(s) is ${rounds.toFixed(2)}x, ` +
+      `fully serialized is ${CONCURRENT_TEXTS.length.toFixed(2)}x)`,
   );
+  console.log(`   -> ${((rounds / ratio) * 100).toFixed(0)}% of the achievable parallelism on this host`);
 
   // 5. Prewarm effectiveness -- simulate reader-view.tsx's
   // prewarmFirstChunk firing while the user is still looking at the

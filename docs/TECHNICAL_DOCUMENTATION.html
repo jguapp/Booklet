@@ -1339,19 +1339,44 @@
             the extra work was close to free.
           </p>
           <p>
-            <strong>Fixed since (#162).</strong> Three changes, in the order
-            they matter. Each worker's ONNX session now gets an explicit
-            thread budget — <code>cores / pool size</code> — instead of
-            being left to claim the machine. The pool is sized from real
-            cores rather than a fixed three, so a 2-vCPU host runs two
-            workers rather than three fighting. And the benchmark now prints
-            the host's core count and the concurrency ratio as a first-class
-            number (<code>1.00&times;</code> perfect,
-            <code>3.00&times;</code> serialized), because the original claim
-            was not wrong so much as <em>context-free</em> — a real
-            measurement of a machine nobody deploys to, recorded as though it
-            were a property of the design.
+            <strong>Fixed since (#162).</strong> Each worker's ONNX session
+            now gets an explicit thread budget —
+            <code>cores / pool size</code> — instead of being left to claim
+            the machine, and the pool is sized from real cores rather than a
+            fixed three, so a 2-vCPU host runs two workers rather than three
+            fighting over two cores.
           </p>
+          <p>Re-measured on the same 2-vCPU runner:</p>
+          <table>
+            <tr><th>Scenario</th><th>Before</th><th>After</th></tr>
+            <tr><td>Cold start</td><td>11,838&nbsp;ms</td><td><strong>8,872&nbsp;ms</strong></td></tr>
+            <tr><td>Warm, uncached chunk</td><td>6,542&nbsp;ms</td><td><strong>5,661&nbsp;ms</strong></td></tr>
+            <tr><td>3 concurrent chunks</td><td>18,725&nbsp;ms</td><td><strong>14,796&nbsp;ms</strong></td></tr>
+            <tr><td>Ratio vs. one</td><td>2.86&times;</td><td><strong>2.61&times;</strong></td></tr>
+          </table>
+          <div class="callout">
+            <span class="callout-label">Being honest about that ratio</span>
+            <p>
+              2.86&times; &rarr; 2.61&times; is a modest improvement, and it
+              would be easy to present it as more than it is. The larger
+              correction is that <strong>the target was never
+              1.00&times;</strong>. With more chunks than workers, the best
+              achievable result is <code>ceil(chunks / workers)</code>
+              rounds — three chunks on a two-worker host cannot beat
+              <strong>2.00&times;</strong> however well threading is tuned.
+              Measured against that floor, the pool is now at about
+              <strong>77%</strong> of the parallelism the hardware allows,
+              where before it was contending for cores it didn't have.
+            </p>
+            <p>
+              The benchmark prints the floor and that percentage rather than
+              a bare ratio, because the bare ratio is what made a
+              hardware-bound result look like a broken pool. The real
+              user-visible win here is the absolute numbers: every scenario
+              got 10–25% faster, on the same machine, from doing less
+              fighting.
+            </p>
+          </div>
           <p>
             The warm-ahead count stayed at two, but its justification did
             not. It is no longer "the extra chunks are free because the pool
