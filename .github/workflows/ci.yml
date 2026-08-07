@@ -35,6 +35,15 @@ jobs:
       - run: pnpm --filter @booklet/web lint
       - run: pnpm --filter @booklet/extension exec tsc --noEmit
       - run: pnpm --filter @booklet/mobile exec tsc --noEmit
+      # The production bundle, without waiting for a Docker layer to say so.
+      # tsc resolves imports through node_modules and never asks who *declared*
+      # a package, so importing a transitive dependency typechecks cleanly and
+      # then fails in esbuild -- which is exactly how a direct
+      # @huggingface/transformers import broke docker-build with "No loader is
+      # configured for '.node' files" while every other job stayed green.
+      # docker-build still covers the full build+run path; this just moves the
+      # cheapest half of that signal ~2 minutes earlier.
+      - run: pnpm --filter @booklet/api exec node scripts/build.mjs
 
   # Unit tests that need nothing but Node: @booklet/shared and apps/web.
   test-unit:
