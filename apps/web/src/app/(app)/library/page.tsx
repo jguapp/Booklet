@@ -19,6 +19,7 @@ import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { useRefreshOnFocus } from "@/lib/data/use-refresh-on-focus";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
+import { useToast } from "@/lib/toast/toast-provider";
 
 type FilterTab = "ALL" | ArticleStatus;
 
@@ -38,7 +39,9 @@ export default function LibraryPage() {
 }
 
 function LibraryPageInner() {
-  const { status, isAuthenticated, lastSyncResult, dismissSyncResult } = useAuth();
+  const { status, isAuthenticated, lastSyncResult, dismissSyncResult, syncFailure, syncLocalData } = useAuth();
+  const { toast } = useToast();
+  const [retryingSync, setRetryingSync] = useState(false);
   const { hoarding } = useDevicePrefs();
   const searchParams = useSearchParams();
   const collectionId = searchParams.get("collection");
@@ -125,6 +128,18 @@ function LibraryPageInner() {
       .sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
   }, [articles, searchResults, isSearching, tab, tagFilter]);
 
+  async function retrySync() {
+    setRetryingSync(true);
+    try {
+      await syncLocalData();
+      refresh();
+    } catch {
+      toast("Still couldn't move your saved articles. They're safe on this device — try again in a moment.");
+    } finally {
+      setRetryingSync(false);
+    }
+  }
+
   function handleSaveClick() {
     const unreadCount = articles.filter((a) => a.status === "UNREAD").length;
     if (hoarding.enabled && unreadCount >= hoarding.maxUnread) {
@@ -190,6 +205,29 @@ function LibraryPageInner() {
           Save article
         </Button>
       </div>
+
+      {/* A migration that didn't fully land has to say so. Everything counted
+          here is still in this browser's IndexedDB -- but the app switches to
+          reading from the server the moment you're signed in, so without this
+          notice the only thing visible is an empty library, which reads as
+          "signing up deleted everything" (#164). */}
+      {syncFailure && syncFailure.remainingArticles > 0 && (
+        <div className="mb-6 flex items-center justify-between gap-4 rounded-sm border border-amber-500/40 bg-amber-500/10 px-4 py-2.5">
+          <p className="font-sans text-sm text-ink">
+            {syncFailure.remainingArticles} article{syncFailure.remainingArticles === 1 ? "" : "s"} saved on this
+            device {syncFailure.remainingArticles === 1 ? "hasn't" : "haven't"} moved to your account yet.{" "}
+            {syncFailure.remainingArticles === 1 ? "It's" : "They're"} still here and nothing has been lost.
+          </p>
+          <button
+            type="button"
+            onClick={retrySync}
+            disabled={retryingSync}
+            className="shrink-0 font-sans text-xs font-medium text-ink underline disabled:opacity-50"
+          >
+            {retryingSync ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
 
       {lastSyncResult &&
         (lastSyncResult.importedArticles > 0 ||
