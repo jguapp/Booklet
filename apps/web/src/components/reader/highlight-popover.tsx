@@ -14,6 +14,12 @@ function labelFor(color: string): string {
   return PALETTE_LABELS.get(color) ?? color;
 }
 
+/** How far the page has to actually move before an open popover is dismissed.
+ * Small enough that any deliberate scroll closes it, large enough to absorb
+ * a stale scroll event for scrolling that had already finished (see the
+ * scroll handler below) and sub-pixel scrollY jitter. */
+const SCROLL_DISMISS_PX = 8;
+
 type Panel = "none" | "note" | "define";
 type DictStatus = "idle" | "loading" | "error" | "not-found" | "found";
 
@@ -45,8 +51,25 @@ export function HighlightPopover({ anchorRect, selectedText, onConfirm, onDismis
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") onDismiss();
     }
+    // Dismissing on *any* scroll event was too eager. The reason to dismiss
+    // at all is that anchorRect is viewport-relative and goes stale once the
+    // page moves -- so what matters is whether the page has actually moved
+    // since this popover opened, not whether a scroll event arrived.
+    //
+    // Those are different things, because a scroll event can be dispatched
+    // on a later frame than the scrolling that caused it: a programmatic
+    // scrollIntoView, or ordinary momentum/inertial scrolling (which keeps
+    // emitting for hundreds of milliseconds after the fingers leave the
+    // trackpad). Either can deliver an event *after* the popover mounts, for
+    // scrolling that finished before it existed -- closing the popover the
+    // reader just opened, with no scrolling on their part in between.
+    //
+    // Comparing against the position captured at mount makes those no-ops,
+    // since the page is already where the event says it is. A real scroll
+    // still moves scrollY and still dismisses.
+    const openedAtScrollY = window.scrollY;
     function handleScroll() {
-      onDismiss();
+      if (Math.abs(window.scrollY - openedAtScrollY) > SCROLL_DISMISS_PX) onDismiss();
     }
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKey);
