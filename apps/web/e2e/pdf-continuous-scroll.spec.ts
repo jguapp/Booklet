@@ -1,6 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { waitForSaveModalToClose } from "./helpers";
+import { selectFirstTextLayerSpan, waitForSaveModalToClose } from "./helpers";
 
 /**
  * The PDF reader's continuous-scroll mode (pdf-reader.tsx's PdfScrollPageSlot)
@@ -13,22 +13,6 @@ import { waitForSaveModalToClose } from "./helpers";
  */
 
 const MULTI_PAGE_PDF = path.join(process.cwd(), "e2e", "fixtures", "multi-page.pdf");
-
-async function selectFirstTextLayerSpanIn(page: import("@playwright/test").Page, containerSelector: string) {
-  return page.evaluate((selector) => {
-    const container = document.querySelector(selector);
-    const span = container?.querySelector('[class*="textLayer"] span');
-    if (!span?.firstChild) throw new Error("no text layer span to select");
-    const range = document.createRange();
-    range.setStart(span.firstChild, 0);
-    range.setEnd(span.firstChild, span.firstChild.textContent!.length);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    container!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    return range.toString();
-  }, containerSelector);
-}
 
 async function enableScrollMode(page: import("@playwright/test").Page) {
   await page.goto("/settings/reading");
@@ -105,7 +89,7 @@ test("highlighting works in scroll mode, positioned over the right page", async 
     timeout: 10_000,
   });
 
-  const selectedText = await selectFirstTextLayerSpanIn(page, '[data-pdf-scroll-page="1"]');
+  const selectedText = await selectFirstTextLayerSpan(page, '[data-pdf-scroll-page="1"]');
   expect(selectedText.length).toBeGreaterThan(0);
 
   const yellowSwatch = page.getByTitle("Yellow");

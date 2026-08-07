@@ -43,3 +43,28 @@ allowBuilds:
   # package.json directly). Needed for the OCR feature (pdf-extraction.ts).
   tesseract.js: true
   unrs-resolver: true
+
+# One React for the whole JS workspace (#166). `nodeLinker: hoisted` above is
+# what makes this necessary: with a flat node_modules there is one winner per
+# package name at the root, and anything that cannot use it gets a nested copy
+# instead. That left three React installs -- root, apps/web's own 19.2.4 pair,
+# and apps/mobile's 19.0.0 -- including, at one point, a root react@19.0.0
+# paired with react-dom@19.2.8, a combination React does not support at all.
+#
+# The visible cost was component tests. @testing-library/react ended up with
+# its own nested react-dom, so rendering crossed two instances and failed as
+# "Cannot read properties of null (reading 'useState')". Worth knowing how
+# that presents: a component with no hooks renders fine across two copies, so
+# a hookless test passes and proves nothing -- the first attempt here did
+# exactly that before being retried against a component using useState.
+#
+# Pinned to apps/web's version rather than apps/mobile's 19.0.0 (which Expo /
+# react-native 0.79 nominally wants) because web is where the rendering,
+# testing and production traffic actually are. Both typecheck cleanly under
+# it; the mobile runtime is not provable in this environment, and verifying
+# real device builds is already tracked in #1 and #2. If Expo turns out to
+# object at runtime, the alternative is pinning both to 19.0.0 -- Next 16
+# accepts it -- rather than going back to three copies.
+overrides:
+  react: 19.2.4
+  react-dom: 19.2.4

@@ -32,9 +32,10 @@ async function saveByFile(page: import("@playwright/test").Page, filePath: strin
 test("an HTML article with an og:image shows it as its library card thumbnail", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  // A real page confirmed to serve <meta property="og:image"> -- GitHub
-  // generates a social-preview image for every repo.
-  await page.getByPlaceholder(/example\.com/).fill("https://github.com/mozilla/readability");
+  // The tagging fixture serves <meta property="og:image"> (see
+  // e2e/fixture-server/server.mjs) so this exercises the real
+  // og:image -> inlined data: URI thumbnail path without a network fetch.
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/tagging.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 

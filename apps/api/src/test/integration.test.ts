@@ -560,6 +560,104 @@ describe("API integration", () => {
       expect(second.statusCode).toBe(200);
       expect(second.json()).toMatchObject({ importedArticles: 0, skippedArticles: 1 });
     });
+
+    // #164: the migration used to go up as one JSON body, so Fastify's 1MB
+    // default rejected it with 413 before the route was even reached -- and
+    // the client swallowed that, leaving a brand-new account staring at an
+    // empty library. Extraction inlines images as base64 up to 15MB an
+    // article, so one ordinary image-heavy save is enough to trigger it.
+    it("accepts an article far larger than Fastify's default 1MB body limit", async () => {
+      const bigHtml = `<p>${"x".repeat(1_500_000)}</p>`;
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [
+            {
+              localId: "local-big",
+              url: "https://example.com/vitest-import-big",
+              title: "Big",
+              extractedHtml: bigHtml,
+              extractedText: "big",
+            },
+          ],
+          highlights: [],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ importedArticles: 1 });
+    });
+
+    // Two local articles can share a URL (saved twice before dedupe existed).
+    // Batched createMany would trip @@unique([userId, url]) and take the whole
+    // import down, so the duplicate has to be folded into the first one.
+    it("folds a URL duplicated within one payload instead of failing the batch", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [
+            { localId: "dup-a", url: "https://example.com/vitest-dupe", title: "A", extractedText: "a" },
+            { localId: "dup-b", url: "https://example.com/vitest-dupe", title: "B", extractedText: "b" },
+          ],
+          highlights: [
+            {
+              localArticleId: "dup-b",
+              selectedText: "from the duplicate",
+              position: { type: "text", exact: "from the duplicate", prefix: "", suffix: "", start: 0, end: 18 },
+              color: "BLUE",
+            },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      // One created, one folded -- and the folded one's highlight still lands,
+      // attached to the article that was actually created.
+      expect(res.json()).toMatchObject({ importedArticles: 1, skippedArticles: 1, importedHighlights: 1 });
+    });
+
+    // The client clears a batch from IndexedDB only once the server has
+    // accepted it, so a batch the server committed but whose response was
+    // lost gets re-sent. Articles dedupe by URL; highlights have no unique
+    // constraint, so without an explicit guard a dropped response silently
+    // doubles someone's notebook.
+    it("does not duplicate highlights when a batch is replayed", async () => {
+      const payload = {
+        articles: [
+          { localId: "replay-1", url: "https://example.com/vitest-replay", title: "Replay", extractedText: "body" },
+        ],
+        highlights: [
+          {
+            localArticleId: "replay-1",
+            selectedText: "body",
+            position: { type: "text", exact: "body", prefix: "", suffix: "", start: 0, end: 4 },
+            color: "YELLOW",
+          },
+        ],
+      };
+      const send = () =>
+        app.inject({
+          method: "POST",
+          url: "/api/sync/import",
+          headers: { authorization: `Bearer ${accessToken}` },
+          payload,
+        });
+
+      const first = await send();
+      expect(first.json()).toMatchObject({ importedArticles: 1, importedHighlights: 1 });
+
+      const replay = await send();
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json()).toMatchObject({ importedArticles: 0, skippedArticles: 1, importedHighlights: 0 });
+
+      const article = await prisma.article.findFirst({
+        where: { url: "https://example.com/vitest-replay" },
+        include: { highlights: true },
+      });
+      expect(article?.highlights).toHaveLength(1);
+    });
   });
 
   describe("logout", () => {

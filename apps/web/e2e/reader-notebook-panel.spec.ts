@@ -1,6 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { waitForSaveModalToClose } from "./helpers";
+import { selectFirstTextLayerSpan, waitForSaveModalToClose } from "./helpers";
 
 /**
  * The in-reader right-side Notebook panel (notebook-panel.tsx) -- toggled
@@ -34,7 +34,7 @@ test("toggling the Notebook panel from the toolbar shows and hides it without lo
 }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
   await page.locator("a[href^='/reader/']").first().click();
@@ -57,7 +57,7 @@ test("toggling the Notebook panel from the toolbar shows and hides it without lo
 test("Info tab shows article metadata", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
   await page.locator("a[href^='/reader/']").first().click();
@@ -76,7 +76,7 @@ test("HTML: a highlight appears in the Notebook tab, and clicking it jumps back 
 }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/long-article.html");  // long enough to scroll well past the highlight
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
   await page.locator("a[href^='/reader/']").first().click();
@@ -112,19 +112,7 @@ test("PDF: a highlight appears in the Notebook tab, and clicking it jumps to the
   await page.locator("a[href^='/reader/']").first().click();
   await expect(page).toHaveURL(/\/reader\//);
 
-  await page.waitForSelector('[data-pdf-reader] [class*="textLayer"] span', { timeout: 10_000 });
-  await page.evaluate(() => {
-    const layer = document.querySelector('[class*="textLayer"]');
-    const span = layer?.querySelector("span");
-    if (!span?.firstChild) throw new Error("no text layer span to select");
-    const range = document.createRange();
-    range.setStart(span.firstChild, 0);
-    range.setEnd(span.firstChild, span.firstChild.textContent!.length);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    layer!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  });
+  await selectFirstTextLayerSpan(page);
   await page.getByTitle("Yellow").click();
 
   // Navigate away from page 1.
@@ -157,21 +145,7 @@ test("PDF continuous-scroll mode: clicking a highlight in the Notebook scrolls t
   await expect(page).toHaveURL(/\/reader\//);
 
   await expect(page.locator("[data-pdf-scroll-page]")).toHaveCount(12, { timeout: 10_000 });
-  await expect(page.locator('[data-pdf-scroll-page="1"] [class*="textLayer"] span').first()).toBeAttached({
-    timeout: 10_000,
-  });
-  await page.evaluate(() => {
-    const layer = document.querySelector('[data-pdf-scroll-page="1"] [class*="textLayer"]');
-    const span = layer?.querySelector("span");
-    if (!span?.firstChild) throw new Error("no text layer span to select");
-    const range = document.createRange();
-    range.setStart(span.firstChild, 0);
-    range.setEnd(span.firstChild, span.firstChild.textContent!.length);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    layer!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  });
+  await selectFirstTextLayerSpan(page, '[data-pdf-scroll-page="1"]');
   await page.getByTitle("Yellow").click();
 
   await page.locator('[data-pdf-scroll-page="10"]').scrollIntoViewIfNeeded();

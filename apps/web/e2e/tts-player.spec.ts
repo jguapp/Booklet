@@ -18,7 +18,7 @@ import { waitForSaveModalToClose } from "./helpers";
  * model download.
  */
 
-test("selecting a Kokoro voice and pressing play actually generates and plays real audio, with a persistent player bar and read-along highlighting", async ({
+test("@live selecting a Kokoro voice and pressing play actually generates and plays real audio, with a persistent player bar and read-along highlighting", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -28,7 +28,7 @@ test("selecting a Kokoro voice and pressing play actually generates and plays re
 
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Dog");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/long-opening-sentence.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 
@@ -46,7 +46,7 @@ test("selecting a Kokoro voice and pressing play actually generates and plays re
   // "Spotify-style" requirement, not just "TTS makes noise."
   const playerBar = page.getByRole("region", { name: "Read-aloud player" });
   await expect(playerBar).toBeVisible();
-  await expect(playerBar).toContainText("Dog");
+  await expect(playerBar).toContainText("A Long Opening Sentence");
   // Spotify-style progress bar, not "Sentence X of Y" text -- see
   // tts-player-bar.tsx's own comment on the progressbar's data-* attrs.
   await expect(page.getByRole("progressbar", { name: "Reading progress" })).toBeVisible();
@@ -87,7 +87,7 @@ test("the system voice is the default, and switching back to it needs no generat
   await expect(page.getByRole("combobox", { name: "Read-aloud voice" })).toHaveValue("system");
 });
 
-test("a real, full-length article with dense infobox/citation content doesn't blow up the chunk count", async ({
+test("@live a real, full-length article with dense infobox/citation content doesn't blow up the chunk count", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -97,20 +97,23 @@ test("a real, full-length article with dense infobox/citation content doesn't bl
   // infobox/taxonomy content -- hundreds of newline-separated one-to-few-
   // character fragments with no real sentence punctuation (geological-
   // period abbreviations, binomial-nomenclature citations) -- each became
-  // its own chunk: 2283 chunks for this exact article, most under 20
-  // characters, meaning 2283 separate server round trips before "read
-  // aloud" finished a single page. Fixed by accumulating across paragraph
-  // boundaries instead of resetting at each one (see that function's own
-  // comment) -- confirmed by hand this brought the same article down to
-  // ~430 chunks. This test only checks that playback starts and the
-  // reported chunk count is sane, not the exact number (real extracted
-  // text length can shift over time as the source page is edited).
+  // its own chunk: 2283 chunks for that article, most under 20 characters,
+  // meaning 2283 separate server round trips before "read aloud" finished a
+  // single page. Fixed by accumulating across paragraph boundaries instead
+  // of resetting at each one.
+  //
+  // The fragment-grouping logic itself is now unit-tested directly
+  // (packages/shared/src/tts-chunking.test.ts, which feeds it 300 newline-
+  // separated fragments and asserts they group). What this test still adds
+  // that the unit test can't: that the count reaching the *player*, through
+  // real extraction and the real provider, is sane -- so it runs against a
+  // long multi-paragraph article rather than needing a pathological one.
   await page.goto("/settings/reading");
   await page.getByRole("combobox", { name: "Read-aloud voice" }).selectOption({ value: "af_heart" });
 
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
-  await page.getByPlaceholder(/example\.com/).fill("https://en.wikipedia.org/wiki/Dog");
+  await page.getByPlaceholder(/example\.com/).fill("http://127.0.0.1:4321/long-article.html");
   await page.getByRole("button", { name: /^save$/i }).click();
   await waitForSaveModalToClose(page);
 
@@ -128,9 +131,10 @@ test("a real, full-length article with dense infobox/citation content doesn't bl
   const totalChunksAttr = await page.getByRole("progressbar", { name: "Reading progress" }).getAttribute("data-total-chunks");
   expect(totalChunksAttr).not.toBeNull();
   const totalChunks = Number(totalChunksAttr);
-  // A real, heavily-cited Wikipedia article legitimately has a few hundred
+  // A long article legitimately has a few dozen to a few hundred
   // sentence-sized chunks -- the regression this guards against was
   // thousands, from one-character fragments never getting grouped at all.
+  expect(totalChunks).toBeGreaterThan(0);
   expect(totalChunks).toBeLessThan(1000);
 
   // Scoped to the player bar, not page-wide getByTitle("Stop") -- a

@@ -9,7 +9,7 @@ import { waitForSaveModalToClose } from "./helpers";
  * it, which anonymous-flow.spec.ts already covers.
  */
 
-const TEST_ARTICLE_URL = "https://en.wikipedia.org/wiki/Readability";
+const TEST_ARTICLE_URL = "http://127.0.0.1:4321/readability.html";
 
 async function saveAndHighlight(page: import("@playwright/test").Page) {
   await page.goto("/library");

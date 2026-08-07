@@ -2,8 +2,10 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { pickBestVoice } from "./tts-voice";
-import { isKokoroVoice, generateKokoroChunk, toSafeTextChunks } from "./kokoro-tts";
+import { isKokoroVoice, generateKokoroChunk, toSafeTextChunks, warmKokoroChunks } from "./kokoro-tts";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
+import { useToast } from "@/lib/toast/toast-provider";
+import { abandonTtfaSample, markFirstAudio, markFirstChunkReady, markPlayClicked } from "./tts-metrics";
 
 export type TtsStatus = "idle" | "loading" | "playing" | "paused";
 
@@ -40,6 +42,29 @@ interface TtsPlayerContextValue {
 }
 
 const TtsPlayerContext = createContext<TtsPlayerContextValue | null>(null);
+
+/**
+ * How many chunks past the first to have the server generate into its cache
+ * when an article is opened (see prewarmFirstChunk).
+ *
+ * This used to be justified by "the pool runs three workers, so all three
+ * finish in roughly the wall-clock time of one" -- which turned out to be
+ * false on a small host, where three concurrent generations measured 2.86x a
+ * single one rather than ~1x (#162). Warming was not free; it was competing.
+ *
+ * Two is still the right number, but for a different reason: speculative
+ * work goes on the pool's low-priority queue tier, which is only ever
+ * drained when nothing is actually waiting. That makes warming safe even
+ * when the pool is effectively serial -- it can consume idle capacity and
+ * nothing else -- so the bound is about how much speculative work is worth
+ * doing, not about how much the pool can absorb for free.
+ *
+ * These cover the window between "chunk one finishes playing" and "the play
+ * loop's own prefetch has caught up" -- without them a listener gets a fast
+ * start followed by a pause, which reads as worse than a uniformly slower
+ * start.
+ */
+const PREWARM_SERVER_CHUNKS = 2;
 
 /** Non-whitespace runs in `text`, as character-offset spans -- the units
  * playKokoro's timing estimate assigns playback time to. */
@@ -85,6 +110,11 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const supported = typeof window !== "undefined";
   const { reader } = useDevicePrefs();
+  // Surfaced via a toast rather than the player bar: the bar unmounts as
+  // soon as status goes back to "idle" (see tts-player-bar.tsx's early
+  // return), which is exactly what a failed chunk does -- so an error
+  // rendered there would disappear in the same frame it appeared.
+  const { toast } = useToast();
   const readerRef = useRef(reader);
   // Synced via effect, not written during render (React refs are only safe
   // to read/write outside of render -- effects, event handlers, etc.) --
@@ -112,6 +142,12 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   // one wasted request, not a growing cost.
   const prewarmedRef = useRef<{
     articleId: string;
+    /** The full article text this warm was derived from. Held so the
+     * identity check can run *before* chunking rather than after -- the
+     * reader re-fires this effect on any article mutation, and chunking a
+     * whole article only to discover nothing changed was the expensive half
+     * of that. */
+    sourceText: string;
     chunkText: string;
     voice: string;
     rate: number;
@@ -158,23 +194,34 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
 
   const prewarmFirstChunk = useCallback(
     (articleId: string, text: string) => {
+      // Note this is inert whenever the selected voice is the device's own
+      // SpeechSynthesis ("system", the default) -- correctly so: that path
+      // needs no network round trip and no generation, so its time to first
+      // audio is already effectively zero and there is nothing to warm.
       if (!supported || !isKokoroVoice(reader.ttsVoice) || !text.trim()) return;
-      const chunkText = toSafeTextChunks(text)[0];
-      if (!chunkText) return;
+
       const existing = prewarmedRef.current;
       // Reader-view calls this reactively on every relevant render, most of
       // which change nothing that actually matters here -- skip re-issuing
       // an identical request rather than firing a new one (and abandoning
       // the still-in-flight old one) every time.
+      //
+      // Checked against the *source* text, before chunking, precisely so the
+      // common no-op case costs nothing: this used to chunk the entire
+      // article first and only then discover the result was identical.
       if (
         existing &&
         existing.articleId === articleId &&
-        existing.chunkText === chunkText &&
+        existing.sourceText === text &&
         existing.voice === reader.ttsVoice &&
         existing.rate === reader.ttsRate
       ) {
         return;
       }
+
+      const chunks = toSafeTextChunks(text);
+      const chunkText = chunks[0];
+      if (!chunkText) return;
       // Supersede, don't just overwrite -- a previous prewarm (a different
       // article, or the same article before its text/voice finished
       // settling) is no longer needed once this one exists, so cancel it
@@ -188,13 +235,37 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       // marks the promise as handled without changing what the *original*
       // promise resolves/rejects to for whoever does still await it below.
       promise.catch(() => {});
-      prewarmedRef.current = { articleId, chunkText, voice: reader.ttsVoice, rate: reader.ttsRate, promise, controller };
+
+      // The chunks *after* the first are warmed on the server instead of
+      // being fetched here. They only need to be cache hits by the time
+      // playback reaches them -- roughly a chunk's worth of audio later --
+      // so downloading them now would just move bandwidth earlier for no
+      // latency benefit, and waste it entirely for a reader who opens an
+      // article and never presses play.
+      //
+      // Bounded at two -- see PREWARM_SERVER_CHUNKS for why that bound is
+      // about how much speculation is worth doing rather than, as it once
+      // claimed, about the pool absorbing three generations for free.
+      warmKokoroChunks(chunks.slice(1, 1 + PREWARM_SERVER_CHUNKS), reader.ttsVoice, reader.ttsRate, controller.signal);
+
+      prewarmedRef.current = {
+        articleId,
+        sourceText: text,
+        chunkText,
+        voice: reader.ttsVoice,
+        rate: reader.ttsRate,
+        promise,
+        controller,
+      };
     },
     [supported, reader.ttsVoice, reader.ttsRate],
   );
 
   const stop = useCallback(() => {
     generationRef.current++; // abandon any in-flight chunk loop
+    // Safe to do here even though play() calls stop() first: play()'s own
+    // mark is recorded afterwards, in playKokoro.
+    abandonTtfaSample();
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     if (supported && "speechSynthesis" in window) window.speechSynthesis.cancel();
@@ -301,7 +372,9 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
         controller = warm.controller;
         inFlight.set(0, warm.promise);
         nextToPrefetch = 1;
+        markPlayClicked(true);
       } else {
+        markPlayClicked(false);
         warm?.controller.abort(); // stale prewarm for a different article/chunk/voice -- not needed
         controller = new AbortController();
       }
@@ -326,10 +399,29 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
           let blob: Blob;
           try {
             blob = await inFlight.get(i)!;
-          } catch {
-            if (generationRef.current === myGeneration) setStatus("idle");
+          } catch (err) {
+            if (generationRef.current !== myGeneration) return;
+            // An AbortError here is the user pressing stop (or a supersede)
+            // -- expected, and stop() has already reset everything. Anything
+            // else is a real failure, and this used to be indistinguishable:
+            // both went silently to "idle", so a rate-limited or failing
+            // server just made read-aloud quietly stop mid-article with
+            // nothing shown to the user.
+            // Never audible, so there's no TTFA to record -- drop the
+            // pending sample rather than let it attach to the next play.
+            abandonTtfaSample();
+            const aborted = err instanceof DOMException && err.name === "AbortError";
+            if (!aborted) {
+              toast(
+                i === 0
+                  ? "Couldn't start reading aloud. Please try again."
+                  : "Reading aloud stopped early — the audio couldn't be loaded.",
+              );
+            }
+            setStatus("idle");
             return;
           }
+          if (i === 0) markFirstChunkReady();
           inFlight.delete(i);
           if (generationRef.current !== myGeneration) return;
 
@@ -393,6 +485,10 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
               .then(() => {
                 if (firstChunkStarted) return;
                 firstChunkStarted = true;
+                // Measured here rather than where play() is *called*: this
+                // resolves when audio is genuinely audible, which is the
+                // only definition of "time to first audio" worth reporting.
+                markFirstAudio(blob.size);
                 if (generationRef.current === myGeneration) setStatus("playing");
               })
               .catch(() => resolve());
@@ -412,7 +508,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [revokeObjectUrl],
+    [revokeObjectUrl, toast],
   );
 
   const play = useCallback(

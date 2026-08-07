@@ -10,7 +10,7 @@ import { expect, test } from "@playwright/test";
 
 const XKCD_FEED = "https://xkcd.com/rss.xml";
 
-test("subscribing to a feed shows its items, and unsubscribing removes it", async ({ page }) => {
+test("@live subscribing to a feed shows its items, and unsubscribing removes it", async ({ page }) => {
   await page.goto("/rss");
   await page.getByPlaceholder(/example\.com\/feed\.xml/).fill(XKCD_FEED);
   await page.getByRole("button", { name: "Subscribe", exact: true }).click();
@@ -23,7 +23,7 @@ test("subscribing to a feed shows its items, and unsubscribing removes it", asyn
   await expect(page.getByText(/no feeds yet/i)).toBeVisible();
 });
 
-test("saving an item from a feed adds it to the library", async ({ page }) => {
+test("@live saving an item from a feed adds it to the library", async ({ page }) => {
   await page.goto("/rss");
   await page.getByPlaceholder(/example\.com\/feed\.xml/).fill(XKCD_FEED);
   await page.getByRole("button", { name: "Subscribe", exact: true }).click();
@@ -39,7 +39,7 @@ test("saving an item from a feed adds it to the library", async ({ page }) => {
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(1);
 });
 
-test("subscribing to the same feed twice is rejected", async ({ page }) => {
+test("@live subscribing to the same feed twice is rejected", async ({ page }) => {
   await page.goto("/rss");
   await page.getByPlaceholder(/example\.com\/feed\.xml/).fill(XKCD_FEED);
   await page.getByRole("button", { name: "Subscribe", exact: true }).click();
@@ -52,7 +52,7 @@ test("subscribing to the same feed twice is rejected", async ({ page }) => {
 
 test("subscribing to something that isn't a feed shows an error", async ({ page }) => {
   await page.goto("/rss");
-  await page.getByPlaceholder(/example\.com\/feed\.xml/).fill("https://en.wikipedia.org/wiki/Readability");
+  await page.getByPlaceholder(/example\.com\/feed\.xml/).fill("http://127.0.0.1:4321/readability.html");
   await page.getByRole("button", { name: "Subscribe", exact: true }).click();
   await expect(page.getByText(/doesn't look like a valid rss or atom feed/i)).toBeVisible({ timeout: 15_000 });
 });

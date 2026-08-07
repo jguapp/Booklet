@@ -21,6 +21,7 @@ import { registerTtsRoute } from "./routes/tts.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { captureException, initErrorMonitoring } from "./lib/error-monitoring.js";
 import { isAllowedOrigin } from "./lib/cors.js";
+import { ttsPoolStatus } from "./services/tts-pool.js";
 
 /**
  * Builds a fully-configured Fastify instance without binding a port -- the
@@ -31,7 +32,24 @@ import { isAllowedOrigin } from "./lib/cors.js";
 export async function buildApp(): Promise<FastifyInstance> {
   initErrorMonitoring();
 
-  const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
+  // trustProxy is opt-in via env, not on by default, and that distinction
+  // matters in both directions.
+  //
+  // Off (the default) behind a reverse proxy -- which is how this actually
+  // deploys on Fly/Railway/Render/nginx/Cloudflare -- every request's
+  // `request.ip` is the *proxy's* address, not the client's. @fastify/rate-limit
+  // keys on `request.ip` by default (its defaultKeyGenerator is literally
+  // `req => req.ip`), so every user in the world would share a single bucket
+  // and the TTS limit below would lock everyone out within a minute of launch.
+  //
+  // On when there *isn't* a trusted proxy in front is the opposite failure:
+  // X-Forwarded-For is client-controlled, so anyone could spoof a fresh IP per
+  // request and bypass rate limiting entirely. Hence env-gated rather than
+  // either hardcoded value -- see DEPLOYMENT.md.
+  const app = Fastify({
+    logger: process.env.NODE_ENV !== "test",
+    trustProxy: process.env.TRUST_PROXY === "true",
+  });
 
   app.setErrorHandler((err: FastifyError, request, reply) => {
     captureException(err);
@@ -72,6 +90,16 @@ export async function buildApp(): Promise<FastifyInstance> {
     // coverage, not something new this change introduces.
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
     credentials: true,
+    // Without this, no Access-Control-Max-Age header is sent and browsers
+    // fall back to a very short default (~5s in Chrome) -- meaning a
+    // preflight OPTIONS round trip in front of essentially every request.
+    // That lands squarely on the TTS critical path: /api/tts is a POST with
+    // Content-Type: application/json and credentials: "include" (see
+    // apps/web/src/lib/api/client.ts), i.e. never a "simple" request, so
+    // read-aloud pays an extra RTT before the first chunk's generation can
+    // even start, and again for every chunk after the short default lapses.
+    // 24h is the largest value Chrome honors (Firefox caps at 24h too).
+    maxAge: 86400,
   });
 
   await app.register(cookie);
@@ -80,8 +108,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   // production deployment needs a shared store (e.g. Redis via
   // @fastify/rate-limit's `redis` option) so limits are enforced across
   // instances instead of separately per-process.
+  // Configurable because the e2e suite drives the entire app from a single
+  // IP address in a couple of minutes -- exactly the shape this limit exists
+  // to stop, and it will trip on a large enough suite even though nothing is
+  // wrong. Raising it there beats the alternatives (per-test IP spoofing, or
+  // discovering it as an intermittent 429 in one unlucky spec).
   await app.register(rateLimit, {
-    max: 300,
+    max: Number(process.env.GLOBAL_RATE_LIMIT_MAX) || 300,
     timeWindow: "1 minute",
   });
 
@@ -92,7 +125,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await setupAuthContext(app);
 
   app.get("/api/health", async (): Promise<HealthResponse> => {
-    return { status: "ok", timestamp: new Date().toISOString() };
+    return { status: "ok", timestamp: new Date().toISOString(), tts: ttsPoolStatus() };
   });
 
   await registerAuthRoutes(app);
