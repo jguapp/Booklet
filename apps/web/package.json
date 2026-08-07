@@ -17,10 +17,12 @@
     "@sentry/browser": "^10.68.0",
     "epubjs": "^0.3.93",
     "jszip": "^3.10.1",
+    "minisearch": "^7.2.0",
     "next": "16.2.11",
     "pdfjs-dist": "^6.1.200",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "stemmer": "^2.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
