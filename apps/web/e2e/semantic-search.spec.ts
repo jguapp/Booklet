@@ -36,6 +36,9 @@ test("@live the embedding worker loads in the browser and matches by meaning", a
 
     const vectors = await new Promise<Float32Array[]>((resolve, reject) => {
       worker.addEventListener("message", (event) => {
+        // Download progress is interleaved with replies; anything that treats
+        // every message as a response rejects on the first one.
+        if (event.data.kind === "model-progress") return;
         if (event.data.ok) resolve(event.data.vectors);
         else reject(new Error(event.data.error));
       });
@@ -64,6 +67,41 @@ test("@live the embedding worker loads in the browser and matches by meaning", a
   // A floor as well as a comparison: beating an unrelated sentence is easy if
   // both scores are noise near zero.
   expect(result.relatedScore).toBeGreaterThan(0.2);
+});
+
+test("@live the model download reports progress rather than going silent", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto("/library");
+
+  // A fresh browser context has an empty Cache API, so this is genuinely a
+  // cold download -- which is the only state where progress can be observed.
+  const report = await page.evaluate(async () => {
+    const worker = new Worker("/workers/embedding-worker.js", { type: "module" });
+    const fractions: number[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      worker.addEventListener("message", (event) => {
+        if (event.data.kind === "model-progress") {
+          if (event.data.total > 0) fractions.push(event.data.loaded / event.data.total);
+          return;
+        }
+        if (event.data.ok) resolve();
+        else reject(new Error(event.data.error));
+      });
+      worker.addEventListener("error", (event) => reject(new Error(event.message || "worker failed")));
+      worker.postMessage({ id: 1, texts: ["a short sentence to force the model to load"] });
+    });
+    worker.terminate();
+
+    return { count: fractions.length, max: Math.max(0, ...fractions), monotonic: fractions.every((f, i, a) => i === 0 || f >= a[i - 1]) };
+  });
+
+  expect(report.count).toBeGreaterThan(0);
+  // Summed across files, so it must climb rather than restart per file --
+  // that is the whole reason the worker aggregates instead of forwarding raw
+  // per-file events.
+  expect(report.monotonic).toBe(true);
+  expect(report.max).toBeGreaterThan(0.5);
 });
 
 test("the setting is off by default and downloads nothing until turned on", async ({ page }) => {

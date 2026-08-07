@@ -19,7 +19,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { localArticles, localEmbeddings } from "@/lib/local/db";
-import { type IndexProgress, buildLocalEmbeddingIndex, terminateEmbeddingWorker } from "@/lib/search/local-embeddings";
+import {
+  type IndexProgress,
+  buildLocalEmbeddingIndex,
+  setModelProgressListener,
+  terminateEmbeddingWorker,
+} from "@/lib/search/local-embeddings";
 import { cn } from "@/lib/cn";
 
 /**
@@ -32,6 +37,10 @@ import { cn } from "@/lib/cn";
  */
 type IndexState =
   | { kind: "idle" }
+  // Its own state, not a flavour of "indexing": the 25MB download happens
+  // before any article can be embedded, and reporting it as "indexing 0 of
+  // 40" for a minute is how a feature gets mistaken for a hung one.
+  | { kind: "downloading"; fraction: number }
   | { kind: "indexing"; progress: IndexProgress }
   | { kind: "done" }
   | { kind: "error"; message: string };
@@ -56,6 +65,14 @@ export function SemanticSearchSetting() {
     const controller = new AbortController();
     abortRef.current = controller;
     setState({ kind: "indexing", progress: { done: 0, total: 0 } });
+
+    // Download progress outranks indexing progress while it is arriving: the
+    // worker only emits these until the weights are in place, after which
+    // onProgress below takes over for the rest of the run.
+    setModelProgressListener((fraction) => {
+      if (!controller.signal.aborted && fraction < 1) setState({ kind: "downloading", fraction });
+    });
+
     try {
       const articles = await localArticles.getAll();
       await buildLocalEmbeddingIndex(articles, {
@@ -72,6 +89,10 @@ export function SemanticSearchSetting() {
       if (!controller.signal.aborted) {
         setState({ kind: "error", message: err instanceof Error ? err.message : "Indexing failed." });
       }
+    } finally {
+      // Otherwise a listener closing over this run's aborted controller stays
+      // installed and swallows the next run's download progress.
+      setModelProgressListener(null);
     }
   }, []);
 
@@ -124,6 +145,12 @@ export function SemanticSearchSetting() {
           On
         </button>
       </div>
+      {state.kind === "downloading" && (
+        <p className="font-sans text-xs text-ink-faint" role="status">
+          Downloading the language model, {Math.round(state.fraction * 100)}% of about 25MB. This happens once --
+          it&apos;s cached for next time.
+        </p>
+      )}
       {state.kind === "indexing" && state.progress.total > 0 && (
         <p className="font-sans text-xs text-ink-faint" role="status">
           Indexing {state.progress.done} of {state.progress.total} articles. You can leave this page -- it will pick
