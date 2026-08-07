@@ -1246,9 +1246,32 @@
           <p>
             The cause is that each worker sizes its ONNX Runtime thread pool
             to the whole machine, so three workers on two cores oversubscribe
-            and contend rather than share (tracked as issue #162). This also
-            invalidates the reasoning behind warming exactly two chunks
-            ahead, which assumed the extra work was close to free.
+            and contend rather than share. This also invalidated the
+            reasoning behind warming exactly two chunks ahead, which assumed
+            the extra work was close to free.
+          </p>
+          <p>
+            <strong>Fixed since (#162).</strong> Three changes, in the order
+            they matter. Each worker's ONNX session now gets an explicit
+            thread budget — <code>cores / pool size</code> — instead of
+            being left to claim the machine. The pool is sized from real
+            cores rather than a fixed three, so a 2-vCPU host runs two
+            workers rather than three fighting. And the benchmark now prints
+            the host's core count and the concurrency ratio as a first-class
+            number (<code>1.00&times;</code> perfect,
+            <code>3.00&times;</code> serialized), because the original claim
+            was not wrong so much as <em>context-free</em> — a real
+            measurement of a machine nobody deploys to, recorded as though it
+            were a property of the design.
+          </p>
+          <p>
+            The warm-ahead count stayed at two, but its justification did
+            not. It is no longer "the extra chunks are free because the pool
+            is parallel"; it is that speculative work runs on a
+            <a href="#tts">low-priority queue tier</a> that only ever
+            consumes capacity which would otherwise sit idle, so it cannot
+            push back the chunk a listener is actually waiting for even when
+            the pool is effectively serial.
           </p>
           <p>
             Worth recording as a correction rather than a quiet edit: the
