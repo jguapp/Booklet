@@ -324,6 +324,20 @@ model Article {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Weighted tsvector over title/author/siteName/tags/excerpt/extractedText,
+  /// backing ranked full-text search (#155). A Postgres GENERATED ALWAYS ...
+  /// STORED column, so it can never drift from the row the way a trigger or
+  /// application-maintained column can -- there is no write path that could
+  /// forget to update it.
+  ///
+  /// Declared here purely so Prisma knows it exists. `Unsupported` means the
+  /// client cannot read or write it, which is exactly right (search.ts reads
+  /// it through raw SQL), but declaring it is not optional: without it,
+  /// Prisma treats the column as drift and the next `migrate dev` offers to
+  /// drop it. Its expression and GIN index live in the migration, since
+  /// neither is expressible in this schema language.
+  searchVector Unsupported("tsvector")?
+
   highlights  Highlight[]
   collections ArticleCollection[]
 

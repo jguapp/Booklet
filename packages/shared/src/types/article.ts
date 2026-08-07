@@ -135,8 +135,22 @@ export interface ArticleListResponse {
   nextCursor: string | null;
 }
 
-/** GET /api/search */
+/** Wraps a matched term inside a snippet. Deliberately a pair of C0 control
+ * characters rather than `<mark>`: a snippet is cut from article text this
+ * app did not author, so returning HTML would mean rendering attacker-
+ * controlled markup (Postgres's ts_headline does not escape the document it
+ * quotes from). Control characters cannot occur in extracted article text,
+ * survive JSON transport, and let the UI split the string into plain React
+ * nodes -- so nothing ever needs dangerouslySetInnerHTML to show a snippet. */
+export const SNIPPET_MARK_START = "\u0002";
+export const SNIPPET_MARK_END = "\u0003";
+
 export interface SearchResponse {
+  /** Ordered by relevance, best first -- not by savedAt. */
   articles: ArticleSummary[];
   highlights: Highlight[];
+  /** articleId -> a short excerpt showing why it matched, with matched terms
+   * wrapped in SNIPPET_MARK_START/END. Absent for an article that matched on
+   * something with no body context to quote (a tag, or a title-only hit). */
+  snippets?: Record<string, string>;
 }
