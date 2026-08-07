@@ -36,7 +36,8 @@ jobs:
       - run: pnpm --filter @booklet/extension exec tsc --noEmit
       - run: pnpm --filter @booklet/mobile exec tsc --noEmit
 
-  test-shared:
+  # Unit tests that need nothing but Node: @booklet/shared and apps/web.
+  test-unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +48,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @booklet/shared test
+      # apps/web's unit tests run here rather than in their own job: they need
+      # no database, no browser and no built artifacts, and the whole suite is
+      # ~2s -- a dedicated job would spend more time on checkout and install
+      # than on the tests. See apps/web/vitest.config.ts for what they cover
+      # and why the runner exists at all (#165).
+      - run: pnpm --filter @booklet/shared build
+      - run: pnpm --filter @booklet/web test
 
   test-api:
     runs-on: ubuntu-latest

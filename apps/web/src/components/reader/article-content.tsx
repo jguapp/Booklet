@@ -101,7 +101,7 @@ function isReasonablyScoped(el: HTMLElement): boolean {
 // sub-section to point at when the "nearest" match is actually a
 // wrapper around several real sections, so no indicator is the honest
 // answer, not the whole page.
-function nearestSectionEl(node: Node, container: HTMLElement): HTMLElement | null {
+export function nearestSectionEl(node: Node, container: HTMLElement): HTMLElement | null {
   const el = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
   if (!el || el === container) return null;
   const specific = el.closest<HTMLElement>(SECTION_SELECTOR);
@@ -133,7 +133,7 @@ function nearestSectionEl(node: Node, container: HTMLElement): HTMLElement | nul
 // deliberately left alone: it's shared with highlight rendering, where the
 // *end* point decides which text nodes get wrapped in <mark>, and biasing
 // that forward would change what gets wrapped.
-function sectionAnchorNode(point: { node: Text; offset: number }, container: HTMLElement): Node {
+export function sectionAnchorNode(point: { node: Text; offset: number }, container: HTMLElement): Node {
   if (point.offset < point.node.data.length) return point.node;
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   walker.currentNode = point.node;
