@@ -62,6 +62,28 @@ export function toArticle(row: ArticleRow): Article {
 
 const TRASH_RETENTION_DAYS = 30;
 
+/** Everything an article owns on disk, which is two files and not one: the
+ * uploaded PDF/EPUB, and the podcast episode generated from it. Only the
+ * first was ever cleaned up. The second is easy to miss because deleting the
+ * article cascades its ArticleAudio row away, so after the delete there is
+ * nothing left that even names the WAV -- it just stays on the disk forever,
+ * and on a paid volume that is a bill (#173).
+ *
+ * Selected as a shape rather than passed as keys so every caller below has to
+ * ask for `audio` in its query, and forgetting to is a type error instead of
+ * another silent leak. */
+type ArticleFileRefs = { fileStorageKey: string | null; audio: { storageKey: string } | null };
+const ARTICLE_FILE_SELECT = { fileStorageKey: true, audio: { select: { storageKey: true } } } as const;
+
+/** Always after the rows are gone, never before: a delete that fails
+ * mid-flight should leave a row pointing at bytes that exist, not the
+ * reverse. Individually best-effort, since a file already missing (a
+ * half-finished earlier delete) must not fail the request. */
+async function deleteArticleFiles(articles: ArticleFileRefs[]): Promise<void> {
+  const keys = articles.flatMap((a) => [a.fileStorageKey, a.audio?.storageKey ?? null]).filter((k) => k !== null);
+  await Promise.all(keys.map((key) => deleteStoredFile(key).catch(() => undefined)));
+}
+
 /** Best-effort -- called before reading the trash view, not on a schedule
  * (no background worker in this app). Failing silently just means a purge
  * happens on the next read instead. */
@@ -69,13 +91,11 @@ async function purgeExpiredTrash(userId: string): Promise<void> {
   const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const expired = await prisma.article.findMany({
     where: { userId, deletedAt: { lt: cutoff } },
-    select: { id: true, fileStorageKey: true },
+    select: { id: true, ...ARTICLE_FILE_SELECT },
   });
   if (expired.length === 0) return;
   await prisma.article.deleteMany({ where: { id: { in: expired.map((a) => a.id) } } });
-  await Promise.all(
-    expired.filter((a) => a.fileStorageKey).map((a) => deleteStoredFile(a.fileStorageKey!).catch(() => undefined)),
-  );
+  await deleteArticleFiles(expired);
 }
 
 /** Takes a row that never had extractedHtml/extractedText selected in the
@@ -593,12 +613,11 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
     async (request, reply) => {
       const existing = await prisma.article.findFirst({
         where: { id: request.params.id, userId: request.userId! },
+        select: { id: true, ...ARTICLE_FILE_SELECT },
       });
       if (!existing) return reply.code(404).send({ error: "not_found", message: "Article not found." });
       await prisma.article.delete({ where: { id: existing.id } });
-      if (existing.fileStorageKey) {
-        await deleteStoredFile(existing.fileStorageKey).catch(() => undefined);
-      }
+      await deleteArticleFiles([existing]);
       return reply.code(204).send();
     },
   );
@@ -610,13 +629,11 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
   app.delete("/api/articles/trash", { preHandler: requireAuth }, async (request, reply) => {
     const trashed = await prisma.article.findMany({
       where: { userId: request.userId!, deletedAt: { not: null } },
-      select: { id: true, fileStorageKey: true },
+      select: { id: true, ...ARTICLE_FILE_SELECT },
     });
     if (trashed.length > 0) {
       await prisma.article.deleteMany({ where: { id: { in: trashed.map((a) => a.id) } } });
-      await Promise.all(
-        trashed.filter((a) => a.fileStorageKey).map((a) => deleteStoredFile(a.fileStorageKey!).catch(() => undefined)),
-      );
+      await deleteArticleFiles(trashed);
     }
     return reply.code(204).send();
   });

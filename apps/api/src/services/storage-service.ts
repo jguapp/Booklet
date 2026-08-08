@@ -10,11 +10,34 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ReadStream } from "node:fs";
 
-const STORAGE_ROOT = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "storage",
+/** Where these files actually live, and the single most important thing to
+ * get right about this module in a deployment (#173).
+ *
+ * The default is a directory inside the application itself, which is correct
+ * for `pnpm dev` and wrong everywhere else: container filesystems are
+ * replaced on every deploy, so a routine release deleted every uploaded book
+ * and every generated podcast enclosure while the rows naming them survived
+ * -- a library that lists fine and opens empty, discovered long after the
+ * deploy that caused it. FILE_STORAGE_PATH is how a deployment moves this
+ * onto a mounted disk that outlives the container; docker-compose.yml and
+ * apps/api/Dockerfile set it, and DEPLOYMENT.md treats it as a hard
+ * requirement in the same terms as the database.
+ *
+ * Named FILE_STORAGE_PATH rather than STORAGE_ROOT because "storage" alone
+ * says nothing about which storage (Redis and Postgres are storage too), and
+ * because a bare generic name is exactly the kind a hosting platform injects
+ * for its own purposes.
+ *
+ * Resolved, not used raw: a relative value would otherwise be interpreted
+ * against the process's cwd only by accident of path.join, and the default
+ * itself moves with the compiled layout -- `node dist/index.js` resolves it
+ * two directories up from dist/, not from src/services/. Setting the
+ * variable explicitly is what makes the location stop depending on which of
+ * those is running.
+ */
+const STORAGE_ROOT = path.resolve(
+  process.env.FILE_STORAGE_PATH?.trim() ||
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "storage"),
 );
 
 function keyToPath(storageKey: string): string {

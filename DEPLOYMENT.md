@@ -19,6 +19,10 @@ what that means in practice.
   (`output: "standalone"` is set in `next.config.ts` specifically so it
   isn't tied to one platform's build system)
 - A JWT_ACCESS_SECRET (see `apps/api/.env.example` for how to generate one)
+- **A mounted persistent disk for uploaded files, with `FILE_STORAGE_PATH`
+  pointing at it** -- as non-optional as the database, and for the same
+  reason: it holds user data that exists nowhere else. See "File storage"
+  below.
 
 Optional, everything works without them (see the code comments where each
 is read for the fallback behavior):
@@ -200,6 +204,46 @@ confirmation, neither of which belong in a deploy step. `migrate deploy`
 just applies whatever's in `apps/api/prisma/migrations/` that hasn't run
 yet.
 
+## File storage
+
+**This needs a mounted persistent disk, in exactly the sense the database
+does. Without one the app destroys user data on the next deploy.**
+
+`apps/api/src/services/storage-service.ts` writes two kinds of file to local
+disk: the uploaded PDF/EPUB behind `Article.fileStorageKey`, and the
+generated podcast enclosure behind `ArticleAudio.storageKey`. Both are named
+by rows in Postgres, and neither is anywhere else -- the web app deliberately
+clears its own IndexedDB copy of an uploaded book once the server has
+accepted it, so after a signup migration the server holds the only copy of
+files the user may no longer have at all.
+
+- `FILE_STORAGE_PATH` (API, default `apps/api/storage/`) -- absolute path to
+  write them under. **The default is a directory inside the application**,
+  which is right for `pnpm dev` and catastrophic in a deployment: container
+  filesystems are replaced on every deploy on every platform this is likely
+  to run on (Fly, Railway, Render, Cloud Run, plain `docker compose up -d
+  --build`), and often on restart. Set it to a mount point on a real volume
+  and the library survives releases; leave it unset and the first routine
+  redeploy after launch empties every reader while the library page still
+  lists everything, because the rows are still there.
+- In `docker-compose.yml` this is the `storage-data` named volume mounted at
+  `/var/lib/booklet/storage`, declared the same way `postgres-data` and
+  `redis-data` are. `apps/api/Dockerfile` creates that directory and sets
+  `FILE_STORAGE_PATH` to it; on any other platform, attach a volume and point
+  the variable at it yourself.
+- **Back it up alongside Postgres, not separately.** A database backup
+  restored next to a lost disk gives you rows pointing at files that don't
+  exist -- a library that lists correctly and opens empty, which is worse
+  than a visible failure. `GET /api/articles/:id/file` 404s, and podcast
+  clients 404 on enclosures they already listed.
+- **A mounted disk is a single-instance answer.** It works, completely, for
+  one API process. It stops working the moment there are two: instance A
+  cannot serve a file instance B wrote, so uploads and podcast enclosures
+  start failing for whichever half of the requests land on the wrong box.
+  Object storage (S3/R2/GCS) is the real fix, and this module was written to
+  make it a change to three functions rather than to their callers -- but it
+  is not done here. Until it is, run one API instance.
+
 ## Docker
 
 `apps/api/Dockerfile` and `apps/web/Dockerfile` build each app; `docker-compose.yml`
@@ -258,12 +302,11 @@ JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toStr
   than one API instance behind a load balancer without switching to a
   shared store (Redis, via the plugin's `redis` option). Noted in the code
   where it's registered.
-- **File storage**: `apps/api/src/services/storage-service.ts` writes
-  PDF/EPUB uploads to local disk (`apps/api/storage/`). Fine for a single
-  instance with a persistent volume; multiple instances or ephemeral
-  containers need to swap this for S3 (or similar) -- the module's three
-  functions (`saveFile`/`readStoredFile`/`deleteStoredFile`) are the only
-  thing that needs replacing, per the comment at the top of that file.
+- **`FILE_STORAGE_PATH`**: the one item in this list that loses data rather
+  than degrading an experience, and the one that fires without anyone doing
+  anything wrong -- shipping a routine change is enough. Set it to a mounted
+  persistent disk before the first deploy, not after. Full detail in "File
+  storage" above.
 - **`NEXT_PUBLIC_*` vars**: Next.js inlines these into the client bundle at
   *build* time, not runtime. `NEXT_PUBLIC_API_URL` and
   `NEXT_PUBLIC_SENTRY_DSN` need to be set when you build the web image, not
