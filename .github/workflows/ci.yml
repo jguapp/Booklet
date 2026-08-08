@@ -1,17 +1,20 @@
 # CI for Booklet.
 #
-# Read this before editing: `.gitlab-ci.yml` is a second, equivalent pipeline
-# covering the same seven jobs, and **a change here has to be mirrored there**
-# (and vice versa). That is not hypothetical -- #169's auth rate limits were
-# added to the GitLab file and not to this one, and this workflow's
-# test-web-e2e job would have failed on them until it was fixed.
+# This is the one and only pipeline. It runs on a **self-hosted runner** --
+# a machine you own, registered to this repository (see
+# scripts/register-github-runner.sh and docs/CI_GITHUB_RUNNER.md). Self-hosted
+# runner minutes are not metered or billed, which is the whole reason this
+# repo is on one: GitHub-hosted minutes and GitLab's free tier both ran out
+# mid-branch and left pushes unverified. There is no second (GitLab) pipeline
+# to keep in sync anymore -- that was removed when the move happened.
 #
-# Which of the two is actually live, and why neither may be right now, is in
-# DEPLOYMENT.md's "Which CI config is live". The short version: this workflow
-# is dormant because the repository's Actions allowance is exhausted, and the
-# GitLab pipeline does not run either until the repository reaches GitLab.
-# The file is kept, not deleted -- it is the only pipeline here with a
-# proven-green history on real hardware.
+# Because the runner is a persistent machine rather than a fresh VM per job,
+# two things follow that a GitHub-hosted runner handled for free:
+#   - It needs Docker (for the `services:` Postgres containers and the
+#     docker-build job) and passwordless sudo (for the apt-get/xvfb steps),
+#     provisioned once. docs/CI_GITHUB_RUNNER.md lists the prerequisites.
+#   - One runner runs one job at a time, so the seven jobs serialize. Register
+#     more runners (same script, same labels) to run them in parallel.
 
 name: CI
 
@@ -19,11 +22,12 @@ on:
   push:
     branches: [main]
   pull_request:
-    # A commit that only touches prose costs the same ~22 minutes of runner
-    # time as one that touches every app, and buys nothing -- there is no
-    # code in it to typecheck, bundle, or drive a browser against. Note this
-    # means a docs-only PR reports *no* checks at all; if required status
-    # checks are ever turned on for this repo, this needs to become a
+    # A commit that only touches prose ties the runner up for the same ~22
+    # minutes as one that touches every app, and buys nothing -- there is no
+    # code in it to typecheck, bundle, or drive a browser against. On a single
+    # self-hosted runner that is 22 minutes the next real push has to wait for.
+    # Note this means a docs-only PR reports *no* checks at all; if required
+    # status checks are ever turned on for this repo, this needs to become a
     # no-op job rather than a skipped workflow, or such a PR can never merge.
     paths-ignore:
       - "**/*.md"
@@ -34,11 +38,11 @@ on:
   workflow_dispatch:
 
 # Superseded runs are cancelled instead of racing the new one to the finish.
-# Pushing five times in an afternoon used to mean five concurrent full runs,
-# four of which nobody would ever read -- at ~22 minutes of billable runner
-# time each, that is where an Actions allowance actually goes. The final
-# push on a branch still gets a complete run; only the ones already obsolete
-# are dropped.
+# This mattered for billed minutes on a hosted runner; on a single self-hosted
+# runner it matters more, not less -- five pushes in an afternoon would queue
+# five full runs back to back, and the newest push (the only one anyone will
+# read) would wait behind ~88 minutes of already-obsolete work. The final push
+# on a branch still gets a complete run; only the ones already obsolete drop.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -58,7 +62,7 @@ env:
 
 jobs:
   typecheck-and-lint:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -85,7 +89,7 @@ jobs:
 
   # Unit tests that need nothing but Node: @booklet/shared and apps/web.
   test-unit:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -104,7 +108,7 @@ jobs:
       - run: pnpm --filter @booklet/web test
 
   test-api:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     services:
       postgres:
         image: postgres:16
@@ -138,7 +142,7 @@ jobs:
       - run: pnpm --filter @booklet/api test
 
   test-web-e2e:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     services:
       postgres:
         image: postgres:16
@@ -244,7 +248,7 @@ jobs:
     # be asked for on any branch via workflow_dispatch -- which is exactly
     # how #162's before/after numbers were taken.
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -264,7 +268,7 @@ jobs:
       - run: pnpm --filter @booklet/api exec tsx scripts/bench-tts-ttfa.ts
 
   docker-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       # Build only, no push -- this is here to catch exactly the kind of
@@ -308,7 +312,7 @@ jobs:
           docker logs booklet-api
 
   test-extension-e2e:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     services:
       postgres:
         image: postgres:16

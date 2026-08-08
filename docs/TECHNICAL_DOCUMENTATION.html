@@ -342,7 +342,7 @@
   <button class="mobile-toc-toggle" id="mobileTocToggle" type="button">☰ Contents</button>
   <nav class="toc" id="toc">
     <div class="toc-title">📖 Booklet</div>
-    <div class="toc-sub">The Coding Bible — v8, living document</div>
+    <div class="toc-sub">The Coding Bible — v9, living document</div>
     <ol>
       <li><a href="#part-0">0. How to Use This Document</a></li>
       <li><a href="#part-1">I. The Big Picture</a>
@@ -413,7 +413,7 @@
         <ol>
           <li><a href="#ci-what-it-is">What CI Actually Does Here</a></li>
           <li><a href="#ci-cost">The Day the Allowance Ran Out</a></li>
-          <li><a href="#gitlab-port">Porting the Pipeline to GitLab</a></li>
+          <li><a href="#ci-self-hosted">Moving to a Self-Hosted Runner</a></li>
           <li><a href="#ci-gating">Gating Jobs on the Tree, Not on a Flag</a></li>
           <li><a href="#deployment">Deployment &amp; Environment</a></li>
           <li><a href="#observability">Observability</a></li>
@@ -4170,36 +4170,27 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           production images and smoke-tests the API image against a real
           Postgres container.
         </p>
-        <div class="callout warn">
-          <span class="callout-label">That pipeline is written twice, and neither copy may be running</span>
+        <div class="callout">
+          <span class="callout-label">One pipeline, on a machine you own</span>
           <p>
-            <code>.github/workflows/ci.yml</code> is the version whose runs
-            have actually gone green on real hardware, but this repository's
-            Actions allowance is exhausted, so it is dormant.
-            <code>.gitlab-ci.yml</code> is an equivalent port — the same seven
-            jobs, with service hostnames, service readiness and
-            Docker-in-Docker networking genuinely rewritten rather than
-            copied — and it has never executed, because the repository lives
-            on GitHub. <code>docs/CI_GITLAB.md</code> covers the move,
-            including the part that matters most: GitLab.com's free tier is
-            <em>smaller</em> than Actions', so shared runners do not solve the
-            problem that prompted the switch. A self-hosted runner does.
-          </p>
-          <p>
-            Two configs that both exist and neither of which runs is a drift
-            hazard, and it has already bitten once: #169's auth rate limits
-            were added to the GitLab file only, leaving the Actions
-            <code>test-web-e2e</code> job unrunnable. Both files now carry a
-            header saying a change to one has to be mirrored to the other.
-            Until one is genuinely live, <code>pnpm verify</code> is the
-            stand-in — see Part VI.
+            There is a single config, <code>.github/workflows/ci.yml</code>,
+            and it runs on a <strong>self-hosted runner</strong> rather than
+            GitHub-hosted VMs. The two-config GitHub/GitLab split that used to
+            live here — and the drift it caused (#169's auth rate limits were
+            once added to the GitLab file only, leaving the Actions
+            <code>test-web-e2e</code> job unrunnable) — is gone: the GitLab
+            pipeline was removed. Why a self-hosted runner rather than either
+            hosted service is the subject of
+            <a href="#ci-self-hosted">Moving to a Self-Hosted Runner</a> below;
+            the short version is that it is the only option with no metered
+            minutes to run out of. Whether pushes are verified at any given
+            moment depends on one thing — is a runner registered and Idle —
+            and until one is, <code>pnpm verify</code> is the stand-in (Part
+            VI).
           </p>
         </div>
         <p>
-          Booklet's pipeline exists twice, in two dialects, and both are real
-          and current: <code>.github/workflows/ci.yml</code> for GitHub
-          Actions and <code>.gitlab-ci.yml</code> for GitLab CI/CD. Six jobs,
-          in three stages:
+          The pipeline is seven jobs, in three stages:
         </p>
         <table>
           <tr><th>Job</th><th>What it does, and why it's separate</th></tr>
@@ -4313,19 +4304,53 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           </p>
         </div>
 
-        <h3 id="gitlab-port">Porting the Pipeline to GitLab</h3>
+        <h3 id="ci-self-hosted">Moving to a Self-Hosted Runner</h3>
         <p>
-          The second response was to port the whole thing to GitLab CI/CD,
-          which is where the pipeline runs now. Every job is a
-          <strong>deliberate translation</strong> of its Actions counterpart
-          rather than a fresh design, so the two can be compared side by side
-          while both exist, with every non-cosmetic difference commented at
-          the point it occurs.
+          The second response was to <strong>stop paying for metered
+          minutes at all</strong> — but the first attempt at that was a wrong
+          turn worth recording, because it is the kind of wrong turn that
+          looks right. The pipeline was ported to GitLab CI/CD, on the
+          assumption that a second provider meant a second free allowance.
+          It does: GitLab.com's free tier is <em>smaller</em> than Actions',
+          not larger. Moving there would have hit the same wall sooner. The
+          port was reversed and its config removed.
         </p>
         <p>
-          Four translation hazards account for most of the work, and each one
-          silently produces a broken-but-green or mysteriously-red pipeline if
-          missed. They generalize well beyond this repo:
+          What actually removes the meter is not a different vendor but
+          <strong>not renting the compute in the first place</strong>. GitHub
+          bills minutes only for <em>GitHub-hosted</em> runners; a
+          <strong>self-hosted runner</strong> — a machine you own, registered
+          to the repo — is free and unmetered. That is where CI runs now, and
+          it is the only arrangement with no allowance to exhaust. The cost
+          does not vanish, it changes shape: from a per-minute bill to a
+          machine you keep running (an old laptop, a spare box, or a ~$5–12/mo
+          VPS), and from zero maintenance to patching that machine yourself.
+          Because the runner is persistent rather than a fresh VM per job, it
+          needs Docker and passwordless sudo provisioned once, and one runner
+          runs one job at a time (register more to parallelize) — all covered
+          in <code>docs/CI_GITHUB_RUNNER.md</code>, alongside the one-command
+          <code>scripts/register-github-runner.sh</code>.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why a self-hosted runner and not just "buy more minutes"</span>
+          <p>
+            Paying GitHub for more hosted minutes would also work, and for
+            some teams it is the right call — no machine to babysit. It was
+            not the call here for two reasons: the recurring metered bill is
+            precisely the failure mode that kept biting (a cap that stops CI
+            dead mid-branch), and the project already owns hardware that sits
+            idle. A self-hosted runner converts "an allowance that runs out"
+            into "a box that is either up or down," which is a failure mode you
+            can see and fix rather than one that arrives as
+            <code>runner_id: 0</code> with no explanation.
+          </p>
+        </div>
+        <p>
+          The GitLab port was not wasted, though — translating the pipeline
+          between two CI dialects surfaced four hazards that generalize well
+          beyond this repo, each of which silently produces a broken-but-green
+          or mysteriously-red pipeline if missed. They are kept here as the
+          lesson, even though the GitLab config that taught them is gone:
         </p>
         <table>
           <tr><th>Hazard</th><th>GitHub Actions</th><th>GitLab CI</th></tr>
@@ -4948,7 +4973,7 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           <dd>Running a Docker daemon inside a container so a CI job can build images. Its practical consequence in this repo: the daemon is a <em>separate container</em>, so a published port lands in the daemon's network namespace rather than the job's — and every job gets a brand-new daemon with an empty layer cache, so nothing built in one job survives into another.</dd>
 
           <dt>Service container</dt>
-          <dd>A supporting container (here, Postgres) that a CI system starts alongside a job. GitHub Actions maps its ports onto <code>localhost</code>; GitLab CI does not, exposing it under its own hostname instead — one of the four hazards in <a href="#gitlab-port">the GitLab port</a>.</dd>
+          <dd>A supporting container (here, Postgres) that a CI system starts alongside a job. GitHub Actions maps its ports onto <code>localhost</code>, which the workflow's <code>DATABASE_URL</code> relies on — unlike GitLab CI, which exposes a service under its own hostname on a shared network. That difference was one of the four hazards surfaced by <a href="#ci-self-hosted">the GitLab port, since reversed</a>.</dd>
 
           <dt><code>xvfb</code></dt>
           <dd>"X virtual framebuffer" — an X11 display server that renders to memory instead of a screen. It lets a program that insists on a real display run on a machine that has none, which is how the extension's e2e suite drives a <em>headed</em> Chromium in CI (a browser extension's background service worker does not register in headless mode).</dd>
@@ -6078,6 +6103,26 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           <tr>
             <td>2026-08-08</td>
             <td>
+              v9 — CI consolidated onto a single <strong>self-hosted GitHub
+              Actions runner</strong>, and the GitLab pipeline removed
+              entirely. Rewrote Part VII to match: the "written twice, neither
+              may run" reality is gone, and
+              <a href="#ci-self-hosted">Moving to a Self-Hosted Runner</a>
+              replaces the GitLab-port section, keeping the four
+              cross-dialect translation hazards as the lesson even though the
+              config that taught them is deleted. The point recorded there:
+              switching CI <em>vendors</em> (GitLab) does not remove metered
+              minutes — GitLab's free tier is smaller than Actions' — while a
+              runner you host has no meter to run out of at all. Added
+              <code>scripts/register-github-runner.sh</code> and
+              <code>docs/CI_GITHUB_RUNNER.md</code>; removed
+              <code>.gitlab-ci.yml</code>, <code>docs/CI_GITLAB.md</code>, and
+              the GitLab runner registration script.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-08-08</td>
+            <td>
               v8 — merged the two parallel documentation branches that had grown
               from the same v4 base while the codebase was being worked on in two
               directions at once. One lineage (this branch) went
@@ -6293,7 +6338,7 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
               runner</a>; and a rewritten
               <a href="#part-7">Part VII</a> covering
               <a href="#ci-cost">the exhausted Actions allowance</a>, the
-              <a href="#gitlab-port">GitLab port and its four translation
+              <a href="#ci-self-hosted">GitLab port and its four translation
               hazards</a>, <a href="#ci-gating">gating jobs on the tree rather
               than a flag</a>, and the <code>NEXT_PUBLIC_SENTRY_DSN</code>
               build-arg lesson. Six new entries in
@@ -6426,7 +6471,7 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <footer class="doc-footer">
         <p>
-          Booklet — Technical Documentation, v8. Written collaboratively by
+          Booklet — Technical Documentation, v9. Written collaboratively by
           the project's owner and Claude (Anthropic), grounded in the real
           implementation and real development history rather than written
           from scratch after the fact. Keep it that way: when this file is
