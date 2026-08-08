@@ -40,10 +40,6 @@ const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || "booklet-api";
 
 let provider: NodeTracerProvider | null = null;
 
-export function isTelemetryEnabled(): boolean {
-  return provider !== null;
-}
-
 /**
  * Safe to call more than once (tests build several app instances); only the
  * first call installs a provider.

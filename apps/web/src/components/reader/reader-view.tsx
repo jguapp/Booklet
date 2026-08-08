@@ -23,6 +23,7 @@ import { formatMinutesLeft, formatReadingTime } from "@/lib/format";
 import { textToParagraphHtml } from "@/lib/reader/text-to-html";
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { IconPencil } from "@/components/ui/icons";
+import { LoadError } from "@/components/ui/load-error";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { ReaderToolbar } from "./reader-toolbar";
 import { ReaderProgressBar } from "./reader-progress-bar";
@@ -77,6 +78,7 @@ export function ReaderView({ articleId }: { articleId: string }) {
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [progress, setProgress] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [fileBlob, setFileBlob] = useState<Blob | null>(null);
   const [fileLoadStatus, setFileLoadStatus] = useState<"idle" | "loading" | "loaded" | "failed">("idle");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
@@ -113,13 +115,17 @@ export function ReaderView({ articleId }: { articleId: string }) {
 
   const refresh = useCallback(() => {
     if (authStatus === "loading") return;
-    Promise.all([loadArticle(articleId, isAuthenticated), loadHighlights(isAuthenticated, articleId)]).then(
-      ([a, h]) => {
+    Promise.all([loadArticle(articleId, isAuthenticated), loadHighlights(isAuthenticated, articleId)])
+      .then(([a, h]) => {
         setArticle(a);
         setHighlights(h);
         setLoaded(true);
-      },
-    );
+      })
+      // loadArticle already turns a 404 into null (rendered as "couldn't find
+      // that article"), so reaching here means the request itself failed --
+      // and without this the reader stayed on `if (!loaded) return null`
+      // forever, i.e. a blank page with no message and no way to retry.
+      .catch(() => setLoadFailed(true));
   }, [authStatus, isAuthenticated, articleId]);
 
   useEffect(() => {
@@ -314,14 +320,46 @@ export function ReaderView({ articleId }: { articleId: string }) {
   // call racing the `article` state update that would otherwise let the
   // effect fire again before status catches up.
   const autoArchivedRef = useRef(false);
+  // Everything per-article that isn't derived from `article` itself has to be
+  // reset here, because in-app navigation between two reader pages reuses
+  // this same component instance (see the file-load effect's comment) -- so
+  // whatever is left over describes the article the reader just left.
+  //
+  // Two of these were being missed. hasResumedScrollRef stays true, so the
+  // *second* article opened in a session silently ignores its saved reading
+  // position -- reproducible with two half-read articles and the "More from
+  // your library" links at the bottom of the reader. And `progress` keeps the
+  // previous article's value until a scroll event recomputes it, which for an
+  // article finished to the end means the next one satisfies the
+  // auto-archive threshold below on arrival and is archived unread.
   useEffect(() => {
     autoArchivedRef.current = false;
+    hasResumedScrollRef.current = false;
+    latestProgressRef.current = 0;
   }, [articleId]);
+  // `progress` is state rather than a ref, so it's reset during render (the
+  // documented "adjust state when a prop changes" pattern, same as
+  // pdf-reader.tsx's scroll-mode reset) instead of in the effect above: an
+  // effect would let one render through with the previous article's progress
+  // still in place, which is the render the auto-archive check runs in.
+  const [progressArticleId, setProgressArticleId] = useState(articleId);
+  if (progressArticleId !== articleId) {
+    setProgressArticleId(articleId);
+    setProgress(0);
+  }
   useEffect(() => {
     if (autoArchivedRef.current || !article || article.status === "ARCHIVED") return;
     if (progress < AUTO_READ_PROGRESS_THRESHOLD) return;
     autoArchivedRef.current = true;
-    updateArticleStatus(article, "ARCHIVED", isAuthenticated).then(setArticle);
+    updateArticleStatus(article, "ARCHIVED", isAuthenticated)
+      .then(setArticle)
+      // Nothing asked for this, so it isn't worth a toast -- but the guard
+      // has to come back off, or a write that failed once (an expired token
+      // being refreshed, a dropped connection) means this article can never
+      // auto-archive again for the life of the page.
+      .catch(() => {
+        autoArchivedRef.current = false;
+      });
   }, [progress, article, isAuthenticated]);
 
   // "More from your library" -- computed client-side from tag/title-overlap
@@ -333,10 +371,17 @@ export function ReaderView({ articleId }: { articleId: string }) {
   useEffect(() => {
     if (!article || progress < AUTO_READ_PROGRESS_THRESHOLD || relatedFetchedForRef.current === articleId) return;
     relatedFetchedForRef.current = articleId;
-    loadArticles(isAuthenticated).then((all) => {
-      const candidates = (all as Article[]).filter((a) => a.deletedAt === null);
-      setRelatedArticles({ articleId, articles: computeRelatedArticles(article, candidates) });
-    });
+    loadArticles(isAuthenticated)
+      .then((all) => {
+        const candidates = (all as Article[]).filter((a) => a.deletedAt === null);
+        setRelatedArticles({ articleId, articles: computeRelatedArticles(article, candidates) });
+      })
+      // A suggestion list nobody asked for isn't worth interrupting a reader
+      // over; clearing the guard just lets the next scroll past the threshold
+      // try again instead of the section staying absent for good.
+      .catch(() => {
+        relatedFetchedForRef.current = null;
+      });
   }, [progress, article, isAuthenticated, articleId]);
   // Tagged with the articleId it was computed for -- on navigating between
   // two reader pages that reuse this same component instance, this stops
@@ -391,6 +436,12 @@ export function ReaderView({ articleId }: { articleId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [article, readableText, ttsIsThisArticle, ttsPlayer.prewarmFirstChunk]);
 
+  // Every mutation below reports its own failure. They all follow the same
+  // pattern -- await the write, then reflect it in local state -- so a
+  // rejection meant the state update was simply skipped: the popover closed,
+  // the highlight never appeared, and nothing said why. A highlight that
+  // silently fails to save is indistinguishable from one that saved and then
+  // failed to render, and the reader only finds out much later.
   async function handleCreateHighlight(
     selectedText: string,
     position: HighlightPosition,
@@ -398,30 +449,46 @@ export function ReaderView({ articleId }: { articleId: string }) {
     note: string,
   ) {
     if (!article) return;
-    const created = await createHighlight(
-      { articleId: article.id, selectedText, position, color, noteText: note.trim() || undefined },
-      isAuthenticated,
-    );
-    setHighlights((prev) => [...prev, created]);
+    try {
+      const created = await createHighlight(
+        { articleId: article.id, selectedText, position, color, noteText: note.trim() || undefined },
+        isAuthenticated,
+      );
+      setHighlights((prev) => [...prev, created]);
+    } catch {
+      toast("Couldn't save that highlight.");
+    }
   }
 
   async function handleDeleteHighlight(highlightId: string) {
-    await deleteHighlight(highlightId, isAuthenticated);
-    setHighlights((prev) => prev.filter((h) => h.id !== highlightId));
+    try {
+      await deleteHighlight(highlightId, isAuthenticated);
+      setHighlights((prev) => prev.filter((h) => h.id !== highlightId));
+    } catch {
+      toast("Couldn't delete that highlight.");
+    }
   }
 
   async function handleSaveNote(highlightId: string, noteText: string) {
     const target = highlights.find((h) => h.id === highlightId);
     if (!target) return;
-    const updated = await saveNote(target, noteText, isAuthenticated);
-    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+    try {
+      const updated = await saveNote(target, noteText, isAuthenticated);
+      setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+    } catch {
+      toast("Couldn't save that note.");
+    }
   }
 
   async function handleDeleteNote(highlightId: string) {
     const target = highlights.find((h) => h.id === highlightId);
     if (!target) return;
-    const updated = await deleteNote(target, isAuthenticated);
-    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+    try {
+      const updated = await deleteNote(target, isAuthenticated);
+      setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+    } catch {
+      toast("Couldn't delete that note.");
+    }
   }
 
   // The Notebook panel's "click a highlight to go there" -- HTML jumps
@@ -447,15 +514,26 @@ export function ReaderView({ articleId }: { articleId: string }) {
 
   async function handleStatusChange(nextStatus: ArticleStatus) {
     if (!article) return;
-    const updated = await updateArticleStatus(article, nextStatus, isAuthenticated);
-    setArticle(updated);
+    try {
+      const updated = await updateArticleStatus(article, nextStatus, isAuthenticated);
+      setArticle(updated);
+    } catch {
+      // The tab snapping back to the old status is the visible half; without
+      // this it looked identical to a click that never registered.
+      toast("Couldn't change this article's status.");
+    }
   }
 
   async function handleRenameConfirm(title: string) {
     if (!article) return;
-    const updated = await renameArticle(article, title, isAuthenticated);
-    setArticle(updated);
-    setRenaming(false);
+    try {
+      const updated = await renameArticle(article, title, isAuthenticated);
+      setArticle(updated);
+      setRenaming(false);
+    } catch {
+      // The dialog deliberately stays open, holding what was typed.
+      toast("Couldn't rename this article.");
+    }
   }
 
   async function handleSendToKindle() {
@@ -473,6 +551,14 @@ export function ReaderView({ articleId }: { articleId: string }) {
     } finally {
       setSendingToKindle(false);
     }
+  }
+
+  if (!loaded && loadFailed) {
+    return (
+      <div className="mx-auto max-w-2xl px-8 py-10">
+        <LoadError message="Couldn't load this article. Check your connection and try again." onRetry={refresh} />
+      </div>
+    );
   }
 
   if (!loaded) return null;

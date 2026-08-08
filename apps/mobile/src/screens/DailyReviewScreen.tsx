@@ -21,6 +21,12 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
+  // Prompted highlights (#157) keep their passage hidden until asked for,
+  // so the grade below is a retrieval judgment rather than a re-read. Keyed
+  // by id, not one flag: a single flag would reveal the next card's answer
+  // before its question had been asked.
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const loadedArticles = await loadArticles(authenticated);
@@ -48,7 +54,22 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
   }, [authenticated]);
 
   useEffect(() => {
-    refresh().finally(() => setLoading(false));
+    let cancelled = false;
+    refresh()
+      .catch(() => {
+        // A rejection here used to be unhandled, and left batchIds at null --
+        // which renders no cards, no "nothing eligible" box and no "done for
+        // today" box, because all three are gated on batchIds. The screen
+        // just sat there blank, permanently, whether the API was down or the
+        // session had expired.
+        if (!cancelled) setError("Couldn't load your review. Check your connection and try again.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
 
   const articleById = useMemo(() => new Map(articles.map((a) => [a.id, a])), [articles]);
@@ -72,24 +93,35 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
         )
       : null;
 
-    const updated = await updateHighlightFeedback(
-      target,
-      {
-        lastSurfacedAt: nowIso,
-        surfaceCount: target.surfaceCount + 1,
-        ...(feedback ? { lastFeedback: feedback, lastFeedbackAt: nowIso } : {}),
-        ...(archive ? { resurfaceArchivedAt: nowIso } : {}),
-        ...(sm2
-          ? {
-              easinessFactor: sm2.easinessFactor,
-              intervalDays: sm2.intervalDays,
-              repetitions: sm2.repetitions,
-              nextDueAt: sm2.nextDueAt,
-            }
-          : {}),
-      },
-      authenticated,
-    );
+    setError(null);
+    let updated: Highlight;
+    try {
+      updated = await updateHighlightFeedback(
+        target,
+        {
+          lastSurfacedAt: nowIso,
+          surfaceCount: target.surfaceCount + 1,
+          ...(feedback ? { lastFeedback: feedback, lastFeedbackAt: nowIso } : {}),
+          ...(archive ? { resurfaceArchivedAt: nowIso } : {}),
+          ...(sm2
+            ? {
+                easinessFactor: sm2.easinessFactor,
+                intervalDays: sm2.intervalDays,
+                repetitions: sm2.repetitions,
+                nextDueAt: sm2.nextDueAt,
+              }
+            : {}),
+        },
+        authenticated,
+      );
+    } catch {
+      // The card stays on screen and un-reviewed, which is the truth: nothing
+      // was written. Before this the rejection was unhandled and the button
+      // simply did nothing, so the obvious response -- tap it again -- would
+      // have double-counted the review the moment the network came back.
+      setError("Couldn't save that. Check your connection and try again.");
+      return;
+    }
     setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
     setReviewedIds((prev) => new Set(prev).add(highlightId));
   }
@@ -114,6 +146,8 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
         {batchIds ? `${batchIds.length} highlight${batchIds.length === 1 ? "" : "s"} selected for today.` : ""}
       </Text>
 
+      {error && <Text style={styles.error}>{error}</Text>}
+
       {batchIds && batchIds.length === 0 && (
         <View style={styles.emptyBox}>
           <Text style={styles.emptyText}>No highlights are eligible to resurface right now.</Text>
@@ -126,23 +160,47 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
       )}
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        {batch.map((h) => (
-          <View key={h.id} style={styles.card}>
-            <Text style={styles.quote}>&ldquo;{h.selectedText}&rdquo;</Text>
-            <Text style={styles.articleTitle}>{articleById.get(h.articleId)?.title ?? "Untitled"}</Text>
-            <View style={styles.actionsRow}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, "FORGOT", false)}>
-                <Text style={styles.secondaryButtonText}>Forgot</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, null, true)}>
-                <Text style={styles.secondaryButtonText}>Archive</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.primaryButton} onPress={() => applyFeedback(h.id, "REMEMBERED", false)}>
-                <Text style={styles.primaryButtonText}>Remembered</Text>
-              </TouchableOpacity>
+        {batch.map((h) => {
+          const concealed = !!h.prompt && !revealedIds.has(h.id);
+          return (
+            <View key={h.id} style={styles.card}>
+              {h.prompt ? <Text style={concealed ? styles.quote : styles.prompt}>{h.prompt}</Text> : null}
+              {concealed ? null : <Text style={styles.quote}>&ldquo;{h.selectedText}&rdquo;</Text>}
+              <Text style={styles.articleTitle}>{articleById.get(h.articleId)?.title ?? "Untitled"}</Text>
+              {concealed ? (
+                // Grading is withheld until the answer has been asked for,
+                // matching the web app. Archive stays available: deciding
+                // you're done with a highlight isn't a recall judgment.
+                <View style={styles.actionsRow}>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, null, true)}>
+                    <Text style={styles.secondaryButtonText}>Archive</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    onPress={() => setRevealedIds((prev) => new Set(prev).add(h.id))}
+                  >
+                    <Text style={styles.primaryButtonText}>Show the highlight</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.actionsRow}>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, "FORGOT", false)}>
+                    <Text style={styles.secondaryButtonText}>Forgot</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, null, true)}>
+                    <Text style={styles.secondaryButtonText}>Archive</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    onPress={() => applyFeedback(h.id, "REMEMBERED", false)}
+                  >
+                    <Text style={styles.primaryButtonText}>Remembered</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
-          </View>
-        ))}
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -154,10 +212,14 @@ const styles = StyleSheet.create({
   back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
   title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 4 },
   subtitle: { fontSize: 13, color: "#6b6558", marginBottom: 20 },
+  error: { color: "#b5502f", fontSize: 13, marginBottom: 12 },
   emptyBox: { borderWidth: 1, borderStyle: "dashed", borderColor: "#ddd6c7", borderRadius: 8, padding: 24, alignItems: "center" },
   emptyText: { fontSize: 14, color: "#6b6558", textAlign: "center" },
   card: { backgroundColor: "#fff", borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#ece6d8" },
   quote: { fontSize: 16, color: "#1c1a16", lineHeight: 22, marginBottom: 8 },
+  // Once revealed, the prompt stays on the card above the passage, smaller
+  // and quieter -- it's the context for the answer, not the answer.
+  prompt: { fontSize: 14, fontWeight: "600", color: "#6b6558", lineHeight: 20, marginBottom: 6 },
   articleTitle: { fontSize: 12, color: "#6b6558", marginBottom: 12 },
   actionsRow: { flexDirection: "row", gap: 8 },
   secondaryButton: { flex: 1, borderWidth: 1, borderColor: "#ddd6c7", borderRadius: 6, paddingVertical: 8, alignItems: "center" },

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { MAX_RECALL_PROMPT_LENGTH } from "@booklet/shared";
 import { buildApp } from "../app.js";
 import { prisma } from "../lib/prisma.js";
 
@@ -374,7 +375,94 @@ describe("API integration", () => {
       expect(body.annotation?.noteText).toBe("a thought");
       expect(body.easinessFactor).toBe(2.5);
       expect(body.nextDueAt).toBeNull();
+      // No prompt asked for, no prompt stored -- the highlight keeps the
+      // original show-then-grade review behavior (#157).
+      expect(body.prompt).toBeNull();
       highlightId = body.id;
+    });
+
+    it("stores a recall prompt given at creation time, trimmed", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/highlights",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articleId,
+          selectedText: "another passage",
+          position: { type: "text", exact: "another passage", prefix: "", suffix: "", start: 10, end: 25 },
+          color: "GREEN",
+          prompt: "  What does this passage claim?  ",
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().prompt).toBe("What does this passage claim?");
+    });
+
+    // A whitespace-only prompt would read as "prompted" to every check in the
+    // app while asking the reader nothing -- the review card would conceal
+    // the answer behind a blank question.
+    it("treats a whitespace-only prompt as no prompt at all", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/highlights",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articleId,
+          selectedText: "a third passage",
+          position: { type: "text", exact: "a third passage", prefix: "", suffix: "", start: 26, end: 41 },
+          color: "BLUE",
+          prompt: "   \n  ",
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().prompt).toBeNull();
+    });
+
+    it("rejects a prompt past the length cap", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/highlights",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articleId,
+          selectedText: "a fourth passage",
+          position: { type: "text", exact: "a fourth passage", prefix: "", suffix: "", start: 42, end: 58 },
+          color: "PINK",
+          prompt: "q".repeat(MAX_RECALL_PROMPT_LENGTH + 1),
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("invalid_prompt");
+    });
+
+    it("adds a prompt to an existing highlight, then clears it with null", async () => {
+      const added = await app.inject({
+        method: "PATCH",
+        url: `/api/highlights/${highlightId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { prompt: "Why does this matter?" },
+      });
+      expect(added.statusCode).toBe(200);
+      expect(added.json().prompt).toBe("Why does this matter?");
+
+      // An unrelated PATCH must not disturb it -- prompt is only written when
+      // the key is actually present in the body.
+      const untouched = await app.inject({
+        method: "PATCH",
+        url: `/api/highlights/${highlightId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { color: "ORANGE" },
+      });
+      expect(untouched.json().prompt).toBe("Why does this matter?");
+
+      const cleared = await app.inject({
+        method: "PATCH",
+        url: `/api/highlights/${highlightId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { prompt: null },
+      });
+      expect(cleared.statusCode).toBe(200);
+      expect(cleared.json().prompt).toBeNull();
     });
 
     it("updates SM-2 fields via PATCH", async () => {
@@ -657,6 +745,349 @@ describe("API integration", () => {
         include: { highlights: true },
       });
       expect(article?.highlights).toHaveLength(1);
+    });
+
+    /**
+     * The migrated article used to arrive with canonicalUrl: null, because
+     * the import route simply never set it. Duplicate detection matches on
+     * `url OR canonicalUrl`, so re-saving the same article from a link
+     * carrying a tracking parameter missed both arms and created a second
+     * copy -- silently, permanently (nothing backfills the column), and
+     * only for the articles a user cared enough about to have saved before
+     * signing up.
+     */
+    it("derives canonicalUrl on import, so duplicate detection still works afterwards", async () => {
+      const url = "https://example.com/vitest-canonical-import";
+      await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [{ localId: "canon-1", url, title: "Migrated" }],
+          highlights: [],
+        },
+      });
+
+      const migrated = await prisma.article.findFirst({ where: { url } });
+      expect(migrated?.canonicalUrl).toBeTruthy();
+
+      // The same article, shared with a tracking parameter -- what a real
+      // re-save looks like. Must be recognised as already saved.
+      const again = await app.inject({
+        method: "POST",
+        url: "/api/articles",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { url: `${url}?utm_source=newsletter` },
+      });
+      expect(again.statusCode).toBe(409);
+      expect(again.json().error).toBe("already_saved");
+    });
+
+    /**
+     * #171. The review schedule a user built up reading anonymously used to
+     * be destroyed by the one action that promises to preserve their data.
+     * surfaceCount and lastFeedback crossed the seam and the four SM-2
+     * columns did not, so the library went on showing "Remembered, 4
+     * reviews" while the scheduler believed the highlight had never been
+     * seen -- and the next Daily Review served everything at once, weeks
+     * after the signup that caused it.
+     *
+     * Asserts on the values rather than a 200, because a 200 is exactly
+     * what the broken version returned.
+     */
+    it("carries a highlight's SM-2 schedule across the migration", async () => {
+      const nextDueAt = new Date(Date.now() + 16 * 24 * 60 * 60 * 1000);
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [{ localId: "sm2-1", url: "https://example.com/vitest-sm2", title: "SM2" }],
+          highlights: [
+            {
+              localArticleId: "sm2-1",
+              selectedText: "reviewed four times already",
+              position: { type: "text", exact: "reviewed", prefix: "", suffix: "", start: 0, end: 8 },
+              color: "YELLOW",
+              surfaceCount: 4,
+              lastFeedback: "REMEMBERED",
+              easinessFactor: 2.6,
+              intervalDays: 16,
+              repetitions: 4,
+              nextDueAt: nextDueAt.toISOString(),
+            },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const article = await prisma.article.findFirst({
+        where: { url: "https://example.com/vitest-sm2" },
+        include: { highlights: true },
+      });
+      const h = article!.highlights[0]!;
+      expect(h.easinessFactor).toBe(2.6);
+      expect(h.intervalDays).toBe(16);
+      expect(h.repetitions).toBe(4);
+      expect(h.nextDueAt?.toISOString()).toBe(nextDueAt.toISOString());
+      // The two that always survived, asserted alongside so the pair can't
+      // drift apart again without a test noticing.
+      expect(h.surfaceCount).toBe(4);
+      expect(h.lastFeedback).toBe("REMEMBERED");
+    });
+
+    // An older client, or a highlight genuinely never reviewed, sends none
+    // of this -- it has to import cleanly and land on the schema defaults.
+    it("falls back to the schema defaults when SM-2 state is absent or out of range", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [{ localId: "sm2-2", url: "https://example.com/vitest-sm2-defaults", title: "SM2 defaults" }],
+          highlights: [
+            {
+              localArticleId: "sm2-2",
+              selectedText: "never reviewed",
+              position: { type: "text", exact: "never", prefix: "", suffix: "", start: 0, end: 5 },
+              color: "YELLOW",
+            },
+            {
+              localArticleId: "sm2-2",
+              selectedText: "nonsense schedule",
+              position: { type: "text", exact: "nonsense", prefix: "", suffix: "", start: 6, end: 14 },
+              color: "GREEN",
+              // Below SM-2's 1.3 floor, negative, fractional, unparseable --
+              // the import route must not be a way around the validation
+              // PATCH /api/highlights/:id enforces on these same columns.
+              easinessFactor: 0.1,
+              intervalDays: -5,
+              repetitions: 1.5,
+              nextDueAt: "not a date",
+            },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const article = await prisma.article.findFirst({
+        where: { url: "https://example.com/vitest-sm2-defaults" },
+        include: { highlights: true },
+      });
+      expect(article?.highlights).toHaveLength(2);
+      for (const h of article!.highlights) {
+        expect(h.easinessFactor).toBe(2.5);
+        expect(h.intervalDays).toBe(0);
+        expect(h.repetitions).toBe(0);
+        expect(h.nextDueAt).toBeNull();
+      }
+    });
+
+    /** Hand-rolled because there is no form-data dependency here and the
+     * body is one small field -- @fastify/multipart parses whatever arrives
+     * on the wire, which is what inject() delivers. */
+    function multipart(filename: string, contentType: string, content: Buffer) {
+      const boundary = `----vitest${Math.random().toString(16).slice(2)}`;
+      return {
+        headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+        payload: Buffer.concat([
+          Buffer.from(
+            `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+              `Content-Type: ${contentType}\r\n\r\n`,
+          ),
+          content,
+          Buffer.from(`\r\n--${boundary}--\r\n`),
+        ]),
+      };
+    }
+
+    async function importOne(localId: string, article: Record<string, unknown>): Promise<string> {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { articles: [{ localId, ...article }], highlights: [] },
+      });
+      expect(res.statusCode).toBe(200);
+      return res.json().localIdToServerId[localId];
+    }
+
+    /**
+     * #172. The server mints a fresh id for every imported article, while
+     * the browser keys an uploaded PDF's bytes in IndexedDB by the *local*
+     * id. The route has always built this map to attach highlights and
+     * simply never sent it, so nothing on the client could say which server
+     * article a local file belonged to -- and the file was therefore never
+     * migrated at all.
+     */
+    it("returns the localId -> server id map, including for skipped duplicates", async () => {
+      const url = "https://example.com/vitest-idmap";
+      const first = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { articles: [{ localId: "map-1", url, title: "Mapped" }], highlights: [] },
+      });
+      const serverId = first.json().localIdToServerId["map-1"];
+      expect(serverId).toBeTypeOf("string");
+
+      const fetched = await app.inject({
+        method: "GET",
+        url: `/api/articles/${serverId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(fetched.statusCode).toBe(200);
+      expect(fetched.json().title).toBe("Mapped");
+
+      // A re-sent batch (the response to the first one was lost) has to map
+      // to the row that already exists, or the retry has no id to attach the
+      // file to and the book stays empty for good.
+      const replay = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { articles: [{ localId: "map-1", url, title: "Mapped" }], highlights: [] },
+      });
+      expect(replay.json()).toMatchObject({ skippedArticles: 1 });
+      expect(replay.json().localIdToServerId["map-1"]).toBe(serverId);
+    });
+
+    /**
+     * The acceptance criterion of #172: a PDF uploaded anonymously opens
+     * normally after signing up. Before this, the migrated row arrived with
+     * fileStorageKey: null and GET /file answered 404 forever, while the
+     * bytes sat unreachable in the browser -- and an upload is one of the
+     * few things a user cannot re-acquire by re-saving a URL.
+     */
+    it("attaches an uploaded PDF's bytes to the article the migration created", async () => {
+      const pdf = Buffer.from("%PDF-1.4\nvitest migrated bytes\n%%EOF");
+      const articleId = await importOne("pdf-1", { title: "My uploaded book", sourceType: "PDF", url: null });
+
+      // The gap the reader falls back to IndexedDB across -- the row is
+      // there, the file is not yet.
+      const beforeUpload = await app.inject({
+        method: "GET",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(beforeUpload.statusCode).toBe(404);
+
+      const form = multipart("book.pdf", "application/pdf", pdf);
+      const upload = await app.inject({
+        method: "POST",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}`, ...form.headers },
+        payload: form.payload,
+      });
+      expect(upload.statusCode).toBe(200);
+      expect(upload.json().fileStorageKey).toBeTruthy();
+      // Nothing else on the row is touched: the title came from the client's
+      // own extraction and must not be re-derived from the file.
+      expect(upload.json().title).toBe("My uploaded book");
+
+      const served = await app.inject({
+        method: "GET",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(served.statusCode).toBe(200);
+      expect(served.headers["content-type"]).toBe("application/pdf");
+      expect(served.rawPayload.equals(pdf)).toBe(true);
+
+      // Also removes the file this test wrote to disk.
+      await app.inject({
+        method: "DELETE",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    });
+
+    it("does the same for an EPUB, and serves it back with the EPUB content type", async () => {
+      const epub = Buffer.from("PKvitest-epub");
+      const articleId = await importOne("epub-1", { title: "Migrated EPUB", sourceType: "EPUB", url: null });
+
+      const form = multipart("book.epub", "application/epub+zip", epub);
+      const upload = await app.inject({
+        method: "POST",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}`, ...form.headers },
+        payload: form.payload,
+      });
+      expect(upload.statusCode).toBe(200);
+
+      const served = await app.inject({
+        method: "GET",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(served.statusCode).toBe(200);
+      expect(served.headers["content-type"]).toBe("application/epub+zip");
+      expect(served.rawPayload.equals(epub)).toBe(true);
+
+      await app.inject({
+        method: "DELETE",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    });
+
+    /**
+     * The client deletes a file from IndexedDB only once this route has
+     * accepted it, so an accepted upload whose response was lost is sent
+     * again -- the batch-then-clear rule #164 established, applied to files.
+     * Writing a second copy would leave the first orphaned on disk with
+     * nothing pointing at it.
+     */
+    it("treats a replayed file upload as a no-op instead of storing a second copy", async () => {
+      const pdf = Buffer.from("%PDF-1.4\nreplayed\n%%EOF");
+      const articleId = await importOne("pdf-replay", { title: "Replayed book", sourceType: "PDF", url: null });
+
+      const send = () => {
+        const form = multipart("book.pdf", "application/pdf", pdf);
+        return app.inject({
+          method: "POST",
+          url: `/api/articles/${articleId}/file`,
+          headers: { authorization: `Bearer ${accessToken}`, ...form.headers },
+          payload: form.payload,
+        });
+      };
+
+      const first = await send();
+      const replay = await send();
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json().fileStorageKey).toBe(first.json().fileStorageKey);
+
+      await app.inject({
+        method: "DELETE",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    });
+
+    // GET /file picks its Content-Type from sourceType alone, so EPUB bytes
+    // on a row that says PDF would be served as application/pdf and fail to
+    // open in a reader that trusts the header.
+    it("refuses file bytes that don't match the article's declared type, and an unknown article", async () => {
+      const articleId = await importOne("pdf-mismatch", { title: "Mismatch", sourceType: "PDF", url: null });
+
+      const form = multipart("book.epub", "application/epub+zip", Buffer.from("PK"));
+      const mismatch = await app.inject({
+        method: "POST",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}`, ...form.headers },
+        payload: form.payload,
+      });
+      expect(mismatch.statusCode).toBe(400);
+      expect(mismatch.json().error).toBe("type_mismatch");
+
+      const stray = multipart("book.pdf", "application/pdf", Buffer.from("%PDF-1.4"));
+      const unknown = await app.inject({
+        method: "POST",
+        url: "/api/articles/00000000-0000-0000-0000-000000000000/file",
+        headers: { authorization: `Bearer ${accessToken}`, ...stray.headers },
+        payload: stray.payload,
+      });
+      expect(unknown.statusCode).toBe(404);
     });
   });
 

@@ -4,6 +4,7 @@
  * instead of talking to lib/local/db.ts or lib/api.ts directly.
  */
 import type { Article, ArticleListResponse, ExtractedContent } from "@booklet/shared";
+import { canonicalizeUrl } from "@booklet/shared";
 import { apiFetch, ApiError } from "../api";
 import { generateLocalId, localArticles } from "../local/db";
 
@@ -13,6 +14,17 @@ async function extractContent(url: string): Promise<ExtractedContent> {
   return apiFetch<ExtractedContent>("/api/extract", { method: "POST", body: JSON.stringify({ url }), auth: false });
 }
 
+/**
+ * Deliberately narrower than the web app's articles.ts, which also exposes
+ * loadTrash / trashArticle / restoreArticle / permanentlyDeleteArticle /
+ * emptyTrash, plus rename, tags, favorite, status, progress and
+ * send-to-Kindle. None of those has a control on any mobile screen. The one
+ * consequence worth naming: because nothing here can ever set `deletedAt`,
+ * the local branch below does not filter trashed rows out the way
+ * apps/web/src/lib/local/db.ts's localArticles.getAll() does. If a Trash
+ * feature ever lands here, that filter has to land with it -- otherwise
+ * deleted articles come straight back into the library list.
+ */
 export async function loadArticles(authenticated: boolean): Promise<Article[]> {
   if (!authenticated) return localArticles.getAll();
 
@@ -22,6 +34,8 @@ export async function loadArticles(authenticated: boolean): Promise<Article[]> {
   while (hasMore) {
     const query = `limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
     const res: ArticleListResponse = await apiFetch<ArticleListResponse>(`/api/articles?${query}`);
+    // summary omits extractedHtml/extractedText, both absent (not undefined)
+    // here -- ArticleScreen re-fetches the full row via loadArticle().
     articles.push(...(res.articles as Article[]));
     cursor = res.nextCursor;
     hasMore = cursor !== null;
@@ -44,7 +58,16 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     return apiFetch<Article>("/api/articles", { method: "POST", body: JSON.stringify({ url }) });
   }
 
-  const existing = (await localArticles.getAll()).find((a) => a.url === url);
+  // Matched on the canonical form as well as the raw one, the same as the
+  // web app and the same as the server's own duplicate check. Exact-string
+  // matching alone misses the everyday cases -- the utm_-decorated share
+  // link, the AMP variant, a trailing slash -- so saving the same article
+  // twice from two different places silently produced two library entries
+  // with two separate sets of highlights.
+  const canonicalUrl = canonicalizeUrl(url);
+  const existing = (await localArticles.getAll()).find(
+    (a) => a.url === url || (canonicalUrl !== null && a.canonicalUrl === canonicalUrl),
+  );
   if (existing) throw new ApiError(409, "already_saved", "You've already saved this article.");
 
   let extracted: ExtractedContent | null = null;
@@ -60,7 +83,7 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     id: generateLocalId(),
     userId: "local",
     url,
-    canonicalUrl: null,
+    canonicalUrl,
     title: extracted?.title ?? null,
     author: extracted?.author ?? null,
     siteName: extracted?.siteName ?? null,
@@ -168,7 +191,12 @@ export async function saveArticleFromFile(file: PickedFile, authenticated: boole
     extractionError,
     extractedHtml: null,
     extractedText: extracted?.text ?? null,
-    textSource: null,
+    // Carried through, not hardcoded null: "OCR" is the only signal that this
+    // text came out of image recognition and can therefore contain errors a
+    // native text layer never would. Dropping it made a scanned PDF
+    // indistinguishable from a clean one, on the one device where the reader
+    // shows nothing but that text.
+    textSource: extracted?.textSource ?? null,
     fileStorageKey: null,
     originalFilename: fileName,
     coverImageUrl: extracted?.coverImageUrl ?? null,

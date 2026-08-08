@@ -35,6 +35,52 @@ export function toCollection(row: {
   };
 }
 
+const STATUSES = ["UNREAD", "READING", "ARCHIVED"];
+const MAX_FILTER_TAGS = 50;
+const MAX_FILTER_TEXT = 200;
+
+/**
+ * Whether a smart collection's filter is one this app can express.
+ *
+ * The body's `filter` was stored as whatever JSON arrived and then spread
+ * into a Prisma where-clause by filterToArticleWhere below, one field per
+ * column. Prisma's scalar filters accept an *object* of operators, so
+ * `{"status":{"not":"UNREAD"}}` was stored happily and every field that is
+ * not a string arrived at the driver as a shape it could not use.
+ *
+ * The damage is not a data leak -- userId and deletedAt are set by this
+ * server on the same clause and a scalar filter cannot reach another table
+ * -- it is that the bad filter is *stored*. Confirmed by injection: one such
+ * create (201) then made GET /api/collections/:id/articles return 500
+ * forever, and with it GET /api/articles/collection-memberships, which
+ * evaluates every smart collection the account has and is what the library
+ * page asks for on load. One malformed filter, and the library stops
+ * rendering until the collection is deleted through an API call.
+ *
+ * So: checked at the boundary, where a 400 is still possible, rather than
+ * trusted because the TypeScript type says CollectionFilter.
+ */
+function isValidCollectionFilter(value: unknown): value is CollectionFilter {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const filter = value as Record<string, unknown>;
+  if (Object.keys(filter).some((key) => !["status", "tags", "favorited", "textQuery"].includes(key))) return false;
+  if (filter.status !== undefined && (typeof filter.status !== "string" || !STATUSES.includes(filter.status))) {
+    return false;
+  }
+  if (filter.favorited !== undefined && typeof filter.favorited !== "boolean") return false;
+  if (
+    filter.textQuery !== undefined &&
+    (typeof filter.textQuery !== "string" || filter.textQuery.length > MAX_FILTER_TEXT)
+  ) {
+    return false;
+  }
+  if (filter.tags !== undefined) {
+    if (!Array.isArray(filter.tags) || filter.tags.length > MAX_FILTER_TAGS) return false;
+    if (filter.tags.some((tag) => typeof tag !== "string" || !tag.trim() || tag.length > 40)) return false;
+  }
+  return true;
+}
+
 /** Builds the Article where-clause a smart collection's filter describes.
  * AND semantics only -- see CollectionFilter's own doc comment for why. */
 function filterToArticleWhere(userId: string, filter: CollectionFilter): Prisma.ArticleWhereInput {
@@ -82,13 +128,40 @@ export async function registerCollectionRoutes(app: FastifyInstance): Promise<vo
         return reply.code(409).send({ error: "already_exists", message: "You already have a collection with that name." });
       }
 
+      // The same ownership check PATCH already does on parentId, which
+      // create never did. Two things came of that. A collection could be
+      // parented to *another account's* collection -- Collection.parentId is
+      // a plain FK with no userId in it, so Postgres accepted the row
+      // (confirmed: 201) and the tree then spanned two libraries, with
+      // deleting the stranger's parent silently reaching into this account
+      // via onDelete: SetNull. And the two failure modes differed: a parentId
+      // that exists somewhere returned 201 while one that exists nowhere hit
+      // the FK constraint and returned 500, which is an existence oracle for
+      // any collection id in the system. Both answers are now 404.
+      const filter = request.body?.filter;
+      if (filter !== undefined && filter !== null && !isValidCollectionFilter(filter)) {
+        return reply.code(400).send({
+          error: "invalid_filter",
+          message: "A smart collection's filter may only set status, tags, favorited and textQuery.",
+        });
+      }
+
+      const parentId = request.body?.parentId ?? null;
+      if (parentId !== null) {
+        const parent = await prisma.collection.findFirst({
+          where: { id: parentId, userId: request.userId! },
+          select: { id: true },
+        });
+        if (!parent) return reply.code(404).send({ error: "not_found", message: "Parent collection not found." });
+      }
+
       const created = await prisma.collection.create({
         data: {
           userId: request.userId!,
           name,
           color: request.body?.color ?? null,
-          filter: request.body?.filter ? (request.body.filter as Prisma.InputJsonValue) : undefined,
-          parentId: request.body?.parentId ?? null,
+          filter: filter ? (filter as Prisma.InputJsonValue) : undefined,
+          parentId,
         },
       });
       return reply.code(201).send(toCollection({ ...created, _count: { articles: 0 } }));

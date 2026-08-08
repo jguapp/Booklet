@@ -342,7 +342,7 @@
   <button class="mobile-toc-toggle" id="mobileTocToggle" type="button">☰ Contents</button>
   <nav class="toc" id="toc">
     <div class="toc-title">📖 Booklet</div>
-    <div class="toc-sub">The Coding Bible — v5, living document</div>
+    <div class="toc-sub">The Coding Bible — v8, living document</div>
     <ol>
       <li><a href="#part-0">0. How to Use This Document</a></li>
       <li><a href="#part-1">I. The Big Picture</a>
@@ -387,6 +387,8 @@
           <li><a href="#feat-ocr">OCR</a></li>
           <li><a href="#feat-tts">Text-to-Speech (the full story)</a></li>
           <li><a href="#feat-resurface">Resurfacing (SM-2)</a></li>
+          <li><a href="#feat-sharing">Sharing &amp; onboarding seeds</a></li>
+          <li><a href="#feat-podcast">The podcast feed</a></li>
           <li><a href="#feat-search">Search</a></li>
           <li><a href="#feat-collections">Collections</a></li>
           <li><a href="#feat-import-export">Import / Export</a></li>
@@ -401,6 +403,9 @@
           <li><a href="#test-layers">The Four Layers</a></li>
           <li><a href="#web-unit-runner">The 19,000 Untested Lines</a></li>
           <li><a href="#e2e-fixtures">The e2e suite, switched off and back on</a></li>
+          <li><a href="#web-unit-tests">The 19,000 lines with no test runner</a></li>
+          <li><a href="#verify-command">One command, and what it did not check</a></li>
+          <li><a href="#dead-code-audit">The dead-code audit</a></li>
         </ol>
       </li>
       <li>
@@ -416,14 +421,37 @@
       </li>
       <li><a href="#part-8">VIII. Glossary</a></li>
       <li><a href="#part-9">IX. Roads Not Taken</a></li>
-      <li><a href="#part-boundaries">X. Delivery Boundaries &amp; Known Gaps</a>
+      <li>
+        <a href="#part-ship">X. Shipping: What Blocks It, and What Comes After</a>
+        <ol>
+          <li><a href="#ship-blockers">What must be fixed first</a></li>
+          <li><a href="#ship-nice-to-have">Worth adding before deploying</a></li>
+          <li><a href="#post-deploy-roadmap">The roadmap after launch</a></li>
+        </ol>
+      </li>
+      <li>
+        <a href="#part-audit">XI. The Audit: What a Full Sweep Actually Found</a>
+        <ol>
+          <li><a href="#audit-shapes">The four shapes almost everything fell into</a></li>
+          <li><a href="#audit-scope">Confining a credential beats checking it everywhere</a></li>
+          <li><a href="#audit-time">Two bugs about time</a></li>
+          <li><a href="#audit-dedupe">The direction a failure points</a></li>
+          <li><a href="#audit-blank">Eight pages that showed nothing</a></li>
+          <li><a href="#audit-bundle">Two libraries on routes that never used them</a></li>
+          <li><a href="#audit-shed">Rate limiting bounds one caller</a></li>
+          <li><a href="#audit-clients">The secondary clients</a></li>
+          <li><a href="#audit-nonfindings">What the audit did not find</a></li>
+          <li><a href="#audit-e2e">Running the suite, and the one regression it caught</a></li>
+        </ol>
+      </li>
+      <li><a href="#part-boundaries">XII. Delivery Boundaries &amp; Known Gaps</a>
         <ol>
           <li><a href="#boundaries-production">The production critical path</a></li>
           <li><a href="#boundaries-clients">Store publishing and mobile</a></li>
           <li><a href="#boundaries-guardrails">Engineering guardrails</a></li>
         </ol>
       </li>
-      <li><a href="#part-10">XI. Changelog of This Document</a></li>
+      <li><a href="#part-10">XIII. Changelog of This Document</a></li>
     </ol>
   </nav>
 
@@ -763,6 +791,145 @@
           it. It could — but not for a page that has since changed or gone
           offline, and keeping a readable copy of those is real value this app
           otherwise provides. Sizing the limit honestly was the better trade.
+        </p>
+
+        <h4 id="migration-partial">The same seam, twice more: schedules, then files</h4>
+        <p>
+          The <code>413</code> above (#164) was the first bug at this seam and
+          not the last. Two more followed, and the reason they are grouped
+          here rather than filed as three unrelated tickets is that they share
+          a shape: the migration <em>succeeded</em> every time. Nothing threw,
+          nothing warned, and what was missing was only discovered later — in
+          two of the three cases, much later.
+        </p>
+        <p>
+          <strong>#171 — the review schedule.</strong> The import carried five
+          of a highlight's nine resurfacing fields.
+          <code>surfaceCount</code>, <code>lastFeedback</code>,
+          <code>lastFeedbackAt</code>, <code>lastSurfacedAt</code> and
+          <code>resurfaceArchivedAt</code> crossed;
+          <code>easinessFactor</code>, <code>intervalDays</code>,
+          <code>repetitions</code> and <code>nextDueAt</code> did not, so
+          Prisma's column defaults applied. Reproduced against a running API
+          before anything was changed: a highlight reviewed four times up to a
+          16-day interval arrived with <code>repetitions</code> 0 (was 4),
+          <code>intervalDays</code> 0 (was 16), <code>easinessFactor</code>
+          2.5 (was 2.6), and <code>nextDueAt</code> <code>null</code> — which
+          in this schema does not mean "unscheduled", it means
+          <em>due immediately</em>.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Why that was worse than plain data loss</span>
+          <p>
+            The result is <strong>silently self-contradictory</strong>. The
+            library still shows the highlight under "Remembered" with four
+            reviews against it, while the scheduler believes it has never
+            been seen. Neither surface is lying about its own data; the two
+            halves of the record simply disagree, and nothing in the app
+            compares them.
+          </p>
+          <p>
+            And the damage arrives <em>later</em>. Nothing fails at signup.
+            The next Daily Review just serves the entire library at once,
+            because <code>nextDueAt</code> is null for every highlight the
+            user owns — weeks after the signup that caused it, with no reason
+            to connect the two events. The one action that promises to
+            preserve your data is the action that destroyed the schedule.
+          </p>
+        </div>
+        <p>
+          Auditing what <em>else</em> crossed incompletely — a question #171
+          raised without answering — turned up a smaller one immediately. The
+          import route never derived <code>canonicalUrl</code>, so every
+          migrated article arrived with it null. Duplicate detection matches
+          on <code>url OR canonicalUrl</code>, so with the canonical arm empty,
+          re-saving a migrated article from a link carrying
+          <code>?utm_source=newsletter</code> missed both arms and created a
+          second copy. Also reproduced before fixing, and the test asserts the
+          user-visible consequence — a <code>409</code> on the re-save — not
+          merely that the column is populated.
+        </p>
+        <h4 id="migration-files">#172 — the uploaded book that could not follow</h4>
+        <p>
+          Third and last of the three. A PDF or EPUB uploaded before signing
+          up became <strong>unopenable</strong> afterwards. The article row
+          migrated fine; the file could not. Its bytes live in IndexedDB keyed
+          by the <em>local</em> article id, the import payload has no field
+          for them, and the server mints a fresh id — so the row arrived with
+          <code>fileStorageKey: null</code>,
+          <code>GET /api/articles/:id/file</code> 404s on exactly that
+          condition, and <code>loadArticleFile</code> consults IndexedDB only
+          when unauthenticated. The file sat on the user's own disk and the
+          app would never look at it again.
+        </p>
+        <p>
+          This is the member of the family with the least recourse. Everything
+          else at this seam can, in principle, be rebuilt by re-saving a URL.
+          An upload has no URL.
+        </p>
+        <div class="callout rejected">
+          <span class="callout-label">Considered and rejected: just put the bytes in the import payload</span>
+          <p>
+            A 20&nbsp;MB PDF is roughly 27&nbsp;MB of base64 before JSON
+            escaping — a whole batch on its own, against a limit
+            <a href="#local-migration">deliberately sized</a> for the largest
+            single <em>article</em>. And binary in a JSON body is the wrong
+            transport regardless, when a multipart upload route already
+            exists and is already tested.
+          </p>
+        </div>
+        <p>
+          The fix is two-phase, and its key was already there. The batched
+          import (above) generates ids up front so <code>createMany</code> can
+          be used, which means the route has always built a
+          <code>localId&nbsp;&rarr;&nbsp;serverId</code> map internally — and
+          never sent it. It is returned now, so after each accepted batch the
+          client uploads that batch's files against their new ids and deletes
+          each from IndexedDB only once the server has taken it. That is the
+          same batch-then-clear rule #164 established, applied one level down,
+          so an interrupted migration resumes rather than restarting.
+        </p>
+        <p>
+          <code>POST /api/articles/:id/file</code> is a <em>new</em> route
+          rather than a mode on the existing upload route. The upload route
+          derives a title, runs extraction, enriches from Open Library and
+          fires <code>article.created</code>. The migration wants none of
+          that: the row already exists with the text the anonymous client
+          already extracted, and firing <code>article.created</code> for a
+          pre-existing row would lie to webhook subscribers. It refuses bytes
+          whose extension disagrees with the row's <code>sourceType</code> —
+          the <code>GET</code> picks its <code>Content-Type</code> from
+          <code>sourceType</code> alone, so EPUB bytes on a PDF row would be
+          served as <code>application/pdf</code> — and treats a re-upload to
+          a row that already has a file as a no-op rather than orphaning the
+          first copy.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why file failures are collected instead of thrown</span>
+          <p>
+            One bad book should not stop a library from moving, so failures
+            accumulate into <code>PartialMigrationError</code> rather than
+            aborting. The detail that matters is that
+            <code>remainingArticles</code> counts <em>stranded files</em> too:
+            the library's failure notice renders only when that number is
+            above zero, so a file-only failure reported as zero would be
+            completely silent — which is the whole bug again, one layer up.
+          </p>
+          <p>
+            In the meantime the reader falls back to IndexedDB whenever the
+            API 404s, so a book opened mid-migration shows its pages instead
+            of an empty frame, and uploads go per-batch rather than all at the
+            end so that window stays short.
+          </p>
+        </div>
+        <p>
+          Five tests, confirmed failing against the old code in two stages,
+          because removing the id map masks the route's absence. One
+          acceptance criterion is still open and
+          <a href="#ship-nice-to-have">recorded as open</a>: the
+          <code>upload&nbsp;&rarr;&nbsp;signup&nbsp;&rarr;&nbsp;open</code>
+          journey has integration coverage on the server half and none in a
+          real browser, which is the half that actually broke.
         </p>
 
         <h3 id="system-diagram">System Diagram</h3>
@@ -1777,6 +1944,16 @@
           the highlight row — see <a href="#feat-resurface">Resurfacing</a>
           for the algorithm itself.
         </p>
+        <p>
+          <code>prompt</code> is a nullable question whose answer is the
+          highlight. When set, Daily Review asks it before revealing the
+          passage, which is what makes the SM-2 grade above a measure of
+          recall rather than recognition — see
+          <a href="#recall-prompts">Recall prompts</a>. Nullable with no
+          default, so adding it was a metadata-only change in Postgres: no
+          table rewrite, no backfill, and every pre-existing highlight keeps
+          the review behavior it already had.
+        </p>
 
         <h4>Collection</h4>
         <p>
@@ -1852,6 +2029,228 @@
             row, and a stolen access token is only useful for 15 minutes.
           </p>
         </div>
+
+        <h4 id="auth-login-limits">Bounding password guessing per account, not per address</h4>
+        <p>
+          <a href="#verify-command">The rate-limit bug in Part VI</a> ended
+          with refresh moved off the credential-guessing budget. That fixed
+          the symptom and left the underlying unit wrong: guessing was still
+          bounded <em>per IP</em>, which fails in both directions at once.
+          Addresses are cheap to rent, so "N guesses per address" is a budget
+          an attacker simply buys more of. Meanwhile behind one office NAT, a
+          university, or a carrier's CGNAT, hundreds of unrelated people
+          present as the same address — six of them mistyping once each, plus
+          one who retries four times, spent the whole allowance and 429'd
+          everybody there for fifteen minutes, including people who had never
+          tried to sign in.
+        </p>
+        <p>
+          Failed logins are now counted against the <strong>account</strong>
+          (<code>AUTH_FAILED_LOGIN_LIMIT</code>, default 5). Guesses at a
+          given email are bounded however many hosts they arrive from, which
+          is the actual threat, and one user burning their own budget costs
+          their neighbours nothing. Per-IP stays as the backstop that catches
+          one host spraying a single guess across a list of accounts, and was
+          raised 10&nbsp;&rarr;&nbsp;100 now that it no longer has to carry
+          the guessing bound alone. Signup deliberately stays purely per-IP:
+          there is no account yet to key a counter on, and keying on the
+          submitted email would only let an attacker exhaust a budget for an
+          address nobody has registered.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">An escalating wait, not a lockout</span>
+          <p>
+            A hard lock hands anyone who knows an email address a way to keep
+            its owner signed out for as long as they care to keep failing —
+            at which point <em>the lock is the attack</em>, and the app has
+            traded a guessing risk for a denial-of-service anyone can run for
+            free.
+          </p>
+          <p>
+            So after five misses the next attempt waits 5s, then 10s, 20s,
+            doubling to a 15-minute cap, with the strikes decaying entirely
+            after an hour of quiet. Sustained guessing drops to a few hundred
+            tries a day — useless against any password worth the name — while
+            the account is never more than fifteen minutes out of its owner's
+            reach. A correct password clears the counter outright, so two
+            mistypes on Tuesday leave nothing behind to accumulate.
+          </p>
+          <p>
+            The counter lives on the <code>User</code> row, not in Redis or
+            process memory. In-process is no bound at all behind a load
+            balancer (it reads "five failures <em>per instance</em>") and
+            resets on every deploy; Redis is the conventional home, but
+            <code>REDIS_URL</code> is optional here, so a Redis-backed
+            counter would simply not exist in the default deployment. The
+            cost is one write per failed login, which is the request this app
+            is happiest to make expensive.
+          </p>
+        </div>
+        <div class="callout warn">
+          <span class="callout-label">Fixing the lockout <em>creates</em> an account-enumeration oracle</span>
+          <p>
+            This is the part worth reading twice, because the vulnerability is
+            introduced by the fix rather than found alongside it. If only real
+            accounts are delayed, then six wrong guesses at an address and the
+            difference between a <code>401</code> and a <code>429</code>
+            answers "is this email registered?" — cleanly, repeatably, and
+            better than the login response itself does. The route goes to
+            deliberate trouble to return one identical
+            <code>invalid_credentials</code> for "no such user" and "wrong
+            password"; a delay keyed on existence hands that answer straight
+            back through the side door.
+          </p>
+          <p>
+            Unknown emails therefore get byte-identical treatment: same
+            thresholds, same response, same <code>Retry-After</code>, from a
+            capped (10,000-entry), oldest-evicted in-memory map. Re-inserting
+            a key moves it to the back of the map's insertion order, so
+            eviction drops whichever address has been quiet longest rather
+            than the one currently under attack. It defends nothing by itself
+            — there is no account behind it — it only has to be
+            indistinguishable, and it is.
+          </p>
+          <p>
+            <strong>Deliberately not Postgres rows.</strong> These keys are
+            attacker-chosen and unbounded; persisting them would trade an
+            enumeration oracle for a way to fill the database.
+            <strong>Known gap, written into the code:</strong> across multiple
+            instances the real counter is shared through Postgres and this map
+            is not, so a guesser who spreads attempts across instances can
+            still tell the two apart. Closing it needs the shared store
+            <a href="#ship-blockers">this deployment does not yet require</a>.
+          </p>
+        </div>
+        <p>
+          The same work closed a timing leak that predated all of it.
+          <code>verifyPassword</code> was skipped entirely when no account
+          existed — an obvious optimization, and scrypt is the dominant cost
+          of a login, so "no such user" came back
+          <strong>measurably faster</strong> than "wrong password" to anyone
+          with a stopwatch. The identical error body was answering the
+          question in wall-clock time that it refused to answer in text.
+          Verification now always runs, against a dummy hash computed once per
+          process.
+        </p>
+        <p>
+          Five tests, each confirmed to fail against the old code first —
+          including that the bound holds across six different source
+          addresses, that an unknown email produces an identical
+          <code>429</code>, and that two neighbours behind an IP whose third
+          user burned the budget can both still sign in.
+        </p>
+
+        <h4 id="account-deletion">Deleting an account, and the order that matters</h4>
+        <p>
+          There was no deletion route anywhere in the API. For an app that
+          stores what someone reads and what they thought about it, that is a
+          trust problem before it is a legal one, and it is a legal one too.
+          <a href="#feat-sharing">#158</a> sharpened it considerably: a
+          departing user reasonably expects their public pages and their share
+          of the cross-user aggregate to leave with them.
+        </p>
+        <p>
+          Most of the machinery already existed — export has been there for a
+          while, and every table cascades from <code>User</code>. The gap was
+          a route, a re-authentication step, and the two things that do
+          <em>not</em> cascade: stored files, which orphan permanently once
+          the rows naming them are gone, and
+          <code>PublicHighlightStat</code>, which by design holds no user ids
+          and therefore needs a rebuild rather than a cascade.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Order is the crux, and is why this is not a one-liner</span>
+          <p>
+            The storage keys have to be collected <em>before</em> any row is
+            deleted, because those rows are the only record of which files
+            belong to this account: collect, delete the user, delete the
+            files, recompute the aggregate. Reverse the first two and the
+            bytes are unreachable forever.
+          </p>
+          <p>
+            The collecting query carries no <code>deletedAt: null</code>
+            filter, unlike every read query in the app — a trashed article's
+            upload is still a file on disk. The aggregate recompute is
+            <em>awaited</em> rather than fired and forgotten, because "my
+            highlights are still being counted after I deleted my account" is
+            precisely the failure this route exists to prevent, so it happens
+            before the 204.
+          </p>
+        </div>
+        <p>
+          Deletion is <strong>immediate</strong>, not a 30-day soft delete.
+          Two of the acceptance criteria are "shared pages 404 immediately"
+          and "the aggregate stops counting this user", and a grace period is
+          exactly a window in which neither is true. The misclick a grace
+          period would protect against is already covered from the other side
+          by export. And restorability would mean a <code>deletedAt</code>
+          column on <code>User</code> plus a filter in every query that reads
+          one — a soft delete that half the codebase forgets is worse than no
+          soft delete, because rows that look deleted keep being served. The
+          cost, stated plainly in the route: someone who has taken over an
+          account can destroy it, with no undo. That is accepted because an
+          attacker holding the password already has read access to everything
+          the account contains, which is not undoable either.
+        </p>
+        <p>
+          Re-authentication is the password — or, for OAuth-only accounts
+          which have no <code>passwordHash</code> to check, typing the
+          account's own email address. That is weaker (the address is on
+          screen the whole time), but it is a deliberate act rather than a
+          click, which is all a confirmation step can be here; it is compared
+          case- and whitespace-insensitively, because the goal is intent, not
+          dictation. A failed confirmation deliberately does <em>not</em> feed
+          <a href="#auth-login-limits">#170's failure counter</a>: someone
+          holding a stolen access token could otherwise drive the real owner's
+          login into the escalating delay. Eleven tests query each table
+          individually after deletion rather than trusting the cascade, which
+          is the only way to actually know.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">The production-secret guard that shipped alongside it</span>
+          <p>
+            <code>tokens.ts</code> threw when <code>JWT_ACCESS_SECRET</code>
+            was missing and accepted <em>anything</em> otherwise — including
+            the literal placeholder committed in <code>.env.example</code>,
+            in both CI configs, and in <code>scripts/verify.mjs</code>. A
+            deploy that boots on a secret from a README is one where every
+            access token in the system is forgeable by anyone who has read the
+            repository.
+          </p>
+          <p>
+            The check runs <strong>only under
+            <code>NODE_ENV=production</code></strong>, at import time rather
+            than on the first signed token — a server that will refuse to
+            issue tokens should refuse to start, not boot green, pass its
+            health check, and 500 on the first person who logs in. Firing in
+            dev or test would have got it switched off within a day, which is
+            how guards stop guarding anything. It refuses a known placeholder
+            by name and anything under 32 characters; it cannot measure
+            randomness, only length, so that floor is a bar against
+            <code>changeme</code>, not a claim that 32 characters is strong.
+            What it cost CI is
+            <a href="#dead-code-audit">recorded in Part VI</a>.
+          </p>
+        </div>
+        <p>
+          The web half adds the Settings flow and the <code>/privacy</code>
+          and <code>/terms</code> pages, which sit outside the
+          <code>(app)</code> route group for the same structural reason
+          <code>/s/[slug]</code> does — the signed-in shell must not wrap
+          them. They are written from <code>schema.prisma</code> field by
+          field rather than from a template (that extracted text and HTML are
+          stored in full, that sessions record IP and user-agent, that trash
+          is a 30-day window, exactly what a <code>/s/&lt;slug&gt;</code> page
+          does and does not expose), and every fact that depends on
+          <em>who operates this</em> — operator name, jurisdiction, venue,
+          contact, publication date, which of Resend/Sentry/Datadog are
+          actually enabled — is a visible placeholder rather than a plausible
+          guess. Both pages open by saying they are unfinished, the liability
+          cap is marked as needing a lawyer, and there is an explicit section
+          stating the project holds no certification and makes no GDPR, CCPA,
+          SOC 2 or ISO 27001 claim: deletion and export exist because a
+          reading app should have them, not as a compliance posture.
+        </p>
 
         <h3 id="feat-extraction">Article Extraction</h3>
         <p>
@@ -2668,6 +3067,118 @@
           that <a href="#web-unit-runner">apps/web has a unit runner</a>.
         </p>
 
+
+        <h4 id="alignment-research">Chapter 9 — Is read-along actually out of sync? (an unfinished measurement)</h4>
+        <p>
+          <a href="#feat-tts">Chapter 4</a>'s read-along highlight is an
+          estimate: each word's on-screen moment comes from its share of the
+          chunk's character count. That assumption is visibly false in the
+          small — "through" and "thought" are seven characters and one
+          syllable, "a" is one character and one syllable, and a comma adds
+          time no character accounts for at all. The open question (#159) is
+          whether it is false enough to pay for <strong>forced alignment</strong>:
+          a second model inference per chunk, on a pipeline
+          <a href="#feat-tts">already running at 1-2&times; realtime on CPU</a>.
+        </p>
+        <p>
+          This section exists to record that the cheap half of that
+          measurement has been done, that it came back
+          <strong>negative</strong>, and that a negative result here means
+          less than it looks like it does.
+        </p>
+        <p>
+          <code>packages/shared/src/readalong-timing.ts</code> implements two
+          models over the same text: the shipped character-proportional
+          estimate, read forwards instead of backwards so it can be compared
+          word by word, and an independent syllable-plus-punctuation-pause
+          model. <code>scripts/analyze-readalong-drift.ts</code> runs both
+          over real prose chosen to vary in the one dimension that matters —
+          how evenly punctuation and syllable weight are distributed — and
+          reports how far apart they land.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">The inference is one-directional, and that is the whole design</span>
+          <p>
+            Neither model is ground truth, so what comes out is a
+            <em>disagreement</em>, not an error. Two independent estimates of
+            the same quantity agreeing closely is decent evidence the cheap
+            one is not badly wrong, because they would have to be wrong in
+            the same direction by the same amount. Two estimates disagreeing
+            proves only that at least one of them is wrong, and says nothing
+            about which.
+          </p>
+          <p>
+            So this can rule the question <strong>out</strong> and cannot rule
+            it <strong>in</strong> — which is still worth twenty seconds of
+            compute before a week of aligner work. The threshold it is judged
+            against, <code>PERCEPTIBLE_DRIFT_MS = 100</code>, was fixed in
+            source before a single number was produced, specifically so the
+            result could not be graded against a bar chosen after seeing it.
+          </p>
+        </div>
+        <p>
+          It did not rule it out. Per-chunk worst-case disagreement runs from
+          <strong>151&nbsp;ms to 690&nbsp;ms</strong> at the mid-sweep
+          parameter setting, and <strong>1,340&nbsp;ms</strong> at the worst
+          point of the full sweep — against a 100&nbsp;ms threshold. Every
+          constant in the second model is swept rather than quoted at one
+          value, because the constants are its weakest part and a conclusion
+          that only holds at one setting is not a conclusion; the disagreement
+          exceeds the threshold at every setting swept. The honest reading is
+          the narrow one: <em>at least one of these two models is
+          substantially wrong, and this experiment cannot say which.</em>
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">The harness that would settle it has never been run</span>
+          <p>
+            <code>apps/api/scripts/bench-readalong-alignment.ts</code>
+            generates real Kokoro audio and asks Whisper (with
+            <code>return_timestamps: "word"</code>) where the words actually
+            fall. It carries a banner at the top of the file saying, in as
+            many words, that it has never been executed — Hugging Face is
+            unreachable from the environment it was written in, so neither
+            Kokoro's weights nor Whisper's could be fetched.
+          </p>
+          <p>
+            Shipping an unrun script while quietly implying otherwise is worse
+            than not shipping it, so the banner says to expect to debug it on
+            first run and to trust none of its numbers until someone has
+            watched it run. Until then <strong>#159 is open, and the read-along
+            estimate's real accuracy is unknown</strong> — not
+            "probably fine". It is
+            <a href="#post-deploy-roadmap">phase 1 of the post-launch
+            roadmap</a> for exactly that reason: the blocker is network
+            access, not difficulty.
+          </p>
+        </div>
+        <p>
+          Whisper rather than the wav2vec2 CTC aligner the issue proposed,
+          incidentally, because forced alignment is the more correct
+          instrument (it is <em>given</em> the transcript, so it cannot
+          disagree about what was said) but would mean hand-writing the
+          Viterbi pass over CTC logits, which transformers.js does not expose
+          an alignment for. Whisper is recognition and can mis-transcribe, so
+          the harness aligns the two word sequences and measures only where
+          they agree. The decision being made is between two orders of
+          magnitude — tens of milliseconds or hundreds — and Whisper is
+          comfortably good enough to settle that. If it comes back near the
+          threshold, <em>that</em> is when the CTC implementation earns its
+          cost.
+        </p>
+        <div class="callout reversed">
+          <span class="callout-label">Correction found by writing the module's own test</span>
+          <p>
+            The docstring originally asserted that
+            <code>secondsPerSyllable</code> cancels out of the comparison. It
+            does not — the pause constants are absolute seconds, so scaling
+            syllable duration alone does move the result. The sweep was still
+            valid, because what it varies is the pause-to-syllable
+            <em>ratio</em>, which is the only real axis; but the stated reason
+            was wrong, so the claim is corrected in source and a test now pins
+            the property that is actually true.
+          </p>
+        </div>
+
         <h3 id="feat-resurface">Resurfacing (SM-2)</h3>
         <p>
           SM-2 (SuperMemo 2, Wozniak 1987) is the actual algorithm, not a
@@ -2712,6 +3223,283 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           re-rolled on every visit to the page, which would make "what am I
           reviewing today" a moving target.
         </p>
+
+        <h4 id="recall-prompts">Recall prompts: what SM-2 was actually scheduling</h4>
+        <p>
+          All of the machinery above was correct and pointed at the wrong
+          thing. Resurfacing showed you the highlight, and
+          <em>then</em> asked whether you had remembered it. Read that
+          ordering back and the problem is obvious: you are being asked to
+          grade a recall attempt you were never given the chance to make.
+        </p>
+        <p>
+          That is the classic illusion-of-knowing failure. Recognition feels
+          like recall — a passage you have read before reads as familiar
+          whether or not you could have produced it — and re-reading
+          something and judging it familiar is close to the weakest thing
+          you can do for retention. So the binary fed into
+          <code>feedbackToQuality</code> was measuring recognition, and SM-2,
+          an algorithm designed to schedule <em>retrieval attempts</em>, was
+          being used to schedule re-reads. Every part of the implementation
+          was right; the input was the wrong quantity.
+        </p>
+        <p>
+          A highlight can now carry an optional <strong>prompt</strong>: a
+          question whose answer is the highlight
+          (<code>Highlight.prompt</code>, <code>packages/shared/src/recall-prompt.ts</code>).
+          Daily Review shows the prompt, keeps the passage hidden until the
+          reader asks for it, and only then offers the grade buttons.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why the grade buttons disappear too</span>
+          <p>
+            Concealing the passage but leaving "Remembered this" on screen
+            would have been a cosmetic change. The reason to hide the answer
+            is to make the grade mean something, and a grade you can click
+            before attempting recall is the same recognition judgment as
+            before — just with an extra step in front of it. Withholding
+            both is what actually changes what SM-2 receives.
+          </p>
+          <p>
+            <strong>Archive stays available throughout.</strong> Deciding
+            you are done with a highlight is not a recall judgment and needs
+            no answer, so making someone reveal a passage in order to
+            dismiss it would be gatekeeping for its own sake.
+          </p>
+        </div>
+        <p>
+          The note is concealed alongside the passage. This is not
+          over-caution: a note on a highlight is usually the reader's own
+          paraphrase of what the passage says, which means showing it gives
+          the answer away as thoroughly as showing the highlight would.
+        </p>
+        <p>
+          The feature is additive by construction. <code>prompt</code> is
+          <code>null</code> on every highlight saved before it existed, and
+          a highlight without one renders and grades exactly as it always
+          has — no migration of behavior, no prompt to write before
+          resurfacing works. Mobile's Daily Review honors the same reveal
+          step, so a prompt written on the web is respected there too, even
+          though mobile has no prompt-authoring UI yet.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Two small things that would have been bugs</span>
+          <p>
+            <strong>The revealed set is keyed by highlight id</strong>, not
+            held as a single "revealed" flag for the card on screen. Daily
+            Review renders the batch as a list, so one flag would leak
+            across it — reveal the first card's answer and the second card
+            would show its own answer before its question had been asked.
+            A set keyed by id cannot do that.
+          </p>
+          <p>
+            <strong>A whitespace-only prompt normalizes to <code>null</code></strong>,
+            in one shared place. <code>"   "</code> is truthy and non-null,
+            so it reads as "prompted" to every check in the app while asking
+            the reader nothing: the review card would conceal the answer
+            behind a blank question. Four routes accept a prompt and three
+            local-mode constructors build one, and each of them would
+            otherwise have had to remember this independently.
+          </p>
+        </div>
+        <p>
+          Prompts are written from the Highlights page and from Daily
+          Review's library section, not from the reader. Going through a
+          book's highlights and turning the ones worth keeping into
+          questions is a browsing activity; interrupting a reading session
+          to compose a question is not the same act and does not want the
+          same surface.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Deliberately not done yet: finer grades, and generated prompts</span>
+          <p>
+            SM-2 expects a 0-5 quality grade and this app collects a binary,
+            which is a real simplification. It is arguably too coarse now
+            that there is a genuine retrieval attempt to grade — but only
+            <em>now</em>: grading a re-read on a five-point scale would have
+            been false precision on a measurement that was wrong anyway.
+            Worth revisiting with prompts in place, not before.
+          </p>
+          <p>
+            Generating prompts from the passage is the obvious follow-up and
+            a good fit for the paid AI tier — turning a passage into a good
+            question is exactly what an LLM is useful for, and unlike
+            summarization it produces something the spaced-repetition system
+            consumes directly. Manual entry ships first because it is what
+            proves the ordering change is worth anything.
+          </p>
+        </div>
+
+        <h3 id="feat-sharing">Sharing, and the aggregate underneath it</h3>
+        <p>
+          Everything here was private, which is the right default and left
+          the app with <strong>no distribution mechanism at all</strong> —
+          nothing to send anyone, and nothing for a new account to look at.
+        </p>
+        <p>
+          A <code>Share</code> is an unlisted public page for one article's
+          highlights or one collection's. The slug is 128 bits of
+          <code>randomBytes</code>; it is the entire access control, so it
+          is sized against guessing rather than against looking tidy.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Revocation deletes the row, and that is a security decision twice over</span>
+          <p>
+            The obvious implementation is a <code>revokedAt</code> column.
+            It is wrong for two separate reasons. A soft-deleted row still
+            holds the old slug, so revocation becomes reversible by flipping
+            a column back — the guarantee a user thinks they are getting is
+            "that link is dead", not "that link is dormant".
+          </p>
+          <p>
+            And it creates a side channel. With the row gone, a revoked slug
+            takes a byte-identical code path to one that never existed: same
+            single index lookup, same <code>NOT_FOUND</code>. A soft delete
+            is exactly what would have introduced a measurable branch,
+            letting whoever holds a leaked URL confirm the page was once
+            real. The same reasoning drives the single error constant for
+            never-existed, revoked and trashed alike.
+          </p>
+        </div>
+        <p>
+          The public payload is a Prisma <code>select</code>, not a filtered
+          spread — the private columns are never fetched, so a careless
+          spread added later has nothing to leak. Only the reader's own
+          <code>selectedText</code> goes out, plus title, author, site and a
+          link to the original. <code>extractedText</code>,
+          <code>extractedHtml</code>, the cover image and the publisher's
+          own <code>excerpt</code> are all excluded: publishing highlights of
+          a copyrighted article means publishing excerpts, and the line is
+          the reader's selection, not the publisher's content.
+        </p>
+        <p>
+          <strong>Sharing a smart collection is refused outright.</strong>
+          Its membership is a live query, so the page would silently publish
+          articles saved after the link went out — the owner would be
+          consenting to publish things that do not exist yet.
+        </p>
+        <h4 id="onboarding-seeds">Seeds, and why the threshold is enforced on write</h4>
+        <p>
+          <code>PublicHighlightStat</code> aggregates which passages people
+          highlight, to give a new account something worth reading on day
+          one. It stores a hash, the display text, denormalized attribution
+          and a count — <strong>no user ids and no highlight ids</strong>.
+          It cannot deanonymize anyone by construction rather than by
+          policy, which is the only version of that claim worth making.
+        </p>
+        <p>
+          Two conditions must both hold before a passage counts: the account
+          opted in <em>and</em> the highlight is already public. Publishing
+          one page for one friend is not consent to be mined for everyone,
+          so <code>contributesToPublicHighlights</code> is separate from
+          sharing and off by default.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Two details that look like fussiness and are not</span>
+          <p>
+            <strong>The threshold of 3 is enforced at write time, not read
+            time.</strong> A read-side filter leaves the one-person rows
+            sitting in the table, one forgotten where-clause away from being
+            served. At a threshold of 2, an attacker who is one of the two
+            contributors learns that exactly one other account highlighted a
+            specific passage — real membership inference. At 3 they would
+            need two colluding accounts to learn only that some unnamed
+            third exists.
+          </p>
+          <p>
+            <strong>Recompute is a full rebuild, not incremental
+            counters.</strong> Unsharing, opting out, deleting a highlight
+            and trashing an article all have to <em>decrement</em>. A
+            counter that only climbs keeps publishing passages their authors
+            have withdrawn, which is the failure that matters here.
+          </p>
+        </div>
+        <p>
+          With no users the aggregate is empty, so day one is covered by 19
+          hand-transcribed public-domain passages. Nothing scraped —
+          explicitly not Amazon's Kindle popular highlights, which is a
+          terms-of-service and copyright gray area. Every work is pre-1929
+          and so is every <em>translation</em>, with the translator named,
+          because a modern translation is its own copyrighted work. Several
+          popular "Marcus Aurelius" and "Sun Tzu" lines were left out as
+          modern paraphrases rather than translations.
+        </p>
+
+        <h3 id="feat-podcast">The podcast feed</h3>
+        <p>
+          Read-aloud only worked inside Booklet, while the listening habit
+          people already have lives in a podcast player that has solved
+          lock-screen controls, CarPlay, playback speed, sleep timers and
+          offline sync. An RSS feed reaches all of it for comparatively
+          little work.
+        </p>
+        <p>
+          The hard part is not the feed. Clients want <strong>one file per
+          item</strong> and TTS generates per chunk, so
+          <code>audio-concat.ts</code> splices past each 44-byte header and
+          rewrites the RIFF and data sizes. It also clamps the declared data
+          size to what the buffer actually holds and floors to a whole
+          frame: a stray odd byte mid-chain byte-shifts every later chunk
+          and turns the rest of the article into noise — silently, because
+          it still plays.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">The feed token's boundary is its format, not a scope check</span>
+          <p>
+            The obvious design is a <code>feed</code> scope checked on the
+            feed routes. That works and has to be remembered on every route
+            written afterwards; the failure mode is a new endpoint that
+            forgets, years later, with nothing to catch it.
+          </p>
+          <p>
+            Instead feed tokens are <code>bkpod_</code>-prefixed and
+            <code>looksLikeApiToken()</code> matches only
+            <code>blk_</code>. A feed token therefore falls through to JWT
+            verification, fails, and leaves <code>request.userId</code>
+            null. It cannot become a session <em>anywhere</em> in the app,
+            including code not yet written. The reverse is closed too:
+            <code>POST /api/tokens</code> refuses to mint the feed scope, so
+            a valid read-only personal access token gets a 404 at the feed
+            URL.
+          </p>
+        </div>
+        <p>
+          The feed defaults to the queue (UNREAD + READING) rather than the
+          library, because a podcast client auto-downloads everything it has
+          not seen — defaulting to everything hands someone with a
+          400-article backlog 400 unplayed episodes and tens of gigabytes on
+          first subscribe.
+        </p>
+        <p>
+          <strong>Playback position does not write back, and cannot.</strong>
+          Podcast clients have no field, callback or standard for reporting
+          it; the only signal is that someone fetched an enclosure, which
+          does not imply listening. Stated in the route, in the feed's own
+          description, and in the settings UI, so it is not filed as a bug
+          later.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Unverified: no real client has ever subscribed to this</span>
+          <p>
+            The XML is generated and unit-tested, and the concatenation math
+            has tests. What has <em>not</em> happened is the only test that
+            matters for a feed: running it through a real validator and
+            subscribing to it from Apple Podcasts, Overcast or Pocket Casts.
+            This environment has no route to any of them, so two of #154's
+            acceptance criteria are open, and the odds that a first real
+            subscribe works perfectly are not high — feeds fail on details
+            (enclosure lengths, GUID stability, date formats) that nothing
+            local complains about — the mandatory
+            <code>&lt;enclosure&gt;</code> length, an RFC 822
+            <code>&lt;pubDate&gt;</code>, a <code>guid</code> keyed on the
+            article so regeneration is not a new episode, each of which has a
+            unit test here and none of which is the same thing as a client
+            accepting the feed. It is
+            <a href="#post-deploy-roadmap">phase 1 of the roadmap</a>
+            alongside #159 for the same reason: blocked on network access,
+            not on difficulty.
+          </p>
+        </div>
 
         <h3 id="feat-search">Search</h3>
         <p>
@@ -2879,42 +3667,33 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
         <h2><span class="part-label">Part VI</span>Testing Philosophy</h2>
         <h3 id="test-layers">The Four Layers</h3>
         <p>
-          Each answers a different question, at a different cost, and the cost
-          difference is the whole design:
+          Four layers, each answering a different question:
         </p>
-        <table>
-          <tr><th>Layer</th><th>What it proves</th><th>Cost</th></tr>
-          <tr>
-            <td><strong>Pure unit</strong><br>Vitest, <code>packages/shared</code></td>
-            <td>Logic with no I/O and no DOM: the SM-2 algorithm, highlight-anchor resolution, URL canonicalization, collection filters, Kindle-clippings parsing, TTS chunking.</td>
-            <td>84 tests, milliseconds</td>
-          </tr>
-          <tr>
-            <td><strong>DOM unit</strong><br>Vitest + jsdom, <code>apps/web</code></td>
-            <td>Browser logic that doesn't need pixels: offset&harr;DOM-node bridging, section anchoring, popover dismissal rules, the resume decision — plus, since #166, real rendered React components.</td>
-            <td>~49 tests, ~2s</td>
-          </tr>
-          <tr>
-            <td><strong>Integration</strong><br>Vitest, <code>apps/api</code></td>
-            <td>The full API surface through Fastify's own <code>.inject()</code>: real route handlers, real Prisma queries against a real test Postgres, no socket actually listening.</td>
-            <td>149 tests, ~12s</td>
-          </tr>
-          <tr>
-            <td><strong>End-to-end</strong><br>Playwright, <code>apps/web</code> + <code>apps/extension</code></td>
-            <td>A real Chromium driving the real app: PDF canvas rendering, EPUB iframe pagination, cross-iframe text selection, real Kokoro generation, a real loaded browser extension.</td>
-            <td>~116 tests, ~8.7 min</td>
-          </tr>
-        </table>
-        <p>
-          <code>.inject()</code> in that third row is worth explaining, since
-          it's what makes the API layer fast enough to run constantly: Fastify
-          can construct a request object and push it straight through its own
-          routing, hooks, validation and handler chain <em>in process</em>,
-          returning the response object without ever opening a TCP socket. You
-          get genuine end-to-end route behavior — real middleware, real
-          serialization, real database — without the per-test cost of a server
-          listening and a client connecting.
-        </p>
+        <ul>
+          <li><strong>Unit (Vitest, <code>packages/shared</code>)</strong> —
+            pure logic with no I/O: the SM-2 algorithm, highlight-anchor
+            resolution, URL canonicalization, collection filters, Kindle-
+            clippings parsing, TTS chunking. Fast, deterministic, no
+            database.</li>
+          <li><strong>Unit in jsdom (Vitest, <code>apps/web</code>)</strong> —
+            the app's own DOM logic and its React components: offset↔node
+            bridging, section anchoring, the highlight popover's dismissal
+            rule, recall-prompt concealment. Added late, for reasons worth
+            reading — see
+            <a href="#web-unit-tests">the 19,000 lines with no test
+            runner</a> below. jsdom does no layout, so anything
+            geometry-dependent still belongs one layer down.</li>
+          <li><strong>Integration (Vitest, <code>apps/api</code>)</strong> —
+            the full API surface exercised through Fastify's own
+            <code>.inject()</code> — real route handlers, real Prisma
+            queries against a real (test) Postgres, no HTTP server actually
+            listening on a socket.</li>
+          <li><strong>End-to-end (Playwright, <code>apps/web</code>)</strong> —
+            a real Chromium browser driving the real running app: real PDF
+            canvas rendering, real EPUB iframe pagination, real cross-iframe
+            text selection, real Kokoro model generation (not mocked) for
+            the TTS suite.</li>
+        </ul>
         <div class="callout why">
           <span class="callout-label">Why real generation instead of mocking TTS in e2e tests</span>
           <p>
@@ -3117,6 +3896,262 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           Result: the suite runs green in about <strong>8.7 minutes</strong>,
           with no dependency on Wikipedia being up or unedited.
         </p>
+
+        <h3 id="web-unit-tests">The 19,000 lines with no test runner</h3>
+        <p>
+          <code>packages/shared</code> had Vitest. <code>apps/api</code> had
+          Vitest. Everything in between — roughly 19,000 lines of
+          <code>apps/web</code>, including all the reader's offset-to-DOM
+          logic — had <strong>no unit test runner at all</strong>. Its only
+          coverage was Playwright, at whole-browser cost and whole-browser
+          latency.
+        </p>
+        <p>
+          That gap has a measured price. Three real bugs shipped that a unit
+          test would have caught in under a second each: both chunk-0 sizing
+          bugs in the TTS chunker, the read-along section anchor resolving to
+          the wrong element at a text-node boundary, and the highlight
+          popover dismissing itself on a scroll event that arrived after it
+          opened. Every one surfaced as a slow, intermittent e2e failure that
+          read like flakiness — which is the expensive way to find a pure
+          function returning the wrong number.
+        </p>
+        <p>
+          <code>apps/web</code> now runs Vitest in jsdom. jsdom does no
+          layout, so <code>getBoundingClientRect</code> and
+          <code>Range#getClientRects</code> return zeros: anything
+          geometry-dependent still belongs in Playwright, and this runner is
+          for offset↔node bridging, section anchoring, concealment rules and
+          the like.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Rendering React components needed a 40-line
+          <code>render</code>, and it is not a matter of taste</span>
+          <p>
+            <code>@testing-library/react</code> cannot resolve the same React
+            instance the components use. This workspace sets
+            <code>nodeLinker: hoisted</code> (Metro cannot traverse pnpm's
+            junctions on Windows), so packages land in the <em>root</em>
+            <code>node_modules</code> and resolve their dependencies from
+            there. The library therefore picks up root's <code>react</code>
+            19.0.0 — hoisted from <code>apps/mobile</code>, which Expo pins —
+            and root's <code>react-dom</code> 19.2.8, hoisted from Prisma
+            Studio of all things. <code>apps/web</code> has its own matched
+            19.2.4 pair nested, because it conflicts with root.
+          </p>
+          <p>
+            Rendering across two React instances fails as a bare "Cannot read
+            properties of null (reading 'useState')", or silently renders
+            nothing.
+            <code>resolve.alias</code>, <code>resolve.dedupe</code> and
+            <code>server.deps.inline</code> were all tried and none work: the
+            renderer resolves React through Node before Vite ever sees the
+            import. A helper that <em>lives inside</em>
+            <code>apps/web</code> resolves <code>apps/web</code>'s React,
+            which is the entire trick — one instance, no resolver games, and
+            no fourth React version added to a workspace that already has too
+            many.
+          </p>
+        </div>
+        <p>
+          A concrete example of what this buys, from the recall-prompt work:
+          the assertion that matters is that a concealed highlight's text is
+          <strong>absent</strong>. "The answer leaked" is a silent failure —
+          a card that renders too much still renders, still grades, and still
+          looks right in a screenshot. Only an explicit absence assertion
+          catches it, and that is a millisecond in jsdom.
+        </p>
+
+        <h3 id="verify-command">One command, and an honest list of what it did not check</h3>
+        <p>
+          "The tests pass" was quietly ambiguous. <code>pnpm test</code>
+          (Turborepo) runs the three unit suites and nothing else — not lint,
+          not typecheck, not the production bundle, not the browser suite.
+          Four of the seven things CI checks were invisible to it.
+        </p>
+        <p>
+          <code>pnpm verify</code> runs everything this machine can check,
+          and — the part that actually matters — <strong>names what it
+          skipped and why</strong>, then closes with a section listing what
+          it cannot cover anywhere. A verification tool that silently skips
+          what it cannot do is worse than one that runs less: it teaches you
+          to read a green summary as "safe to deploy".
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why the production bundle is in there</span>
+          <p>
+            The esbuild bundle has broken while every other signal stayed
+            green. A direct <code>@huggingface/transformers</code> import
+            pulled a native <code>.node</code> binding into the bundle;
+            externals are derived from <code>pkg.dependencies</code>, and the
+            package was only a transitive at the time. <code>tsc</code>
+            resolves through <code>node_modules</code> and never asks who
+            <em>declared</em> a package, so it was perfectly happy. The
+            bundle costs about a second and is the only local signal for that
+            whole class of failure.
+          </p>
+        </div>
+        <p>
+          What it still cannot cover, and says so: <code>docker-build</code>
+          (needs a daemon, and is the check that has caught the most real
+          bugs), the <code>@live</code> specs, and the TTFA benchmark.
+        </p>
+
+        <div class="callout warn">
+          <span class="callout-label">When the test suite is the messenger, not the victim</span>
+          <p>
+            Adding one more spec that signs up made three unrelated specs
+            start failing, and <em>which</em> three depended on ordering — the
+            exact signature of flakiness. It was not flakiness. Every auth
+            route shared a 10-per-15-minutes-per-IP budget meant for
+            credential guessing, and <code>POST /api/auth/refresh</code> was
+            on it despite being ordinary traffic the web app issues on every
+            load. The suite drained the budget and signup got the 429.
+          </p>
+          <p>
+            The reflex — raise the limit for CI and move on — would have
+            shipped the bug. One browser making many page loads from one
+            address <em>is</em> a real user with a few tabs open, and because
+            the limiter keys on IP, it is also everyone behind one office NAT
+            sharing ten refreshes. The fix was to give refresh its own budget
+            (see <a href="#part-7">the environment table</a>); raising the
+            limits for CI was then a separate, honest accommodation of a
+            suite that legitimately signs up dozens of times.
+          </p>
+          <p>
+            <strong>Follow-on:</strong> that fixed which routes shared the
+            budget and left the budget keyed on the wrong thing entirely. See
+            <a href="#auth-login-limits">bounding password guessing per
+            account</a> for the second half, where the per-IP unit itself
+            turned out to be the problem.
+          </p>
+        </div>
+
+        <h3 id="dead-code-audit">The dead-code audit, and what a scanner cannot see</h3>
+        <p>
+          A repo-wide scan flagged <strong>62 unused-export candidates and 8
+          unreferenced files</strong>. Three exports were genuinely dead.
+          That ratio is the finding, not a footnote to it: the answer to "is
+          this dead?" is almost always <em>no</em>, and the value of the
+          exercise was establishing that cheaply rather than the deletions it
+          produced.
+        </p>
+        <p>
+          What actually went: <code>warmTtsModel</code>, replaced by
+          <code>loadTtsModel</code> in #161 precisely <em>because</em> it
+          swallows errors, and uncalled ever since — deleting it removes a
+          trap someone could fall back into, and its reasoning was folded into
+          <code>loadTtsModel</code>'s docstring so the lesson outlives the
+          function. <code>isTelemetryEnabled</code>, added in #151 and never
+          called by anything. And <code>IconChevronDown</code>, the only one
+          of 31 icons with no caller.
+        </p>
+        <p>
+          Eleven more were not dead, just never anyone else's business, and
+          were de-exported rather than deleted — <code>OAuthProfile</code>,
+          <code>isPrivateOrReservedIp</code>, the extension's
+          <code>apiFetch</code>/<code>setSession</code>/<code>clearSession</code>
+          (its popup and background import only the wrappers around them),
+          and so on. The rest were kept, with the reasons written down because
+          a future scan will flag every one of them again: a type appearing in
+          an exported function's signature has to stay exported or callers
+          cannot name what they are being handed (that alone covers
+          <code>HighlightRow</code>, <code>PooledSpeech</code>,
+          <code>EmailMessage</code> and twenty more); everything under
+          <code>packages/shared/src/types</code> stays regardless, because
+          that package exists to be a shared vocabulary and "nobody imports it
+          yet" is not the same as dead; and every one of the unreferenced
+          files is a real entry point reached by config, manifest or framework
+          convention rather than by an <code>import</code>. Both flagged
+          "unused" dependencies are load-bearing too:
+          <code>@prisma/client</code> is imported only through subpaths by the
+          generated client, and <code>@babel/runtime</code> is emitted into
+          the Metro bundle by <code>babel-preset-expo</code> rather than
+          imported in source.
+        </p>
+        <div class="callout reversed">
+          <span class="callout-label">Correction: <code>hasScrolledAway</code> was not dead, and I said it was</span>
+          <p>
+            The brief written before this work asserted
+            <code>hasScrolledAway</code> was dead code. It was not. The
+            component's own scroll handler still calls it — #166 orphaned its
+            <em>export</em>, not the function. Deleting it would have been a
+            behavior change dressed up as a cleanup, and it would have looked
+            entirely justified in the diff.
+          </p>
+          <p>
+            It was de-exported instead. Its docstring also stopped claiming
+            that testing it through a rendered component is blocked, because
+            <code>highlight-popover.test.tsx</code> has been doing exactly
+            that since #166 landed. This is recorded rather than quietly
+            fixed because it is the failure mode of the whole exercise: a
+            confident claim about deadness, from a tool that cannot see call
+            sites, believed because it was convenient.
+          </p>
+        </div>
+        <div class="callout warn">
+          <span class="callout-label">Two NUL bytes made an entire file invisible to the scan</span>
+          <p>
+            <code>tts-cache.ts</code> used two raw NUL bytes as a cache-key
+            separator. Raw NULs make a file <em>binary</em> as far as grep is
+            concerned, so a repo-wide symbol scan skipped every symbol in it —
+            silently, with no warning and no error. That is why its own
+            exports came back as unused candidates in the first place: nothing
+            had searched the file that defines them.
+          </p>
+          <p>
+            The same problem had already been found once in
+            <code>sync.ts</code>, which is what made it recognizable here. The
+            fix is an escape sequence for the same character, so the SHA-256
+            digest is byte-for-byte identical and no cached audio is
+            invalidated — verified against the old form on four inputs before
+            changing it. The generalizable part: a tool that reports "no
+            matches" and a tool that reports "I did not look" produce the same
+            output, and only one of them is telling you something.
+          </p>
+        </div>
+        <p>
+          Reported and deliberately <strong>not</strong> done:
+          <code>POST /api/articles</code> and its <code>v1</code> twin share
+          about 45 near-identical lines, as do the two highlight-create
+          handlers. That is the largest real duplication left in the API, and
+          collapsing it touches the stability-contracted public surface — it
+          wants a review, not a drive-by. What was collapsed is
+          <code>isValidPosition</code>, byte-identical in two route files and
+          now exported once, following the pattern <code>v1.ts</code> already
+          uses for <code>toHighlight</code>, <code>toArticle</code> and
+          <code>toCollection</code>.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">A guard working correctly, presenting as an inexplicable CI failure</span>
+          <p>
+            Both pipelines boot the production image for their Docker smoke
+            test with
+            <code>JWT_ACCESS_SECRET=ci-test-secret-not-for-production</code> —
+            which is exactly what
+            <a href="#account-deletion">the new production-secret guard</a>
+            refuses by name. The API would have declined to start, the health
+            check would have timed out, and the job would have failed with a
+            timeout that says nothing whatsoever about secrets. Both jobs now
+            generate a real random secret for that one container.
+          </p>
+          <p>
+            Whitelisting the repository's own placeholder would have been the
+            smaller diff, and would have made the guard
+            <strong>theatre</strong>: a check that passes on the exact value
+            it exists to catch, because the value is ours. The guard stayed
+            and CI moved.
+          </p>
+          <p>
+            <strong>Worth being precise about how this was found.</strong>
+            Neither pipeline runs — see
+            <a href="#part-7">Part VII</a> — so no job went red. It was caught
+            by reading the two workflow files after writing the guard, which
+            is not a repeatable process. The same guard against a live
+            pipeline would have produced a red build with a useless message,
+            and that is still the more likely version of this story next time.
+          </p>
+        </div>
       </section>
 
       <hr class="divider">
@@ -3126,13 +4161,40 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
         <h3 id="ci-what-it-is">What CI Actually Does Here</h3>
         <p>
-          <strong>Continuous Integration</strong>, stripped of the ceremony,
-          is one idea: every push runs the same checks, on a clean machine
-          nobody has configured by hand, before anyone is asked to trust the
-          change. The "clean machine" half is what makes it worth paying for —
-          it is the only environment in which "works on my machine" is not a
-          possible explanation.
+          The pipeline is seven jobs: typecheck + lint for every package, the
+          shared/api/web test suites (API and web e2e against a real Postgres
+          service container), the extension's e2e suite under
+          <code>xvfb</code> (a virtual display, since a real browser extension
+          needs a real browser window even in headless CI), a Kokoro TTFA
+          benchmark, and a <code>docker-build</code> job that builds both
+          production images and smoke-tests the API image against a real
+          Postgres container.
         </p>
+        <div class="callout warn">
+          <span class="callout-label">That pipeline is written twice, and neither copy may be running</span>
+          <p>
+            <code>.github/workflows/ci.yml</code> is the version whose runs
+            have actually gone green on real hardware, but this repository's
+            Actions allowance is exhausted, so it is dormant.
+            <code>.gitlab-ci.yml</code> is an equivalent port — the same seven
+            jobs, with service hostnames, service readiness and
+            Docker-in-Docker networking genuinely rewritten rather than
+            copied — and it has never executed, because the repository lives
+            on GitHub. <code>docs/CI_GITLAB.md</code> covers the move,
+            including the part that matters most: GitLab.com's free tier is
+            <em>smaller</em> than Actions', so shared runners do not solve the
+            problem that prompted the switch. A self-hosted runner does.
+          </p>
+          <p>
+            Two configs that both exist and neither of which runs is a drift
+            hazard, and it has already bitten once: #169's auth rate limits
+            were added to the GitLab file only, leaving the Actions
+            <code>test-web-e2e</code> job unrunnable. Both files now carry a
+            header saying a change to one has to be mirrored to the other.
+            Until one is genuinely live, <code>pnpm verify</code> is the
+            stand-in — see Part VI.
+          </p>
+        </div>
         <p>
           Booklet's pipeline exists twice, in two dialects, and both are real
           and current: <code>.github/workflows/ci.yml</code> for GitHub
@@ -3429,6 +4491,94 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           environment). That gap is stated rather than papered over: what
           follows is real and tested, but it has not yet met real traffic.
         </p>
+        <h4 id="durable-storage">Uploaded files needed somewhere a deploy cannot delete</h4>
+        <p>
+          <code>storage-service.ts</code> derived its root from
+          <code>import.meta.url</code> — a directory inside the application
+          itself — and <code>docker-compose.yml</code> gave named volumes to
+          Postgres and Redis and <strong>none to storage</strong>. Container
+          filesystems are replaced on every deploy, so a routine release
+          destroyed every uploaded PDF, every EPUB and every generated podcast
+          enclosure, while the database rows naming them survived and went on
+          pointing at nothing. The library lists fine and the readers open
+          empty.
+        </p>
+        <p>
+          This sat dormant as a cache-loss problem for as long as the browser
+          still held a copy. <a href="#migration-files">#172</a> ended that:
+          uploaded files now migrate <em>to</em> the server and are cleared
+          from IndexedDB once it accepts them, so the server holds the only
+          copy. A fix landing in one issue turned a tolerable bug in another
+          into data loss.
+        </p>
+        <p>
+          <code>FILE_STORAGE_PATH</code> now names the location, defaulting to
+          today's path so local development is untouched, and resolved through
+          <code>path.resolve</code> so an absolute value is honored verbatim.
+          Named that rather than <code>STORAGE_ROOT</code> because "storage"
+          alone says nothing about <em>which</em> storage — Postgres and Redis
+          are storage too — and because a bare generic name is exactly the
+          kind a hosting platform sets for its own purposes.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">The old default was not even stable across build layouts</span>
+          <p>
+            Found while writing the comment explaining the variable: under
+            <code>tsx</code> the derived default lands on
+            <code>apps/api/storage</code>, while under the production
+            <code>node dist/index.js</code> it resolves two levels up from
+            <code>dist/</code> to <code>apps/storage</code>. The same code,
+            two different directories, depending on which way the process was
+            started. The default is unchanged — but that is a second,
+            independent reason the variable has to be set explicitly in any
+            deployment.
+          </p>
+        </div>
+        <div class="callout rejected">
+          <span class="callout-label">Considered and rejected: a <code>VOLUME</code> line in the Dockerfile</span>
+          <p>
+            The issue asked for one. Without a matching <code>-v</code> at run
+            time, <code>VOLUME</code> produces an <em>anonymous</em> volume:
+            orphaned when the container is removed and never reattached to its
+            replacement. It survives a restart, fails the exact redeploy this
+            bug is about, and — worst of the three — looks like the problem is
+            solved. The mount has to be named, and has to come from compose or
+            from the platform, so the Dockerfile sets
+            <code>FILE_STORAGE_PATH</code> and creates the directory and
+            stops there.
+          </p>
+        </div>
+        <p>
+          The orphaned-audio leak was fixed in the same pass.
+          <code>deleteStoredFile</code> was already called for
+          <code>Article.fileStorageKey</code> on hard delete, empty-trash and
+          expired-trash purge; <code>ArticleAudio.storageKey</code> was not, so
+          deleting an article cascaded the row and left the WAV on disk
+          forever. All three sites now go through one helper whose
+          <code>select</code> is typed as a shape, so a future call site that
+          forgets to fetch the audio relation is a type error rather than a
+          new silent leak.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Unverified: the volume behavior has never been executed</span>
+          <p>
+            There is no Docker daemon in this development environment, so the
+            acceptance criterion that matters — a file surviving
+            <code>docker compose down &amp;&amp; up --build</code> — has never
+            been run. What <em>is</em> checked by tests is that the compose
+            file parses, declares <code>storage-data</code>, mounts it on the
+            API service, and that the mount target equals
+            <code>FILE_STORAGE_PATH</code>: consistency, not behavior. One
+            real down-and-up with an uploaded PDF on either side is required
+            before deploying, and it is the only thing that closes this.
+          </p>
+          <p>
+            A mounted disk also works completely for one instance and breaks
+            at two, because instance A cannot serve what instance B wrote. S3
+            is the real answer to that and a much larger change; see
+            <a href="#ship-blockers">the multi-instance question</a>.
+          </p>
+        </div>
         <p>
           The API image <strong>bakes Kokoro's ONNX weights in at build
           time</strong>. Without that, the ~90MB model downloads from Hugging
@@ -3461,8 +4611,16 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             <td>Set to <code>true</code> if — and only if — a reverse proxy you control sits in front. Rate limiting keys on the client IP; without this, behind a proxy, that resolves to the proxy and every user shares one bucket. With nothing in front, leaving it unset is what stops clients spoofing <code>X-Forwarded-For</code>. Invisible in local dev and <code>docker-compose</code>, so test it against the real deployment.</td>
           </tr>
           <tr>
-            <td><code>TTS_POOL_SIZE</code> (default 3)</td>
-            <td>Worker processes, each holding a real model instance in memory for its whole lifetime — a genuine memory/CPU tradeoff to size against the host's headroom.</td>
+            <td><code>FILE_STORAGE_PATH</code> (default: a directory inside the app — <strong>wrong in production</strong>)</td>
+            <td>Where uploaded PDFs and EPUBs and generated podcast enclosures actually live (#173). Must point at a mounted disk that outlives the container, or a redeploy deletes every one of them while the rows naming them survive. Treat it exactly like <code>DATABASE_URL</code>: restoring a database next to a lost disk gives you rows pointing at nothing. Set it explicitly even if you like the default, because the default resolves to a different directory under <code>tsx</code> than under <code>node dist/index.js</code>. See <a href="#durable-storage">above</a>.</td>
+          </tr>
+          <tr>
+            <td><code>JWT_ACCESS_SECRET</code> — <strong>required</strong></td>
+            <td>Signs every access token. Under <code>NODE_ENV=production</code> the app now refuses to start on a known placeholder (the values committed in this repository's CI configs and <code>verify.mjs</code>) or on anything under 32 characters (#174). Generate one: <code>node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"</code>. The check is production-only on purpose — dev, test and CI all legitimately run on placeholders, and a guard that fires there gets switched off within a day.</td>
+          </tr>
+          <tr>
+            <td><code>TTS_POOL_SIZE</code> (default: one per available core, capped at 3)</td>
+            <td>Worker processes, each holding a real model instance in memory for its whole lifetime — a genuine memory/CPU tradeoff to size against the host's headroom. The default is derived from <code>availableParallelism()</code> rather than fixed since #162: a fixed 3 on a 2-vCPU runner made three concurrent generations take 2.86x a single one instead of ~1x, because three processes each sizing their ONNX thread pool to the whole machine is contention, not concurrency.</td>
           </tr>
           <tr>
             <td><code>REDIS_URL</code></td>
@@ -3479,6 +4637,46 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           <tr>
             <td><code>TTS_CACHE_MAX_MB</code> (default 200)</td>
             <td>In-process cache ceiling, evicted LRU.</td>
+          </tr>
+          <tr>
+            <td><code>AUTH_ATTEMPT_RATE_LIMIT_MAX</code> (default 100 per 15 minutes)</td>
+            <td>Signup, login, and the password-reset routes — the ones with a guessable credential. Raised from 10 in #170: ten was sized for one person, but this keys on IP, and behind one office NAT or a carrier's CGNAT hundreds of unrelated people present as the same address — six of them mistyping once each spent the whole budget and 429'd everybody, including people who had not tried to sign in. 100 still cuts off a single host spraying one guess across a list of accounts, which is all that is left for the per-IP layer now that <code>AUTH_FAILED_LOGIN_LIMIT</code> bounds guessing per account. Otherwise leave it alone in production; it exists as a variable mainly so the e2e suite, which legitimately signs up dozens of times from one address, can raise it for its own run. Read together with <code>TRUST_PROXY</code>, as with every limit here.</td>
+          </tr>
+          <tr>
+            <td><code>AUTH_REFRESH_RATE_LIMIT_MAX</code> (default 120 per 15 minutes)</td>
+            <td><code>/api/auth/refresh</code>, deliberately <em>not</em> on the budget above. It looks like an auth route but is ordinary traffic: the web app calls it on load and on every access-token expiry, so sharing the credential-guessing budget meant the app spent the user's password-attempt allowance simply by working — a few tabs, or a dozen reloads inside fifteen minutes, and refresh started returning 429, which surfaces as being logged out on a correct password. Since the limiter keys on IP, everyone behind one NAT shared those ten. Nothing was gained for it: a refresh token is a high-entropy value in an httpOnly cookie, so there is no credential to guess, and the API-wide limit is the real backstop.</td>
+          </tr>
+          <tr>
+            <td><code>GLOBAL_RATE_LIMIT_MAX</code> (default 300 per minute)</td>
+            <td>The API-wide ceiling every route sits under, including the ones with their own tighter budget. This is what genuinely bounds a flood.</td>
+          </tr>
+          <tr>
+            <td><code>AUTH_FAILED_LOGIN_LIMIT</code> (default 5)</td>
+            <td>The one limit here that does <em>not</em> key on IP, and that is the point (#170): addresses are cheap to rent, so a per-IP ceiling is a budget an attacker buys more of while the people sharing one NAT pay its cost. After this many failed logins <em>for a given account</em>, the next attempt waits 5s, then 10s, 20s — capped at 15 minutes, decaying entirely after an hour of quiet. It escalates a wait rather than locking the account, because a hard lock hands anyone who knows an email address a way to keep its owner signed out, at which point the lock is the attack. The counter lives on the <code>User</code> row rather than in Redis or process memory: in-process would read "N failures per instance" behind a load balancer and reset on every deploy, and <code>REDIS_URL</code> is optional here, so a Redis-backed counter would simply not exist in the default deployment.</td>
+          </tr>
+          <tr>
+            <td><code>PUBLIC_SHARE_RATE_LIMIT_MAX</code> (default 120 per minute)</td>
+            <td>The two routes reachable with no session at all — <code>GET /api/public/shares/:slug</code> and <code>GET /api/public/seeds</code>. Tighter than the app-wide ceiling because it makes share-slug enumeration hopeless in wall-clock terms as well as arithmetic ones, on traffic that has no account behind it to hold responsible afterwards.</td>
+          </tr>
+          <tr>
+            <td><code>TTS_WARM_RATE_LIMIT_MAX</code> (default 120 in production)</td>
+            <td><code>/api/tts/warm</code>, which returns no audio and so gets its own bucket: one reader-open legitimately fires one warm call plus one real chunk fetch, and those should not compete for the same allowance.</td>
+          </tr>
+          <tr>
+            <td><code>TTS_INTRA_OP_THREADS</code> (default: cores ÷ pool size)</td>
+            <td>The ONNX intra-op thread budget per worker — the other half of the #162 fix above. Left to ORT's default each session sizes its pool to the whole machine, so dividing the cores among the workers is what makes the pool's processes run alongside each other instead of fighting.</td>
+          </tr>
+          <tr>
+            <td><code>API_PUBLIC_URL</code></td>
+            <td>Absolute base for the podcast feed URL and every <code>&lt;enclosure&gt;</code> in it. Derived from the request's own <code>Host</code> header by default, which is correct in dev and in <code>docker-compose</code>. Set it explicitly behind a TLS-terminating proxy: <code>request.protocol</code> reads <code>http</code> there unless <code>TRUST_PROXY</code> is on, and an https feed handing out http enclosures is a downgrade iOS's ATS refuses to download at all.</td>
+          </tr>
+          <tr>
+            <td><code>PODCAST_VOICE</code> (default <code>af_heart</code>)</td>
+            <td>The voice every podcast episode is generated with — the feed has to pick one, since a podcast client cannot see the reader's per-device voice preference. Recorded on each <code>ArticleAudio</code> row, which makes changing it a cache invalidation rather than a migration.</td>
+          </tr>
+          <tr>
+            <td><code>EXTRACTION_ALLOW_PRIVATE_ADDRESSES</code> — <strong>test only</strong></td>
+            <td>Lets article extraction fetch private/loopback addresses, which is how the e2e suite reaches its local fixture server instead of the real internet. Ignored outright under <code>NODE_ENV=production</code>, so the SSRF protection it relaxes is not overridable where it matters. Never set it in a deployment.</td>
           </tr>
           <tr>
             <td><code>SENTRY_DSN</code> (API)</td>
@@ -4085,8 +5283,711 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <hr class="divider">
 
+      <section id="part-ship">
+        <h2><span class="part-label">Part X</span>Shipping: What Blocks It, and What Comes After</h2>
+        <p>
+          This project has never met a user. Everything in it — every
+          feature, every latency decision, every schema choice — was made
+          without a single piece of usage data. That is the largest
+          outstanding risk in the codebase, and it is not a risk any amount
+          of further building reduces.
+        </p>
+        <p>
+          What follows is the honest state of readiness: what must be fixed
+          before deploying, what is worth adding first, and what the work
+          looks like once real people are using it. It is deliberately
+          separated that way, because the third list is mostly guesses and
+          the first two are not.
+        </p>
+
+        <h3 id="ship-blockers">What must be fixed first</h3>
+        <div class="callout warn">
+          <span class="callout-label">1. Uploaded files do not survive a deploy (#173)</span>
+          <p>
+            <code>storage-service.ts</code> writes inside the application
+            directory. <code>docker-compose.yml</code> declares volumes for
+            Postgres and Redis and <strong>none for storage</strong>. On
+            Fly, Railway, Render, Cloud Run, or a plain rebuild, every
+            uploaded PDF and EPUB and every generated podcast enclosure is
+            destroyed, while the database rows survive and go on pointing at
+            them. The library looks intact and the readers open empty.
+          </p>
+          <p>
+            <a href="#local-migration">#172</a> raised the stakes: uploaded
+            files now migrate <em>to</em> the server and are cleared from
+            IndexedDB once it accepts them, so the server holds the only
+            copy. This is the fourth member of the family #164, #171 and
+            #172 belong to — silent, invisible when it happens, discovered
+            far too late — and the only one that fires without anyone doing
+            anything wrong. Shipping a routine change is enough.
+          </p>
+        </div>
+        <div class="callout warn">
+          <span class="callout-label">2. Nothing is verifying pushes</span>
+          <p>
+            The GitHub Actions allowance is exhausted; the GitLab port has
+            never executed, because the repository is on GitHub. Three
+            documents claimed CI "runs on every push" and none of it was
+            true. Deploying without a pipeline means the first regression
+            ships silently. <code>pnpm verify</code> stands in locally, but
+            it is a thing a person has to remember.
+          </p>
+          <p>
+            The move to GitLab does not, by itself, fix this: GitLab.com's
+            shared runners give 400 minutes a month against Actions' 2,000,
+            and a run costs 20-25 minutes. A self-hosted runner (free,
+            unlimited, and faster) or making the repository public (which
+            makes Actions free) are the options that actually work.
+          </p>
+        </div>
+        <div class="callout warn">
+          <span class="callout-label">3. No way to delete an account (#174)</span>
+          <p>
+            There is no deletion route and no UI. For an app storing what
+            someone reads and what they thought about it, that is a trust
+            problem before it is a legal one — and it is a legal one too.
+            Sharpened by <a href="#part-5">#158</a>: a departing user
+            reasonably expects their public pages and their contribution to
+            the cross-user aggregate to go with them.
+          </p>
+          <p>
+            Most of the work already exists — export works, and every table
+            cascades from <code>User</code>. The gap is a route, a
+            confirmation, and the two things that <em>don't</em> cascade:
+            stored files (which orphan permanently) and
+            <code>PublicHighlightStat</code>, which by design holds no user
+            ids and therefore needs a recompute rather than a cascade.
+          </p>
+        </div>
+        <p>
+          Three more, smaller but real. <strong>The Docker build has never
+          run in this environment</strong> and is the single check that has
+          caught the most — it must pass once before any deploy.
+          <strong>Nothing rejects a weak production secret</strong>:
+          <code>tokens.ts</code> throws when <code>JWT_ACCESS_SECRET</code>
+          is missing but accepts the placeholder from
+          <code>.env.example</code>, and a startup refusal under
+          <code>NODE_ENV=production</code> is a few lines against a whole
+          class of launch-day mistake. And <strong>there is no privacy
+          policy or terms page</strong>, which an app with accounts, email,
+          public sharing and cross-user aggregation needs.
+        </p>
+        <div class="callout reversed">
+          <span class="callout-label">Status update: four of those six are now done, and one of the four is unverified</span>
+          <p>
+            The list above is kept as written rather than edited down, because
+            the order it puts things in is the useful part and because a
+            blocker list that quietly loses entries stops being evidence of
+            anything. What has changed since:
+          </p>
+          <p>
+            <strong>1 — files destroyed on redeploy: fixed (#173),</strong>
+            with a caveat that is itself on this list.
+            <code>FILE_STORAGE_PATH</code>, a named
+            <code>storage-data</code> volume in compose, and a deliberate
+            refusal to paper over it with a Dockerfile <code>VOLUME</code>;
+            the orphaned-audio item from the next list down went with it. But
+            <strong>no Docker daemon exists here</strong>, so the volume has
+            never actually been exercised — the tests check that compose and
+            the Dockerfile agree, which is consistency, not behavior. That
+            makes blocker "the Docker build has never run in this
+            environment" strictly more important than it was, not less. See
+            <a href="#durable-storage">Part VII</a>.
+          </p>
+          <p>
+            <strong>3 — no way to delete an account: fixed (#174),</strong>
+            API and UI, with the collect-then-delete ordering and the
+            aggregate rebuild that no cascade could do. <strong>The weak
+            production secret is now refused</strong> at startup, and
+            <strong>privacy and terms pages exist</strong> — unfinished by
+            their own admission, with every operator-dependent fact left as a
+            visible placeholder. See
+            <a href="#account-deletion">Part V</a>.
+          </p>
+          <p>
+            <strong>2 — nothing is verifying pushes: unchanged, and now the
+            only structural blocker left.</strong> It also quietly absorbed
+            the cost of the secret guard: that guard would have broken the
+            Docker smoke test in both pipelines, and it was caught by reading
+            the workflow files rather than by a red build, because there is no
+            red build to have.
+            <a href="#dead-code-audit">Part VI has the story.</a>
+          </p>
+        </div>
+        <div class="callout why">
+          <span class="callout-label">The multi-instance question, which has to be answered before it is discovered</span>
+          <p>
+            Several things assume one process. The rate limiter's store is
+            in-memory and says so; #170's unknown-email failure map is too
+            (its real counter is in Postgres, so a guesser spreading across
+            instances can still distinguish the two — documented in the
+            code); the TTS L1 cache is per-process, which is fine because it
+            is a cache. Object storage has the same shape: a mounted disk
+            works for one instance and stops working for two, because
+            instance A cannot serve what instance B wrote.
+          </p>
+          <p>
+            Either deploy deliberately as a single instance and write that
+            down, or move the limiter to Redis and storage to S3 before
+            scaling. What must not happen is scaling to two and finding out:
+            the failure is silent in exactly the same way as the rest of
+            this list — the limits simply become N times looser.
+          </p>
+        </div>
+
+        <h3 id="ship-nice-to-have">Worth adding before deploying, but not blocking</h3>
+        <ul>
+          <li><strong>The <code>upload → signup → open</code> e2e case.</strong>
+            #172's one unchecked criterion. The server half is
+            integration-tested; the browser half is the part that actually
+            broke.</li>
+          <li><strong>Opus for podcast audio (#153).</strong> WAV is ~2.9 MB
+            a minute. A forty-minute article is over 100 MB pushed to a
+            phone, and articles past 250 chunks are currently skipped
+            outright rather than truncated — a truncated episode plays
+            cleanly and hides the loss, which is why skipping is the safer
+            default and a bad permanent answer.</li>
+          <li><strong>Orphaned-file cleanup.</strong> Deleting an article
+            cascades the <code>ArticleAudio</code> row and leaves the WAV.
+            Storage grows and nothing reclaims it. Cheap now, annoying later,
+            and it pairs naturally with #173.</li>
+          <li><strong>Upload quota.</strong> Deferred in #172 because doing
+            it properly needs a stored per-user byte count rather than
+            walking the disk per upload. With durable storage it stops being
+            theoretical and becomes a cost line.</li>
+          <li><strong>Mobile prompt authoring.</strong> Mobile honors recall
+            prompts but cannot write them, so a mobile-only user can never
+            create one.</li>
+        </ul>
+
+        <h3 id="post-deploy-roadmap">The roadmap after launch</h3>
+        <p>
+          Ordered by what usage data unlocks rather than by appeal. The
+          first phase exists to make the later ones decidable, which is the
+          whole reason for deploying sooner rather than building more.
+        </p>
+        <table>
+          <tr><th>Phase</th><th>Work</th><th>Why it waits for users</th></tr>
+          <tr>
+            <td><strong>0 — Watch</strong><br>first weeks</td>
+            <td>Actually read the Datadog traces #151 wired up. Real-world
+              TTFA distribution from RUM. Error triage from Sentry. Confirm
+              <code>TRUST_PROXY</code> resolved correctly by checking whether
+              rate limits key on real client addresses.</td>
+            <td>The observability exists and has never had anything to
+              observe. Every performance number in
+              <a href="#feat-tts">Part V</a> came from a local run or a
+              2-vCPU CI box, and neither is a user.</td>
+          </tr>
+          <tr>
+            <td><strong>1 — Finish the measurements</strong></td>
+            <td>Run <code>bench-readalong-alignment.ts</code> and close
+              <a href="#part-6">#159</a> either way. Run the podcast feed
+              through a real validator and a real client, closing #154's two
+              unverified criteria.</td>
+            <td>Both are blocked here only by network access, not by
+              difficulty. A deployed environment has it.</td>
+          </tr>
+          <tr>
+            <td><strong>2 — Fix what real usage breaks</strong></td>
+            <td>Whatever phase 0 surfaces. Expect: cold-start latency on the
+              first TTS request after idle, extraction failures on sites the
+              fixture server never modelled, and at least one thing nobody
+              predicted.</td>
+            <td>This is the phase that cannot be planned, which is precisely
+              why the plan should not extend past it in detail.</td>
+          </tr>
+          <tr>
+            <td><strong>3 — Growth loops</strong></td>
+            <td>Measure whether shared pages actually bring anyone back.
+              Switch onboarding seeds from the public-domain set to the real
+              cross-user aggregate once enough accounts have opted in to
+              clear the threshold of 3.</td>
+            <td>#158 part 2 is built and structurally empty until there are
+              users. The seed set is scaffolding for exactly this moment.</td>
+          </tr>
+          <tr>
+            <td><strong>4 — Scale, if the numbers say so</strong></td>
+            <td>Redis-backed rate limiting, S3, more than one instance.
+              Postgres full-text search if library sizes make
+              <code>contains</code> matching hurt.</td>
+            <td>Every one of these is a real cost with no benefit at low
+              volume. The search tradeoff in particular was made
+              consciously (see <a href="#feat-search">Search</a>) and should
+              be revisited on evidence, not on principle.</td>
+          </tr>
+          <tr>
+            <td><strong>5 — Platform reach</strong></td>
+            <td>Chrome Web Store, addons.mozilla.org, Safari conversion, the
+              two app stores. Mobile PDF/EPUB page rendering.</td>
+            <td>Store review is slow and each listing is a commitment to
+              keep shipping there. Worth doing once the web app has shown
+              which features people use.</td>
+          </tr>
+        </table>
+        <div class="callout why">
+          <span class="callout-label">The thing this roadmap is really for</span>
+          <p>
+            The backlog before this pass contained a podcast feed, semantic
+            search, forced alignment and cross-user aggregation — all
+            plausible, none informed by anyone's behaviour. Some of them are
+            now built and may turn out to matter to nobody.
+          </p>
+          <p>
+            The build-document-review loop that produced this codebase has
+            no exit condition: a review pass always finds something. What
+            ends it is deployment, because after that the backlog gets
+            ordered by evidence instead of by inference.
+          </p>
+        </div>
+      </section>
+
+      <hr class="divider">
+
+      <section id="part-audit">
+        <h2><span class="part-label">Part XI</span>The Audit: What a Full Sweep Actually Found</h2>
+        <p>
+          Every part above this one describes decisions made while building.
+          This one describes what was found by going back over the finished
+          thing and trying to break it — a full pass across the API routes,
+          the services, the shared logic, the web app, and the two secondary
+          clients, with the standing rule that nothing counted as a bug
+          until it had been made to happen.
+        </p>
+        <p>
+          That rule is the reason this part is worth reading. A list of
+          things that <em>look</em> wrong is cheap and mostly noise. The
+          findings below each came with a reproduction and a failing test
+          first, which changed the outcome more than once: several things
+          that read as bugs were not, and several that read as fine were
+          considerably worse than they looked.
+        </p>
+
+        <h3 id="audit-shapes">The four shapes almost everything fell into</h3>
+        <p>
+          Sorted by kind rather than by file, because the kinds repeat and
+          the files do not. If there is one thing to take from this part, it
+          is that a codebase's bugs cluster by <em>mechanism</em>, and once
+          you have named the mechanism you can go find the rest of them.
+        </p>
+
+        <div class="callout warn">
+          <span class="callout-label">1. The throw that arrives from outside control flow</span>
+          <p>
+            The most dangerous class in this codebase, because a
+            <code>try/catch</code> around the call site does not catch it and
+            the consequence is the whole process rather than one request.
+          </p>
+          <p>
+            #163 was the first: a failed <code>tesseract.js</code> download
+            threw from a <code>nextTick</code> callback, so one unauthenticated
+            PDF upload could take the API down if the CDN was unreachable. The
+            audit found the same shape twice more in the TTS pool. A
+            <code>ChildProcess</code> is an <code>EventEmitter</code>, and an
+            <code>EventEmitter</code> with no <code>"error"</code> listener
+            <em>rethrows</em> — there was no listener at all. Worse,
+            <code>send()</code> on a closed IPC channel does not throw where
+            you can catch it; it schedules
+            <code>emit("error", ERR_IPC_CHANNEL_CLOSED)</code> on the next
+            tick. And a dead worker was reachable: Node delivers
+            <code>"disconnect"</code> strictly before <code>"exit"</code>, and
+            only <code>"exit"</code> removed a worker from the pool, so every
+            crashed worker spent a real interval sitting in the array
+            advertising itself as idle with a channel nobody could write to.
+            Any request arriving in that window ended the server.
+          </p>
+          <p>
+            The fix is the same each time and it is not "add a try/catch":
+            give the emitter a listener so the failure re-enters ordinary
+            control flow. <strong>If you add a child process, a stream, or
+            anything else that is an EventEmitter, it needs an
+            <code>"error"</code> handler before it needs anything
+            else.</strong>
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <span class="callout-label">2. The number that is quietly NaN</span>
+          <p>
+            <code>Number(process.env.X || 200)</code> looks like it has a
+            default. It does not: <code>TTS_CACHE_MAX_MB="200MB"</code> — a
+            units typo, and the most likely way anyone gets this wrong —
+            yields <code>NaN</code>, and <code>currentBytes &gt; NaN</code>
+            is <code>false</code>. So the misconfiguration did not fall back
+            to 200 MB; it switched eviction <em>off</em> and let the
+            "bounded" in-memory cache grow until the container was OOM-killed.
+            Measured: 800 MB retained against a 200 MB cap, and it would have
+            retained any amount.
+          </p>
+          <p>
+            Every comparison against <code>NaN</code> is false, which means a
+            <code>NaN</code> limit is not a small limit or a large one — it is
+            <em>no limit</em>, and it fails in the permissive direction every
+            time. Environment numbers are now validated and a bad one is
+            logged, because a silent fallback would leave the operator
+            believing in a cap that is not in force.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <span class="callout-label">3. The concurrent read-modify-write</span>
+          <p>
+            <code>inlineImages</code> ran four workers, each computing its
+            budget as <code>MAX_TOTAL_IMAGE_BYTES - totalBytes</code>
+            <em>before</em> any of them had added its own image. All four
+            sized themselves against a budget the other three were already
+            spending. Measured 20 MB inlined under a 15 MB cap, with a real
+            ceiling of 24 MB — on input a hostile page fully controls, which
+            then lands in <code>Article.html</code> and is re-sent on every
+            open.
+          </p>
+          <p>
+            The fix is not a lock; it is to re-check and commit the budget
+            after the <code>await</code>, with no <code>await</code> in
+            between, so the test and the increment are atomic with respect to
+            the other workers. <strong>A limit read before an await and
+            enforced after it is not a limit.</strong>
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <span class="callout-label">4. The validated-once, used-forever value</span>
+          <p>
+            Webhook URLs were checked when registered and never again. That
+            is a bound, not a control: the hostname is resolved on every
+            delivery, so a record that pointed somewhere public when saved and
+            was re-pointed at <code>169.254.169.254</code> afterwards was
+            fetched happily — as was any public URL that answered
+            <code>302</code>, since <code>fetch</code> follows redirects by
+            default.
+          </p>
+          <p>
+            This one was confirmed live rather than argued: a delivery aimed
+            at the metadata endpoint came back with a real <code>403</code>
+            status code, and that code lands in the
+            <code>WebhookDelivery</code> row that
+            <code>GET /api/webhooks/:id/deliveries</code> hands straight back
+            to the caller. That makes it an oracle, not a blind SSRF —
+            enough to map an internal network and learn which ports answer.
+          </p>
+          <p>
+            Redirects are now not followed <em>at all</em> here, which is a
+            deliberate departure from how extraction and RSS handle the same
+            risk. Those are GETs of public documents, so re-checking each hop
+            is enough. This is a <em>signed</em> POST: replaying it to a
+            redirect target would hand that target both the payload and a
+            valid <code>X-Booklet-Signature</code> for it, turning a
+            <code>302</code> into a way to make this server vouch for a body
+            to a host the user never registered. A webhook endpoint is a fixed
+            URL by definition, so a redirect is reported as the
+            misconfiguration it is.
+          </p>
+        </div>
+
+        <h3 id="audit-scope">Confining a credential beats checking it everywhere</h3>
+        <p>
+          The single worst finding was not a crash. Personal access tokens
+          were accepted by the auth hook on <em>every</em> route, while the
+          internal <code>/api</code> routes carry no scope check at all —
+          they had only ever been reached by a session, so there was nothing
+          to check. The result was that <code>scopes: ["read"]</code>, the
+          thing you hand a third-party integration precisely because it
+          cannot change anything, was decorative.
+        </p>
+        <p>
+          Confirmed by injection: a read-only token could
+          <code>PATCH</code> and <code>DELETE</code> articles, mint itself a
+          fresh read+write token via <code>POST /api/tokens</code>, mint a
+          bearer podcast URL for the audio of the entire library, and
+          <code>DELETE /api/auth/me</code> — the account really went, which
+          cascaded four later tests into 404s and is how the severity became
+          obvious.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why confinement, not per-route checks</span>
+          <p>
+            The obvious fix is to add a scope check to each internal route.
+            That fix has to be remembered on every route added afterwards,
+            forever, and the failure mode is silence. The credential is now
+            confined instead: a PAT authenticates only where the matched
+            route pattern begins <code>/api/v1/</code> — the surface the
+            developer settings page already told users PATs were for. Same
+            reasoning as the podcast feed token being confined to its own URL.
+          </p>
+          <p>
+            Matched on <code>request.routeOptions.url</code>, never on
+            <code>request.url</code>. The raw URL is a string the caller
+            wrote; anything that normalizes differently between the check and
+            the router — a <code>..</code> segment, an encoded slash — makes
+            the two disagree, and a security check that disagrees with the
+            router is not a check. The route pattern is what the router
+            actually matched, so they cannot.
+          </p>
+          <p>
+            The deeper point: <strong>a token that can mint a token is not
+            revocable</strong>, because revoking it leaves behind the one it
+            made. Any credential that can reach a credential-issuing endpoint
+            has effectively infinite lifetime, whatever its expiry says.
+          </p>
+        </div>
+
+        <h3 id="audit-time">Two bugs about time, and why both were invisible</h3>
+        <p>
+          <code>startOfDay</code> returns <em>local</em> midnight, and
+          consecutive local midnights are 23 or 25 hours apart across a DST
+          transition, not 24. Stepping between days with a fixed
+          <code>86_400_000</code> therefore lands an hour to one side and
+          matches nothing. A reader in America/New_York who finished
+          something on the 6th, 7th, 8th and 9th of March 2026 got a current
+          streak of 1 instead of 4. The same data in UTC gave 4. It happens
+          to every user in a DST timezone, twice a year, and it destroys the
+          streak the entire stats page is built around — which reads as "the
+          app forgot my streak", not as a date bug. Calendar arithmetic now
+          goes through the <code>Date</code> constructor, which also makes
+          month and year boundaries free.
+        </p>
+        <p>
+          The second: SM-2's interval is <code>previous × easinessFactor</code>
+          and nothing in it converges. Running the recurrence out at the
+          quality value the <em>Remembered</em> button maps to, review 20
+          produces roughly 3.5 billion days — past <code>Int4</code>'s
+          2,147,483,647, so the write is rejected — and review 21 throws
+          <code>RangeError: Invalid time value</code> out of
+          <code>new Date(...).toISOString()</code>. That is a bare throw from
+          a pure function every caller treats as total, on the client, while
+          recording a review the reader has already given. Capped at a
+          hundred years: a highlight due in 5.8 million years and one due in
+          a century are the same highlight.
+        </p>
+
+        <h3 id="audit-dedupe">The direction a failure points matters more than its size</h3>
+        <p>
+          <code>canonicalizeUrl</code> re-joined query parameters by pasting
+          decoded values back between <code>=</code> and <code>&amp;</code>.
+          Since <code>searchParams.entries()</code> decodes, a value's own
+          separators became structural ones: <code>?a=1%26b=2</code> (one
+          parameter whose value is the literal <code>1&amp;b=2</code>) and
+          <code>?a=1&amp;b=2</code> (two parameters) both produced
+          <code>a=1&amp;b=2</code>.
+        </p>
+        <p>
+          Two different pages, one canonical URL — so saving the second after
+          the first is silently discarded as a duplicate. The comment at the
+          top of the tracking-parameter list already said this was the
+          direction that must not fail, about a different mechanism.
+          Re-encoding changes stored values for URLs containing escaped
+          characters, so previously-saved rows miss dedupe once. That is the
+          right way round on purpose: <strong>a missed dedupe saves a second
+          copy the user can see and delete; a false dedupe drops an article
+          and says nothing.</strong>
+        </p>
+
+        <h3 id="audit-blank">Eight pages that showed nothing, forever</h3>
+        <p>
+          A pattern repeated across the web app: <code>refresh()</code> with a
+          <code>.then(() =&gt; setLoaded(true))</code> and no
+          <code>.catch</code>, gated by <code>if (!loaded) return null</code>.
+          When the API was unreachable the result was an empty frame — no
+          spinner, no message, no retry — which to a user reads as "my
+          library is gone". The highlights page was worse than blank: it
+          rendered its empty state, so a failed request became the claim
+          <em>"No highlights yet"</em>, which is a statement about their
+          account rather than about the network.
+        </p>
+        <p>
+          The fix is deliberately narrow. Only the <em>first</em> load turns
+          into an error block; a failed background refresh over content
+          already on screen stays quiet, because replacing working content
+          with an error is its own bug. The same audit found the write side
+          of this: highlight create and delete, note save, status change,
+          rename, tag add, collection membership, export and CSV import all
+          failed silently — the sidebar's comment even claimed it surfaced
+          errors inline, and it did not.
+        </p>
+
+        <h3 id="audit-bundle">Two libraries on routes that never used them</h3>
+        <p>
+          <code>epub.js</code> and its bundled JSZip — a 501 KB chunk — sat in
+          the initial JavaScript of <code>/highlights</code>,
+          <code>/resurface</code> and every reader page, for exactly two
+          things: reading a CFI's spine position, and comparing two CFIs.
+          <code>@sentry/browser</code> (81 KB) was in the shared entry of
+          every route whether or not it was configured, while
+          <code>lib/rum.ts</code> two files away already imported Datadog
+          dynamically and explained why.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">How the CFI replacement was made trustworthy</span>
+          <p>
+            Replacing a dependency with a hand-written parser is normally a
+            bad trade, because a parser that is merely plausible is
+            <em>worse</em> than the library it replaced: a subtly mis-ordered
+            highlight list looks exactly like a correctly-ordered one, and
+            nobody will ever notice.
+          </p>
+          <p>
+            So the test asserts no hand-written expectations. It runs the
+            local implementation and the real <code>EpubCFI</code> over a
+            corpus of CFI shapes that actually occur, compares all 196 ordered
+            pairs in both directions, and requires identical answers. The real
+            library is imported in the test, where its size costs nothing.
+            <strong>When you replace something, the replacement's test should
+            be a differential against the original, not a restatement of what
+            you think it does.</strong>
+          </p>
+        </div>
+
+        <h3 id="audit-shed">Rate limiting bounds one caller, not the aggregate</h3>
+        <p>
+          <code>/api/tts</code> is unauthenticated and rate-limited per IP
+          over ten minutes. That bounds one caller and says nothing about how
+          many callers there are, so nothing stood between a few hundred
+          distinct addresses and an unbounded queue of multi-second Kokoro
+          forward passes.
+        </p>
+        <p>
+          Queueing is the wrong response to more work than the machine can do.
+          Every waiting caller holds a connection open for audio that arrives
+          long after they stopped caring — and because the client fetches
+          chunks in order, someone waiting two minutes for chunk 3 hears
+          <em>nothing at all</em> rather than something slightly late. The
+          route now sheds with <code>503</code> and <code>Retry-After</code>
+          past a queue depth of eight per worker, roughly forty seconds of
+          backlog. The client's chunk loop already tolerates a failed chunk,
+          so this degrades to a gap rather than a hang. Speculative warming is
+          excluded from the count, since it is drained only by capacity that
+          would otherwise be idle and therefore is not competing.
+        </p>
+
+        <h3 id="audit-clients">The secondary clients had the worst finding of all</h3>
+        <p>
+          The browser extension's background script had <em>no sender check</em>.
+          With no <code>externally_connectable</code> declared, the default is
+          not "nobody" — any other installed extension could
+          <code>sendMessage</code> to it and drive authenticated API calls
+          with the user's token. The fix is one comparison,
+          <code>sender.id !== chrome.runtime.id</code>, and nothing else in
+          the extension was standing in for it.
+        </p>
+        <p>
+          Both clients also read their stored session with a bare cast. A
+          record missing <code>accessTokenExpiresAt</code> makes the expiry
+          comparison <code>NaN &lt;= now</code>, which is <code>false</code> —
+          so garbage read as a <em>valid</em> session, every request went out
+          as <code>Bearer undefined</code>, and the app sat on the library
+          screen 401ing with no route back to the login form. The same NaN
+          rule as the cache limit above, in a completely different file, with
+          a completely different consequence.
+        </p>
+        <p>
+          And #164 — the migration bug that silently emptied the library on
+          signup — was reproduced on mobile, where the fix had never been
+          applied: the entire local library posted as one body against a 32 MB
+          cap, with the error swallowed by <code>App.tsx</code>. That route,
+          <code>POST /api/sync/import</code>, has now been wrong in six
+          separate fields across four passes. It is the seam where "accounts
+          are optional and exist only for sync" is actually tested, and every
+          single failure has been silent.
+        </p>
+
+        <h3 id="audit-nonfindings">What the audit did not find, and why that is worth recording</h3>
+        <p>
+          Negative results are evidence too, and they are the part of an audit
+          that never gets written down. Checked and clean: every
+          <code>:id</code> route scopes by <code>userId</code> (the one gap
+          was collection <code>parentId</code> on create, now fixed); no route
+          spreads <code>request.body</code> into a Prisma write; no raw SQL
+          outside the readiness probe's <code>SELECT 1</code>; no open
+          redirect; no regex with nested quantifiers; pagination cursors
+          neither leak nor error across tenants; share slugs are 128-bit and
+          revocation is a row delete, so revoked and never-existed are
+          indistinguishable; password comparison is
+          <code>timingSafeEqual</code> and unknown emails still run scrypt
+          against a dummy hash.
+        </p>
+        <p>
+          Three things were suspected and deliberately <em>not</em> changed,
+          which matters as much as the fixes. A concurrent-rebuild race in the
+          public highlight aggregate is real but self-healing, and it is a
+          privacy-sensitive path where a speculative fix is worse than a known
+          bug. <code>fetchHtml</code> decodes as UTF-8 unconditionally, so a
+          Shift_JIS page extracts as mojibake — real, but the fix is a
+          charset-detection feature, not a patch. And an access token outlives
+          session revocation by up to fifteen minutes; closing that means a
+          session lookup on every request, which is a latency and
+          architecture decision, not a route-layer one. It is flagged in
+          <a href="#part-ship">Part X</a> as something to decide before
+          launch rather than discover after it.
+        </p>
+
+        <h3 id="audit-e2e">Running the suite, and the one regression it caught</h3>
+        <p>
+          The full offline e2e suite was run against the audited tree: 103
+          passed, 13 failed, 1 skipped. Both groups of failures are worth
+          recording, because they are opposite kinds of result.
+        </p>
+        <p>
+          Three were a <strong>real regression introduced by the audit
+          itself</strong>. Tidying the EPUB reader's teardown removed
+          <code>destroy()</code> from the cancelled paths of its async open,
+          on the reasoning that the effect cleanup had already torn things
+          down. That is only true if the cleanup runs <em>after</em> the
+          rendition handle is assigned, and the case that matters is the
+          other one: <code>open()</code> is async, React runs effect /
+          cleanup / effect on every dev mount under StrictMode, and the
+          cleanup fires while <code>open()</code> is still awaiting
+          <code>arrayBuffer()</code> — so both handles are still null and it
+          destroys nothing. The abandoned run then rendered an iframe into
+          the container the second run was about to use and returned without
+          cleaning up. The suite reported it exactly:
+          <code>[data-epub-reader] iframe resolved to 2 elements</code>. Two
+          live EPUB renderings stacked in the reader, which is user-visible
+          and which nothing in the unit tests could have seen.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why this is the argument for keeping the e2e suite</span>
+          <p>
+            The change that caused it was a <em>cleanup</em>, made for a good
+            reason (the Book really was leaking), reviewed, typechecked, and
+            green across 93 web unit tests. It shipped a regression anyway,
+            because the failure only exists in a real browser, with a real
+            async race, under React's real double-invoke. The suite is slow
+            and it is the only thing in this project that could have caught
+            it.
+          </p>
+        </div>
+        <p>
+          The other ten are all PDF specs, and they are <em>environmental</em>
+          — the pdf.js text layer does not attach in this container. That had
+          been asserted before on the strength of the same specs being green
+          in Actions CI, which is an inference, not evidence. It is now
+          tested: reverting <code>pdf-reader.tsx</code> to its pre-audit
+          version and re-running produces the identical failure, so the audit
+          did not cause them. Worth stating plainly because the honest version
+          of "these failures are environmental" is a claim someone checked,
+          and the dishonest version is a claim someone wanted to be true.
+        </p>
+
+        <div class="callout">
+          <span class="callout-label">The one habit worth taking from this part</span>
+          <p>
+            Nothing above was found by reading carefully. Every one of them
+            was found by writing something that ran the real code and
+            watching what it did — the real pool against a stand-in worker
+            whose channel had gone, the real extractor against a real PDF,
+            the real Readability against a crafted page, a real delivery to
+            a real metadata endpoint. Several of the reproductions
+            contradicted the hypothesis that motivated them, and that is the
+            point: a bug you have not reproduced is a guess about a bug, and
+            the fix for a guess is a guess.
+          </p>
+        </div>
+      </section>
+
+      <hr class="divider">
+
       <section id="part-boundaries">
-        <h2><span class="part-label">Part X</span>Delivery Boundaries &amp; Known Gaps</h2>
+        <h2><span class="part-label">Part XII</span>Delivery Boundaries &amp; Known Gaps</h2>
         <p>
           An honest statement of where this project actually stops — merged
           here from an earlier architecture document (July 2026) that this one
@@ -4171,9 +6072,190 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <section id="part-10">
         <a id="part-11"></a>
-        <h2><span class="part-label">Part XI</span>Changelog of This Document</h2>
+        <h2><span class="part-label">Part XIII</span>Changelog of This Document</h2>
         <table>
           <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-08</td>
+            <td>
+              v8 — merged the two parallel documentation branches that had grown
+              from the same v4 base while the codebase was being worked on in two
+              directions at once. One lineage (this branch) went
+              v5 recall prompts &rarr; v6
+              <a href="#part-ship">Shipping</a> &rarr; v7
+              <a href="#part-audit">the Audit</a>; the other went its own v5,
+              adding the client-side audio cache (Part V, Chapter 7), listening-
+              position sync (Chapter 8), semantic and full-text search, and a
+              <a href="#part-boundaries">Delivery Boundaries</a> part. Both are
+              kept in full rather than one being discarded, which is why two
+              <strong>v5</strong> rows appear below — that is the fork point, left
+              honest rather than renumbered away. On merge the parts were
+              renumbered so nothing collides: Shipping is Part X, the Audit XI,
+              Delivery Boundaries XII, this changelog XIII; the read-along
+              measurement became Chapter 9 so the audio-cache and listening-
+              position chapters (7 and 8) keep their numbers. Delivery Boundaries
+              and Shipping overlap in purpose — both cover what stands between the
+              code and a deploy — and were left as adjacent parts rather than
+              force-merged, since each is internally coherent.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-08-08</td>
+            <td>
+              v7 — added <a href="#part-audit">Part XI, The Audit</a>: what a
+              full sweep across the routes, services, shared logic, web app
+              and both secondary clients actually found, organised by
+              mechanism rather than by file because the mechanisms repeat.
+              The four recurring shapes (a throw arriving from outside
+              control flow, a limit that is quietly <code>NaN</code>, a
+              concurrent read-modify-write, and a value validated once and
+              trusted forever), why confining a credential beats checking it
+              on every route, the DST and integer-overflow bugs in the
+              scheduling maths, the eight pages that rendered nothing forever
+              on a failed load, the two libraries shipped to routes that
+              never used them and how the replacement was made trustworthy,
+              why rate limiting bounds one caller rather than the aggregate,
+              and the extension's missing sender check. Includes the negative
+              results and the three things deliberately left alone, since an
+              audit that only records its findings is not reproducible.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-08-08</td>
+            <td>
+              v6 — added <a href="#part-ship">Part X, Shipping</a>: the three
+              things that must be fixed before deploying (files destroyed on
+              redeploy, nothing verifying pushes, no way to delete an
+              account), the multi-instance assumptions that have to be
+              answered deliberately rather than discovered, what is worth
+              adding first, and a post-launch roadmap ordered by what usage
+              data unlocks rather than by appeal. Added
+              <a href="#feat-sharing">Sharing</a> and
+              <a href="#feat-podcast">the podcast feed</a> to Part V,
+              including why revocation deletes the row (it is a security
+              decision twice — a soft delete is both reversible and a timing
+              side channel), why the aggregation threshold is enforced on
+              write rather than read, and why the feed token's boundary is
+              its format rather than a scope check that has to be remembered
+              on every future route.
+              Recorded <a href="#alignment-research">#159's negative
+              result</a> as
+              <a href="#feat-tts">TTS Chapter 7</a>: the shipped read-along
+              estimate and an independent syllable-plus-pause model disagree
+              by 151-1,340&nbsp;ms against a 100&nbsp;ms threshold that was
+              fixed in source before any number was produced, and because the
+              inference only runs one way — agreement is evidence, disagreement
+              is not — that cannot rule the question out. The ground-truth
+              harness is written and carries a banner saying it has never been
+              executed, so #159 stays open and the estimate's real accuracy is
+              unknown rather than "probably fine". Includes the correction the
+              module's own test forced: <code>secondsPerSyllable</code> does
+              not cancel out of the comparison, as the docstring had claimed.
+              Extended <a href="#feat-auth">Part V's auth section</a> with
+              <a href="#auth-login-limits">#170</a>, whose interesting half is
+              that the fix creates the vulnerability: bounding guessing
+              per-account instead of per-IP stops one office NAT sharing ten
+              attempts, but delaying only <em>real</em> accounts turns
+              401-vs-429 into a cleaner answer to "is this email registered?"
+              than the login response — which goes to deliberate trouble to be
+              identical either way. Unknown emails get byte-identical
+              treatment from a capped, oldest-evicted in-memory map, not
+              Postgres rows, since the keys are attacker-chosen and unbounded.
+              Also the pre-existing timing leak it closed:
+              <code>verifyPassword</code> was skipped when no account existed
+              and scrypt dominates login cost, so "no such user" was
+              measurably faster than "wrong password". Escalating delay rather
+              than lockout, because a hard lock on a known email hands an
+              attacker a way to keep its owner out.
+              Added <a href="#account-deletion">account deletion (#174)</a>
+              beside it — why immediate rather than a 30-day soft delete, why
+              storage keys must be collected before the cascade runs, and the
+              production-secret guard that shipped with it.
+              Added <a href="#migration-partial">two more sections on the
+              local&nbsp;&rarr;&nbsp;account seam</a> to Part II: #171's
+              destroyed review schedules (four of nine SM-2 fields silently
+              defaulted, leaving a library that says "reviewed four times"
+              next to a scheduler that says "never seen", discovered weeks
+              later), the null <code>canonicalUrl</code> found by auditing
+              what else crossed incompletely, and
+              <a href="#migration-files">#172</a>, the third and last —
+              uploaded files, keyed off the
+              <code>localId&nbsp;&rarr;&nbsp;serverId</code> map the import
+              route had always built internally and never sent.
+              Added <a href="#durable-storage">durable file storage
+              (#173)</a> to Part VII, including that #172 turned it from cache
+              loss into data loss by making the server the only copy, why a
+              Dockerfile <code>VOLUME</code> was refused (an anonymous volume
+              survives a restart, fails the redeploy this bug is about, and
+              looks like a fix), and that the volume behavior itself remains
+              <strong>unverified</strong> — there is no Docker daemon here.
+              Added <a href="#dead-code-audit">the dead-code audit</a> to
+              Part VI, whose honest headline is that of 62 flagged exports and
+              8 unreferenced files only 3 were genuinely dead, plus the
+              correction that <code>hasScrolledAway</code> was asserted dead
+              and is not (#166 orphaned its export, not the function) and the
+              two NUL bytes in <code>tts-cache.ts</code> that made the file
+              binary to grep, so a repo-wide scan skipped every symbol in it
+              silently. The same section records the production-secret guard
+              breaking CI's Docker smoke test — the guard working correctly,
+              presenting as a health-check timeout — and why whitelisting the
+              repository's own placeholder would have made it theatre.
+              Marked four of Part X's six blockers
+              <a href="#ship-blockers">done in place</a> rather than deleting
+              them, leaving "nothing is verifying pushes" as the only
+              structural one left.
+              Corrected the environment table throughout — twelve variables
+              the code reads were undocumented, and both
+              <code>AUTH_ATTEMPT_RATE_LIMIT_MAX</code> (10, now 100) and
+              <code>TTS_POOL_SIZE</code> (a fixed 3, actually one per core
+              capped at 3) had stale defaults, and
+              <code>FILE_STORAGE_PATH</code> and
+              <code>JWT_ACCESS_SECRET</code> were added as the two entries a
+              deployment cannot get wrong quietly. Removed the claim, repeated
+              in three documents, that CI runs on every push; it does not,
+              and Part X says what is true instead.
+            </td>
+          </tr>
+          <tr>
+            <td>2026-08-08</td>
+            <td>
+              v5 — added
+              <a href="#recall-prompts">Recall prompts</a> to the
+              resurfacing section, on the ordering bug underneath a correct
+              implementation: the app showed you the highlight and
+              <em>then</em> asked whether you had remembered it, so SM-2 — an
+              algorithm for scheduling retrieval attempts — was being fed a
+              recognition judgment and scheduling re-reads. Covers why the
+              grade buttons disappear along with the passage (concealing the
+              answer alone would have been cosmetic), why the note is
+              concealed too, the two things that would have been bugs (a
+              single reveal flag leaking across a list of cards, and a
+              whitespace-only prompt reading as "prompted" while asking
+              nothing), and the two follow-ups deliberately not taken yet —
+              finer SM-2 grades, which only start to mean something now that
+              there is a real retrieval attempt to grade, and generated
+              prompts.
+              Added two sections to <a href="#part-6">Part VI</a>:
+              <a href="#web-unit-tests">the 19,000 lines with no test
+              runner</a>, including why rendering React components needed a
+              40-line local <code>render</code> rather than
+              <code>@testing-library/react</code> (three React copies, and a
+              resolution order Vite never gets to influence), and
+              <a href="#verify-command">one command with an honest list of
+              what it did not check</a>. Recorded the auth rate-limit finding
+              there as well, because the lesson generalizes: one added spec
+              made three unrelated ones fail in an order-dependent way, which
+              looked exactly like flakiness and was a real bug —
+              <code>/api/auth/refresh</code> was sharing the
+              credential-guessing budget with signup, so the app spent the
+              user's password-attempt allowance just by working, and everyone
+              behind one NAT shared ten refreshes. Fixed, with the two new
+              variables added to the
+              <a href="#part-7">environment table</a> (along with
+              <code>GLOBAL_RATE_LIMIT_MAX</code>, which was in use but
+              undocumented).
+            </td>
+          </tr>
           <tr>
             <td>2026-08-07</td>
             <td>
@@ -4222,7 +6304,7 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
               standalone <code>Booklet-Technical-Architecture-Expanded.html</code>
               (July 2026) and deleted it: everything in it was covered here in
               more depth except its delivery-boundaries and guardrails list,
-              which is now <a href="#part-boundaries">Part X</a>, annotated
+              which is now <a href="#part-boundaries">Part XII</a>, annotated
               with where each guardrail actually stands. Semantic search
               (#156) is noted in <a href="#feat-search">Search</a> as
               <span class="tag">in progress</span> — schema and shared ranking
@@ -4344,7 +6426,7 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <footer class="doc-footer">
         <p>
-          Booklet — Technical Documentation, v5. Written collaboratively by
+          Booklet — Technical Documentation, v8. Written collaboratively by
           the project's owner and Claude (Anthropic), grounded in the real
           implementation and real development history rather than written
           from scratch after the fact. Keep it that way: when this file is

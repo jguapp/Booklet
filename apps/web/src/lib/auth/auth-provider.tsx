@@ -19,7 +19,7 @@ import { localArticles } from "@/lib/local/db";
 
 type AuthStatus = "loading" | "authenticated" | "anonymous";
 
-export interface SyncFailure {
+interface SyncFailure {
   /** How many articles are still sitting in IndexedDB, un-migrated. */
   remainingArticles: number;
   /** What did make it across before the failure, if anything. */

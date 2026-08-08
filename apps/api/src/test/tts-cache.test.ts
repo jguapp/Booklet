@@ -93,6 +93,48 @@ describe("tts-cache (no Redis configured)", () => {
     expect((await getCachedSpeech("same", "v", 1)).buffer).not.toBeNull();
   });
 
+  /**
+   * The cap is parsed from an environment variable, and the parse used to be
+   * `Number(process.env.TTS_CACHE_MAX_MB || 200)`, which yields NaN for
+   * anything that isn't a bare number. `currentBytes > NaN` is false, so a
+   * NaN cap did not fall back to the default -- it switched eviction off and
+   * left the "bounded" map growing until the process was OOM-killed.
+   * Confirmed by running it: a units typo retained 800 MB against a 200 MB
+   * cap, and would have retained any amount.
+   */
+  it("falls back to the default cap when the configured one isn't a number, rather than growing without limit", async () => {
+    const { getCachedSpeech, setCachedSpeech } = await freshCache({
+      REDIS_URL: undefined,
+      TTS_CACHE_MAX_MB: "1MB", // a units typo -- Number("1MB") is NaN
+    });
+
+    // One 2MB buffer stored under 150 keys: the cache accounts for
+    // buffer.length per entry (300MB) while only 2MB is really resident, so
+    // this crosses the 200MB default without allocating 200MB.
+    const audio = AUDIO(2 * 1024 * 1024, 3);
+    for (let i = 0; i < 150; i++) setCachedSpeech(`chunk ${i}`, "v", 1, audio);
+
+    let retained = 0;
+    for (let i = 0; i < 150; i++) {
+      if ((await getCachedSpeech(`chunk ${i}`, "v", 1)).buffer) retained++;
+    }
+    // Before the fix: 150 -- every one of them, and it would have been every
+    // one of any number. The default cap holds ~100.
+    expect(retained).toBeLessThan(150);
+  });
+
+  it("refuses a nonsense cap loudly, so nobody believes a limit that isn't in force", async () => {
+    const errors: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => void errors.push(args);
+    try {
+      await freshCache({ REDIS_URL: undefined, TTS_CACHE_MAX_MB: "1MB" });
+    } finally {
+      console.error = originalError;
+    }
+    expect(errors.some((args) => String(args[0]).includes("TTS_CACHE_MAX_MB"))).toBe(true);
+  });
+
   it("setCachedSpeech stays synchronous so it never delays the response", async () => {
     const { setCachedSpeech } = await freshCache({ REDIS_URL: undefined });
     expect(setCachedSpeech("hello", "af_heart", 1, AUDIO(8))).toBeUndefined();

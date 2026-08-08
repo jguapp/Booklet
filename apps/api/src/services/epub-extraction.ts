@@ -25,9 +25,40 @@ interface ManifestItem {
   properties: string | null;
 }
 
+/**
+ * A manifest `href` is a URL, not a zip entry name, and the difference is not
+ * cosmetic.
+ *
+ * The OPF spec requires reserved characters in an href to be percent-encoded,
+ * so a book with a space in a filename ships `href="chapter%201.xhtml"`
+ * pointing at a zip entry literally named `chapter 1.xhtml`. Passing the raw
+ * href to zip.file() therefore misses -- and the callers both swallow a miss
+ * (the cover falls back to null, a chapter is skipped by `continue`), so the
+ * damage is silent: chapters vanish from the extracted text, and a book whose
+ * filenames are *all* encoded fails the upload outright with "Couldn't find
+ * any extractable text in that EPUB". Confirmed by building exactly that EPUB
+ * and running it through extractEpubText; spaces and non-ASCII filenames are
+ * ordinary in real books, especially Calibre and Word exports.
+ *
+ * A fragment is stripped for the same reason -- `chapter.xhtml#part2` names a
+ * position inside a file, not a different file.
+ *
+ * decodeURIComponent throws on a malformed escape ("100%.xhtml" is a legal
+ * filename and not legal percent-encoding), so an undecodable href falls back
+ * to its raw form rather than failing the book.
+ */
+function hrefToZipPath(href: string): string {
+  const withoutFragment = href.split("#")[0];
+  try {
+    return decodeURIComponent(withoutFragment);
+  } catch {
+    return withoutFragment;
+  }
+}
+
 function resolveRelativePath(base: string, relative: string): string {
   const baseDir = base.includes("/") ? base.slice(0, base.lastIndexOf("/") + 1) : "";
-  const parts = (baseDir + relative).split("/");
+  const parts = (baseDir + hrefToZipPath(relative)).split("/");
   const resolved: string[] = [];
   for (const part of parts) {
     if (part === "." || part === "") continue;
@@ -97,8 +128,12 @@ export async function extractEpubText(data: Buffer): Promise<EpubExtractionResul
     throw new EpubExtractionError("Missing META-INF/container.xml -- not a valid EPUB.");
   });
   const containerDoc = new JSDOM(containerXml, { contentType: "text/xml" }).window.document;
-  const opfPath = containerDoc.querySelector("rootfile")?.getAttribute("full-path");
-  if (!opfPath) throw new EpubExtractionError("Couldn't find the EPUB's content file (rootfile).");
+  const rootfilePath = containerDoc.querySelector("rootfile")?.getAttribute("full-path");
+  if (!rootfilePath) throw new EpubExtractionError("Couldn't find the EPUB's content file (rootfile).");
+  // full-path is a URL too (same rule as a manifest href -- see hrefToZipPath),
+  // and it is decoded once here so both the direct read below and every path
+  // resolved relative to its directory agree on what the entry is called.
+  const opfPath = hrefToZipPath(rootfilePath);
 
   const opfXml = await readZipText(zip, opfPath);
   const opfDoc = new JSDOM(opfXml, { contentType: "text/xml" }).window.document;

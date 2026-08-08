@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { Article } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { IconLink, IconUpload } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
+import { useModalFocus } from "@/lib/a11y/modal-focus";
 import { ApiError, saveArticleFromFile, saveArticleFromUrl } from "@/lib/data/articles";
 
 const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100MB, matches the API's multipart limit
@@ -32,54 +33,10 @@ export function SaveArticleModal({ authenticated, onClose, onSaved }: SaveArticl
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  // Read during render, not inside an effect: React applies the url-mode
-  // input's autoFocus during commit, which runs *before* passive effects --
-  // by the time a useEffect could read document.activeElement, it would
-  // already be this dialog's own input, not whatever opened the dialog.
-  const previouslyFocusedRef = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
-
-  // The backdrop covers the whole page but isn't inert -- without this, Tab
-  // walks focus straight out of the dialog into the Library page underneath
-  // it, which a sighted keyboard user can't even see is happening since the
-  // backdrop visually hides it.
-  useEffect(() => {
-    const previouslyFocused = previouslyFocusedRef.current;
-
-    function handleTab(e: KeyboardEvent) {
-      if (e.key !== "Tab" || !dialogRef.current) return;
-      // offsetParent is null for display:none elements (e.g. the file mode's
-      // hidden <input>) -- querySelectorAll alone would still match those,
-      // which would throw off which element is really first/last in tab order.
-      const focusable = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => el.offsetParent !== null);
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener("keydown", handleTab);
-    return () => {
-      document.removeEventListener("keydown", handleTab);
-      previouslyFocused?.focus?.();
-    };
-  }, []);
+  // Escape, the Tab trap, and focus restore -- this component is where all
+  // three were worked out; lib/a11y/modal-focus.ts is that same code, now
+  // shared with the other three dialogs that only had Escape.
+  useModalFocus(dialogRef, onClose);
 
   function validateFile(candidate: File): string | null {
     const isPdf = candidate.name.toLowerCase().endsWith(".pdf");
@@ -180,6 +137,7 @@ export function SaveArticleModal({ authenticated, onClose, onSaved }: SaveArticl
             <Input
               type="text"
               autoFocus
+              aria-label="Article URL"
               placeholder="https://example.com/an-article"
               value={url}
               onChange={(e) => setUrl(e.target.value)}

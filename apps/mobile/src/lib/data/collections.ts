@@ -4,6 +4,21 @@
  * actually does (filter by one collection at a time, create, toggle a
  * single article's membership in the currently-viewed collection). No
  * rename/delete/color UI on mobile yet.
+ *
+ * Two shared-type fields are read but never written here, and that
+ * asymmetry is deliberate rather than forgotten:
+ *
+ * - Collection.filter (smart collections). createCollection below always
+ *   writes null, so a *locally* created collection can never be smart --
+ *   which is why the local branch of loadCollections counts join rows only,
+ *   unlike the web app's, which also has to evaluate matchesCollectionFilter.
+ *   A smart collection made on the web still shows up correctly when signed
+ *   in, because the server computes its membership for both of the endpoints
+ *   used here. What it does *not* do is reject an add/remove tap on one; the
+ *   API answers that with a 400 the caller now surfaces.
+ * - Collection.parentId (nesting). Always null locally, and the chip row
+ *   renders a flat list, so a nested tree made on the web appears here
+ *   flattened rather than incorrectly.
  */
 import type { Collection } from "@booklet/shared";
 import { apiFetch, ApiError } from "../api";

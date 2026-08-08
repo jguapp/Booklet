@@ -7,12 +7,47 @@ import type {
   UpdateHighlightRequest,
   UpsertAnnotationRequest,
 } from "@booklet/shared";
-import { isValidHighlightColor } from "@booklet/shared";
+import { isValidHighlightColor, isValidRecallPrompt, normalizeRecallPrompt } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
 
 const FEEDBACKS: ResurfaceFeedback[] = ["REMEMBERED", "FORGOT"];
+
+/**
+ * Upper bounds on the SM-2 columns, which had none.
+ *
+ * The existing checks only reject the low end (>= 1.3, >= 0), so
+ * `easinessFactor: 1.7976931348623157e308` and `intervalDays: 999999999999`
+ * both passed validation and then failed at the driver -- Postgres refusing
+ * an out-of-range double and an integer column that stops at 2^31-1 -- which
+ * this route answers as a 500. A number a scheduling algorithm can never
+ * produce is a bad request, not an internal error, and 500s are what page
+ * someone at night.
+ *
+ * The values themselves are the far side of anything the algorithm reaches:
+ * SM-2 raises the easiness factor by at most 0.1 per review, and an interval
+ * of a century is already well past "you will never see this card again".
+ */
+const MAX_EASINESS_FACTOR = 10;
+const MAX_INTERVAL_DAYS = 36_500;
+/** Postgres `integer`, which is what surfaceCount and repetitions are. */
+const MAX_INT32 = 2_147_483_647;
+
+/**
+ * A Date from an ISO-ish string, or null if it isn't one.
+ *
+ * `new Date("garbage")` is an Invalid Date, which survives every check up to
+ * the driver and then throws there -- routes/sync.ts already guards its
+ * import path for exactly this reason ("an unparseable date reads as NaN and
+ * would throw at the driver"); this route did not, so four of its fields
+ * turned any non-date string into a 500. Confirmed by injection on all four.
+ */
+function parseDate(value: unknown): Date | null {
+  if (typeof value !== "string") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
 async function findHighlightWithAnnotation(id: string) {
   return prisma.highlight.findUnique({ where: { id }, include: { annotation: true } });
@@ -27,6 +62,7 @@ export function toHighlight(row: HighlightRow): Highlight {
     selectedText: row.selectedText,
     position: row.position as unknown as HighlightPosition,
     color: row.color,
+    prompt: row.prompt,
     lastSurfacedAt: row.lastSurfacedAt?.toISOString() ?? null,
     surfaceCount: row.surfaceCount,
     lastFeedback: row.lastFeedback,
@@ -51,7 +87,10 @@ export function toHighlight(row: HighlightRow): Highlight {
   };
 }
 
-function isValidPosition(value: unknown): value is HighlightPosition {
+/** Shared with the public v1 routes, which validate the same body shape --
+ * exported for the same reason toHighlight below is, so /api/v1/highlights
+ * stays a wrapper over this module rather than a parallel copy of it. */
+export function isValidPosition(value: unknown): value is HighlightPosition {
   if (typeof value !== "object" || value === null) return false;
   const type = (value as Record<string, unknown>).type;
   return type === "text" || type === "pdf" || type === "epub";
@@ -62,7 +101,7 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
     "/api/highlights",
     { preHandler: requireAuth },
     async (request, reply) => {
-      const { articleId, selectedText, position, color, noteText } = request.body ?? {};
+      const { articleId, selectedText, position, color, noteText, prompt } = request.body ?? {};
 
       if (typeof articleId !== "string" || !articleId) {
         return reply.code(400).send({ error: "invalid_article", message: "articleId is required." });
@@ -75,6 +114,9 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
       }
       if (typeof color !== "string" || !isValidHighlightColor(color)) {
         return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
+      }
+      if (!isValidRecallPrompt(prompt)) {
+        return reply.code(400).send({ error: "invalid_prompt", message: "Invalid recall prompt." });
       }
 
       const article = await prisma.article.findFirst({
@@ -90,6 +132,7 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
           selectedText,
           position: position as object,
           color,
+          prompt: normalizeRecallPrompt(prompt),
           ...(trimmedNote
             ? { annotation: { create: { userId: request.userId!, noteText: trimmedNote } } }
             : {}),
@@ -130,6 +173,7 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
 
       const {
         color,
+        prompt,
         resurfaceArchivedAt,
         lastSurfacedAt,
         surfaceCount,
@@ -144,37 +188,83 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
       if (color !== undefined && (typeof color !== "string" || !isValidHighlightColor(color))) {
         return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
       }
+      if (prompt !== undefined && !isValidRecallPrompt(prompt)) {
+        return reply.code(400).send({ error: "invalid_prompt", message: "Invalid recall prompt." });
+      }
       if (lastFeedback !== undefined && !FEEDBACKS.includes(lastFeedback)) {
         return reply.code(400).send({ error: "invalid_feedback", message: "Invalid feedback value." });
       }
-      if (surfaceCount !== undefined && (!Number.isInteger(surfaceCount) || surfaceCount < 0)) {
-        return reply.code(400).send({ error: "invalid_surface_count", message: "surfaceCount must be a non-negative integer." });
+      if (
+        surfaceCount !== undefined &&
+        (!Number.isInteger(surfaceCount) || surfaceCount < 0 || surfaceCount > MAX_INT32)
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_surface_count", message: "surfaceCount must be a non-negative integer." });
       }
-      if (easinessFactor !== undefined && (typeof easinessFactor !== "number" || easinessFactor < 1.3)) {
-        return reply.code(400).send({ error: "invalid_easiness_factor", message: "easinessFactor must be >= 1.3." });
+      if (
+        easinessFactor !== undefined &&
+        (typeof easinessFactor !== "number" ||
+          !Number.isFinite(easinessFactor) ||
+          easinessFactor < 1.3 ||
+          easinessFactor > MAX_EASINESS_FACTOR)
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_easiness_factor", message: `easinessFactor must be between 1.3 and ${MAX_EASINESS_FACTOR}.` });
       }
-      if (intervalDays !== undefined && (!Number.isInteger(intervalDays) || intervalDays < 0)) {
-        return reply.code(400).send({ error: "invalid_interval", message: "intervalDays must be a non-negative integer." });
+      if (
+        intervalDays !== undefined &&
+        (!Number.isInteger(intervalDays) || intervalDays < 0 || intervalDays > MAX_INTERVAL_DAYS)
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_interval", message: `intervalDays must be an integer between 0 and ${MAX_INTERVAL_DAYS}.` });
       }
-      if (repetitions !== undefined && (!Number.isInteger(repetitions) || repetitions < 0)) {
-        return reply.code(400).send({ error: "invalid_repetitions", message: "repetitions must be a non-negative integer." });
+      if (repetitions !== undefined && (!Number.isInteger(repetitions) || repetitions < 0 || repetitions > MAX_INT32)) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_repetitions", message: "repetitions must be a non-negative integer." });
+      }
+
+      // Parsed up front so an unparseable date is a 400 naming the field,
+      // rather than an Invalid Date carried down into the update and thrown
+      // by the driver as a 500.
+      const dates: Partial<Record<"resurfaceArchivedAt" | "lastSurfacedAt" | "lastFeedbackAt" | "nextDueAt", Date>> = {};
+      for (const [field, value] of Object.entries({
+        resurfaceArchivedAt,
+        lastSurfacedAt,
+        lastFeedbackAt,
+        nextDueAt,
+      }) as [keyof typeof dates, unknown][]) {
+        // null is a value only resurfaceArchivedAt accepts (it clears the
+        // archive), and the update below handles it directly.
+        if (value === undefined || value === null) continue;
+        const parsed = parseDate(value);
+        if (!parsed) {
+          return reply.code(400).send({ error: "invalid_date", message: `${field} must be an ISO date string.` });
+        }
+        dates[field] = parsed;
       }
 
       const updated = await prisma.highlight.update({
         where: { id: existing.id },
         data: {
           ...(color !== undefined ? { color } : {}),
+          // A prompt of "" or "   " normalizes to null, so clearing one from
+          // the UI works whether it sends null or an emptied textarea.
+          ...(prompt !== undefined ? { prompt: normalizeRecallPrompt(prompt) } : {}),
           ...(resurfaceArchivedAt !== undefined
-            ? { resurfaceArchivedAt: resurfaceArchivedAt ? new Date(resurfaceArchivedAt) : null }
+            ? { resurfaceArchivedAt: dates.resurfaceArchivedAt ?? null }
             : {}),
-          ...(lastSurfacedAt !== undefined ? { lastSurfacedAt: new Date(lastSurfacedAt) } : {}),
+          ...(dates.lastSurfacedAt ? { lastSurfacedAt: dates.lastSurfacedAt } : {}),
           ...(surfaceCount !== undefined ? { surfaceCount } : {}),
           ...(lastFeedback !== undefined ? { lastFeedback } : {}),
-          ...(lastFeedbackAt !== undefined ? { lastFeedbackAt: new Date(lastFeedbackAt) } : {}),
+          ...(dates.lastFeedbackAt ? { lastFeedbackAt: dates.lastFeedbackAt } : {}),
           ...(easinessFactor !== undefined ? { easinessFactor } : {}),
           ...(intervalDays !== undefined ? { intervalDays } : {}),
           ...(repetitions !== undefined ? { repetitions } : {}),
-          ...(nextDueAt !== undefined ? { nextDueAt: new Date(nextDueAt) } : {}),
+          ...(dates.nextDueAt ? { nextDueAt: dates.nextDueAt } : {}),
         },
         include: { annotation: true },
       });

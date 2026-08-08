@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import type { Article, Highlight, HighlightColor } from "@booklet/shared";
-import { computeTextPosition } from "@booklet/shared";
+import { computeTextPosition, highlightColorHex, LEGACY_HIGHLIGHT_COLORS } from "@booklet/shared";
 import { loadArticle } from "../lib/data/articles";
 import { createHighlight, deleteHighlight, loadHighlights } from "../lib/data/highlights";
 
@@ -20,13 +20,22 @@ interface ArticleScreenProps {
   onBack: () => void;
 }
 
-const COLORS: { value: HighlightColor; hex: string; label: string }[] = [
-  { value: "YELLOW", hex: "#F3DE9C", label: "Yellow" },
-  { value: "GREEN", hex: "#BCDFC4", label: "Green" },
-  { value: "BLUE", hex: "#BBD6E8", label: "Blue" },
-  { value: "PINK", hex: "#EFCCDA", label: "Pink" },
-  { value: "ORANGE", hex: "#F1CB9E", label: "Orange" },
-];
+// The swatch bar offers the legacy five only -- there is no color-picker UI
+// here the way there is on the web. Rendering, below, must still cope with
+// every other value: HighlightColor stopped being that five-value enum and is
+// now any legacy name *or* a literal #RRGGBB, so a highlight colored from the
+// web's curated palette or its color wheel syncs down here routinely. This
+// list used to be a hand-copied duplicate of LEGACY_HIGHLIGHT_COLORS that
+// rendering also looked the color up in, and a custom hex found no entry --
+// backgroundColor came back undefined and the highlight rendered as plain,
+// unmarked text. Imported from @booklet/shared now so the two can't drift,
+// and rendering goes through highlightColorHex, which is written for exactly
+// this non-theme-aware case.
+const COLORS: { value: HighlightColor; hex: string; label: string }[] = LEGACY_HIGHLIGHT_COLORS.map((c) => ({
+  value: c.id,
+  hex: c.hex,
+  label: c.label,
+}));
 
 interface Segment {
   key: string;
@@ -65,14 +74,31 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
   const [selecting, setSelecting] = useState(false);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const [saving, setSaving] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
+    // `cancelled` because tapping Back unmounts this screen while the fetch
+    // is still in flight, and .catch below must not resurrect an error state
+    // onto a screen the user has already left.
+    let cancelled = false;
     Promise.all([loadArticle(articleId, authenticated), loadHighlights(articleId, authenticated)])
       .then(([a, h]) => {
+        if (cancelled) return;
         setArticle(a);
         setHighlights(h);
       })
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // Without this the rejection was unhandled and the screen fell
+        // through to the same "Couldn't load that article" as a real 404 --
+        // which told an offline reader their article was gone.
+        if (!cancelled) setLoadFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [articleId, authenticated]);
 
   const text = article?.extractedText ?? "";
@@ -110,7 +136,16 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
         text: "Remove",
         style: "destructive",
         onPress: async () => {
-          await deleteHighlight(highlight.id, authenticated);
+          try {
+            await deleteHighlight(highlight.id, authenticated);
+          } catch {
+            // The list is only updated after the delete lands, so a failure
+            // leaves the highlight painted, which is the truth. Previously
+            // this rejected into nothing and the tap just appeared to do
+            // nothing at all.
+            Alert.alert("Couldn't remove that highlight", "Try again.");
+            return;
+          }
           setHighlights((prev) => prev.filter((h) => h.id !== highlight.id));
         },
       },
@@ -128,7 +163,11 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
   if (!article) {
     return (
       <View style={styles.center}>
-        <Text>Couldn't load that article.</Text>
+        <Text>
+          {loadFailed
+            ? "Couldn't reach Booklet. Check your connection and try again."
+            : "Couldn't load that article."}
+        </Text>
         <TouchableOpacity onPress={onBack}>
           <Text style={styles.back}>Back to Library</Text>
         </TouchableOpacity>
@@ -177,7 +216,7 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
               seg.highlight ? (
                 <Text
                   key={seg.key}
-                  style={{ backgroundColor: COLORS.find((c) => c.value === seg.highlight!.color)?.hex }}
+                  style={{ backgroundColor: highlightColorHex(seg.highlight.color) }}
                   onPress={() => confirmRemoveHighlight(seg.highlight!)}
                 >
                   {seg.text}

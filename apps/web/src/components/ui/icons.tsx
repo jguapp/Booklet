@@ -305,11 +305,3 @@ export function IconVolumeMute(props: IconProps) {
     </svg>
   );
 }
-
-export function IconChevronDown(props: IconProps) {
-  return (
-    <svg {...base(props)}>
-      <path d="m5 7.5 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}

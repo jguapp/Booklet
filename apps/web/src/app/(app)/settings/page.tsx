@@ -1,13 +1,283 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { SessionInfo } from "@booklet/shared";
+import type { PodcastFeedStatus, SessionInfo, UserProfile } from "@booklet/shared";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { useToast } from "@/lib/toast/toast-provider";
 import { loadSessions, revokeOtherSessions, revokeSession } from "@/lib/data/sessions";
+import { createPodcastFeed, loadPodcastFeedStatus, revokePodcastFeed } from "@/lib/data/podcast";
+import { deleteAccount } from "@/lib/data/account";
+import { ApiError } from "@/lib/api/client";
 import { formatRelativeDate, summarizeUserAgent } from "@/lib/format";
+
+/**
+ * The only place a podcast feed URL is ever obtainable (#154).
+ *
+ * Two things this section has to get across, both of which are consequences
+ * of the URL being the entire credential -- a podcast client cannot send a
+ * header, a cookie or an OAuth token, so the secret has to live in the URL:
+ *
+ * - Anyone holding it can read and listen to the whole library. It gets the
+ *   same treatment as the generated-token box on the developer page, plus an
+ *   explicit warning, because a URL does not *look* like a password and gets
+ *   pasted into group chats in a way a "blk_..." string does not.
+ * - It is shown exactly once. The server keeps only a hash, so there is no
+ *   "show it again" -- losing it means regenerating, which invalidates the
+ *   old one and requires resubscribing.
+ */
+function PodcastFeedSection() {
+  const { toast } = useToast();
+  const [status, setStatus] = useState<PodcastFeedStatus | null>(null);
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(() => {
+    loadPodcastFeedStatus().then(setStatus).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  async function handleGenerate() {
+    setBusy(true);
+    try {
+      const feed = await createPodcastFeed();
+      setRevealed(feed.url);
+      setStatus(feed);
+    } catch {
+      toast("Couldn't create a feed URL.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRevoke() {
+    setBusy(true);
+    try {
+      await revokePodcastFeed();
+      setRevealed(null);
+      refresh();
+    } catch {
+      toast("Couldn't turn the feed off.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCopy(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Feed URL copied.");
+    } catch {
+      // Clipboard access is denied outright in some browsers/contexts, and
+      // the URL is visible on screen anyway -- selecting it by hand is a
+      // complete fallback, so this is not worth an error.
+      toast("Copy the URL from the box above.");
+    }
+  }
+
+  return (
+    <section className="mt-8 border-t border-border pt-8">
+      <h3 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Podcast feed</h3>
+      <p className="mt-2 font-sans text-sm text-ink-muted">
+        Subscribe to your unread queue in any podcast app and listen with lock-screen controls, CarPlay and offline
+        sync. Audio is generated in the background, so episodes appear over the first few refreshes rather than all
+        at once.
+      </p>
+      <p className="mt-2 font-sans text-xs text-ink-faint">
+        Podcast apps can&rsquo;t report playback position back, so listening here won&rsquo;t mark anything as read
+        in Booklet.
+      </p>
+
+      {revealed && (
+        <div className="mt-4 rounded-md border border-accent/30 bg-accent/10 px-4 py-3">
+          <p className="font-sans text-xs font-medium text-ink">
+            Treat this URL like a password &mdash; anyone who has it can read and listen to everything you&rsquo;ve
+            saved. Copy it now; it won&rsquo;t be shown again.
+          </p>
+          <code
+            data-testid="podcast-feed-url"
+            className="mt-2 block overflow-x-auto rounded-sm bg-surface px-3 py-2 font-mono text-xs text-ink"
+          >
+            {revealed}
+          </code>
+          <div className="mt-2 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => handleCopy(revealed)}
+              className="font-sans text-xs font-medium text-accent"
+            >
+              Copy
+            </button>
+            <button
+              type="button"
+              onClick={() => setRevealed(null)}
+              className="font-sans text-xs font-medium text-ink-muted"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <Button type="button" variant="secondary" onClick={handleGenerate} disabled={busy}>
+          {status?.enabled ? "Regenerate feed URL" : "Generate feed URL"}
+        </Button>
+        {status?.enabled && (
+          <button
+            type="button"
+            onClick={handleRevoke}
+            disabled={busy}
+            className="font-sans text-xs font-medium text-ink-muted hover:text-red-500 disabled:opacity-50"
+          >
+            Turn off
+          </button>
+        )}
+      </div>
+
+      {status?.enabled && (
+        <p className="mt-2 font-sans text-xs text-ink-faint">
+          Active since {formatRelativeDate(status.createdAt!)} ·{" "}
+          {status.lastFetchedAt ? `last fetched ${formatRelativeDate(status.lastFetchedAt)}` : "not fetched yet"}.
+          Regenerating invalidates the old URL, so you&rsquo;d need to resubscribe.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Deleting the account (#174).
+ *
+ * Collapsed behind a link rather than sitting open, and the confirmation is
+ * the same one the server will check -- password re-entry, or, for an
+ * account created through OAuth that never set a password, typing the
+ * account's own email address. The client could not skip that step even if
+ * it wanted to (the route refuses without it); showing the right field is
+ * only so the confirmation is possible at all for OAuth accounts, which have
+ * no password to re-enter.
+ *
+ * What the copy has to say, because none of it is reversible and none of it
+ * is obvious: it happens now rather than after a grace period, the export in
+ * Settings → Import/Export is the only way to keep a copy, and shared links
+ * stop working for whoever already has them.
+ */
+function DeleteAccountSection({ user, onDeleted }: { user: UserProfile; onDeleted: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setDeleting(true);
+    try {
+      await deleteAccount(user.hasPassword ? { password: confirmation } : { confirmEmail: confirmation });
+      await onDeleted();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't delete the account. Try again.");
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <section className="mt-8 border-t border-border pt-8">
+      <h3 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Delete account</h3>
+      <p className="mt-2 font-sans text-sm text-ink-muted">
+        Permanently deletes your account and everything in it: saved articles and uploaded files, highlights and
+        notes, collections, tags, reading history, RSS subscriptions, API tokens, webhooks and generated audio. Any
+        pages you&rsquo;ve shared stop working for everyone who has the link.
+      </p>
+      <p className="mt-2 font-sans text-xs text-ink-faint">
+        This happens immediately — there is no waiting period and no way to undo it. If you want a copy first, use{" "}
+        <Link href="/settings/import-export" className="font-medium text-accent">
+          Export
+        </Link>{" "}
+        before you delete. The{" "}
+        <Link href="/privacy" className="font-medium text-accent">
+          privacy policy
+        </Link>{" "}
+        lists what is stored.
+      </p>
+
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="mt-4 font-sans text-sm font-medium text-red-500 hover:underline"
+        >
+          Delete my account
+        </button>
+      ) : (
+        <form onSubmit={handleDelete} className="mt-4 flex max-w-sm flex-col gap-2">
+          <label htmlFor="delete-confirmation" className="font-sans text-xs font-medium text-ink-muted">
+            {user.hasPassword
+              ? "Enter your password to confirm"
+              : `Type ${user.email} to confirm`}
+          </label>
+          {user.hasPassword ? (
+            <PasswordInput
+              id="delete-confirmation"
+              name="delete-confirmation"
+              required
+              autoFocus
+              placeholder="••••••••"
+              value={confirmation}
+              onChange={(e) => setConfirmation(e.target.value)}
+            />
+          ) : (
+            // No password on this account, so there is nothing to verify
+            // against -- typing the address is the deliberate act that
+            // stands in for it.
+            <Input
+              id="delete-confirmation"
+              type="email"
+              required
+              autoFocus
+              autoComplete="off"
+              placeholder={user.email}
+              value={confirmation}
+              onChange={(e) => setConfirmation(e.target.value)}
+            />
+          )}
+
+          {error && <p className="font-sans text-sm text-red-500">{error}</p>}
+
+          <div className="mt-2 flex items-center gap-3">
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={deleting || confirmation.length === 0}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              {deleting ? "Deleting…" : "Delete permanently"}
+            </Button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setConfirmation("");
+                setError(null);
+              }}
+              disabled={deleting}
+              className="font-sans text-sm font-medium text-ink-muted disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
 
 export default function AccountSettingsPage() {
   const router = useRouter();
@@ -139,6 +409,23 @@ export default function AccountSettingsPage() {
           </>
         )}
       </section>
+
+      {status === "authenticated" && <PodcastFeedSection />}
+
+      {status === "authenticated" && user && (
+        <DeleteAccountSection
+          user={user}
+          onDeleted={async () => {
+            // logout() clears the in-memory token and provider state. The
+            // server-side session rows are already gone with the account, so
+            // the POST it makes is a no-op -- this is here for the client
+            // half, which would otherwise keep rendering a signed-in shell
+            // for an account that no longer exists.
+            await logout();
+            router.push("/");
+          }}
+        />
+      )}
 
       {status === "authenticated" && sessions && sessions.length > 0 && (
         <section className="mt-8 border-t border-border pt-8">

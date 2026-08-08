@@ -33,6 +33,7 @@ import { ThemeSwitcher } from "@/components/ui/theme-switcher";
 import { BookletLogo } from "@/components/ui/logo";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ARTICLE_DRAG_MIME, HIGHLIGHT_DRAG_MIME, notifyTrashed } from "@/lib/dnd/trash-drop";
+import { useToast } from "@/lib/toast/toast-provider";
 
 const NAV_DRAG_MIME = "application/x-booklet-nav-href";
 
@@ -65,6 +66,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { status, isAuthenticated, user, logout } = useAuth();
+  const { toast } = useToast();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -104,7 +106,12 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
   const refreshCollections = useCallback(() => {
     if (status === "loading") return;
-    loadCollections(isAuthenticated).then(setCollections);
+    // Silent on purpose, unlike the mutations below: this is the sidebar
+    // catching itself up, nobody asked for it, and the page's own content
+    // (which has its own error handling) is what the reader is looking at.
+    // The catch is still needed -- without it this was an unhandled
+    // rejection on every load with the API down.
+    loadCollections(isAuthenticated).then(setCollections).catch(() => undefined);
   }, [status, isAuthenticated]);
 
   useEffect(() => {
@@ -153,8 +160,12 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       setCreating(false);
       router.push(`/library?collection=${created.id}`);
     } catch (err) {
-      // Name collision is the only realistic failure here -- surface it inline rather than losing the input.
-      if (err instanceof ApiError) setNewName(name);
+      // The form stays open holding what was typed -- but that on its own
+      // reads as "the button didn't work", so the reason goes in a toast.
+      // A name collision is the realistic case and the API's message for it
+      // is already the right sentence.
+      setNewName(name);
+      toast(err instanceof ApiError ? err.message : "Couldn't create that collection.");
     }
   }
 
@@ -173,8 +184,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       setCollections((prev) =>
         [...prev.filter((c) => c.id !== id), updated].sort((a, b) => a.name.localeCompare(b.name)),
       );
-    } catch {
-      // Name collision or similar -- just keep the pre-rename name rather than losing the collection.
+    } catch (err) {
+      // Keeps the pre-rename name rather than losing the collection.
+      toast(err instanceof ApiError ? err.message : "Couldn't rename that collection.");
     }
   }
 
@@ -186,7 +198,12 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     const c = pendingCollectionDelete;
     if (!c) return;
     setPendingCollectionDelete(null);
-    await deleteCollection(c.id, isAuthenticated);
+    try {
+      await deleteCollection(c.id, isAuthenticated);
+    } catch {
+      toast("Couldn't delete that collection.");
+      return;
+    }
     setCollections((prev) => prev.filter((col) => col.id !== c.id));
     if (activeCollectionId === c.id) router.push("/library");
   }
@@ -366,6 +383,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
                       onBlur={() => !newName && setCreating(false)}
+                      aria-label="New collection name"
                       placeholder="Collection name"
                       className="w-full rounded-sm border border-border bg-paper px-2 py-1 font-sans text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     />

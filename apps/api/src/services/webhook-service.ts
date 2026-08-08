@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
+import { checkPublicHost } from "../lib/private-address.js";
 
 export type WebhookEvent = "article.created" | "highlight.created";
 
@@ -40,17 +41,55 @@ export async function fireWebhookEvent(
       let success = false;
       let error: string | null = null;
       try {
+        const target = new URL(webhook.url);
+
+        // Re-checked here, at send time, and not only where the webhook was
+        // registered. Validating on create is a bound, not a control: the
+        // hostname is resolved again for every delivery, so a record that
+        // pointed somewhere public when it was saved and is re-pointed at
+        // 169.254.169.254 afterwards would otherwise be fetched happily. The
+        // delivery row keeps the status code and the error string, and
+        // GET /api/webhooks/:id/deliveries hands both back -- which makes
+        // this an oracle rather than a blind SSRF, so the send side has to
+        // hold on its own.
+        const host = await checkPublicHost(target.hostname);
+        if (!host.ok) {
+          throw new Error(
+            host.reason === "private"
+              ? "Refusing to deliver: that URL resolves to a private address."
+              : "Refusing to deliver: that hostname could not be resolved.",
+          );
+        }
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10_000);
         try {
-          const res = await fetch(webhook.url, {
+          const res = await fetch(target, {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-Booklet-Signature": signature, "X-Booklet-Event": event },
             body,
             signal: controller.signal,
+            // Not followed, rather than followed-and-re-checked the way
+            // extraction and RSS do it. Those are GETs of public documents;
+            // this is a signed POST, and replaying it to a redirect target
+            // would hand that target both the payload and a valid
+            // X-Booklet-Signature for it -- so a 302 becomes a way to have
+            // this server vouch for a body to a host the user never
+            // registered. A webhook endpoint is a fixed URL by definition,
+            // so a redirect is reported as the misconfiguration it is.
+            redirect: "manual",
           });
           statusCode = res.status;
-          success = res.ok;
+          // A redirect is not a delivery. Left out of `success` explicitly:
+          // fetch reports an opaque redirect as ok === false already, but
+          // relying on that would make this depend on a detail of how the
+          // runtime models manual redirects.
+          if (res.status >= 300 && res.status < 400) {
+            error = `Endpoint redirected (${res.status}); webhook URLs must be final destinations.`;
+            success = false;
+          } else {
+            success = res.ok;
+          }
         } finally {
           clearTimeout(timeout);
         }

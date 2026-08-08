@@ -27,9 +27,21 @@ interface LibraryScreenProps {
   onOpenArticle: (id: string) => void;
   onOpenDailyReview: () => void;
   onSignedOut: () => void;
+  /** Set when logging in couldn't move this device's local library onto the
+   * account (see App.tsx). Shown here rather than in an Alert because it is
+   * about the list the user is looking at, and because react-native-web's
+   * Alert.alert is a no-op -- an Alert would be invisible on the one target
+   * this app can actually be run on today. */
+  migrationNotice?: string | null;
 }
 
-export function LibraryScreen({ authenticated, onOpenArticle, onOpenDailyReview, onSignedOut }: LibraryScreenProps) {
+export function LibraryScreen({
+  authenticated,
+  onOpenArticle,
+  onOpenDailyReview,
+  onSignedOut,
+  migrationNotice,
+}: LibraryScreenProps) {
   const [articles, setArticles] = useState<Article[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
@@ -50,14 +62,25 @@ export function LibraryScreen({ authenticated, onOpenArticle, onOpenDailyReview,
       ]);
       setArticles(loadedArticles);
       setCollections(loadedCollections);
+      setError(null);
     } catch {
-      // best-effort -- keep whatever was already loaded
+      // Keep whatever was already loaded -- but say so. Swallowing this
+      // silently meant the very first load of a signed-in library with the
+      // API unreachable rendered "Nothing here yet.", which reads as "your
+      // library is empty" rather than "we couldn't fetch it".
+      setError("Couldn't load your library. Pull down to retry.");
     }
   }, [authenticated]);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    refresh().finally(() => setLoading(false));
+    refresh().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
 
   // Membership of the currently-selected collection -- drives both the
@@ -69,9 +92,16 @@ export function LibraryScreen({ authenticated, onOpenArticle, onOpenDailyReview,
       return;
     }
     let cancelled = false;
-    loadArticleIdsInCollection(activeCollectionId, authenticated).then((ids) => {
-      if (!cancelled) setCollectionMemberIds(ids);
-    });
+    loadArticleIdsInCollection(activeCollectionId, authenticated)
+      .then((ids) => {
+        if (!cancelled) setCollectionMemberIds(ids);
+      })
+      .catch(() => {
+        // Unhandled before this. With memberIds left null every card's
+        // toggle silently no-ops (toggleMembership returns early on null),
+        // so the collection looked usable and simply refused to work.
+        if (!cancelled) setError("Couldn't load that collection's contents.");
+      });
     return () => {
       cancelled = true;
     };
@@ -93,15 +123,25 @@ export function LibraryScreen({ authenticated, onOpenArticle, onOpenDailyReview,
   }
 
   async function handleUploadFile() {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ["application/pdf", "application/epub+zip"],
-      copyToCacheDirectory: true,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
+    // Inside the try, not before it: getDocumentAsync rejects on its own
+    // (a denied storage permission, a provider that fails to hand the file
+    // over), and outside a handler that became an unhandled rejection from
+    // an onPress -- the row just did nothing when tapped.
+    setError(null);
+    let asset: DocumentPicker.DocumentPickerAsset;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["application/pdf", "application/epub+zip"],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets[0]) return;
+      asset = result.assets[0];
+    } catch {
+      setError("Couldn't open the file picker.");
+      return;
+    }
 
     setSaving(true);
-    setError(null);
     try {
       const article = await saveArticleFromFile(
         { uri: asset.uri, name: asset.name, mimeType: asset.mimeType, webFile: asset.file },
@@ -146,18 +186,43 @@ export function LibraryScreen({ authenticated, onOpenArticle, onOpenDailyReview,
   async function toggleMembership(articleId: string) {
     if (!activeCollectionId || !collectionMemberIds) return;
     const isMember = collectionMemberIds.has(articleId);
-    setCollectionMemberIds((prev) => {
-      const next = new Set(prev);
-      if (isMember) next.delete(articleId);
-      else next.add(articleId);
-      return next;
-    });
-    if (isMember) await removeArticleFromCollection(articleId, activeCollectionId, authenticated);
-    else await addArticleToCollection(articleId, activeCollectionId, authenticated);
+    const applyLocally = (member: boolean) =>
+      setCollectionMemberIds((prev) => {
+        const next = new Set(prev);
+        if (member) next.add(articleId);
+        else next.delete(articleId);
+        return next;
+      });
+
+    applyLocally(!isMember);
+    setError(null);
+    try {
+      if (isMember) await removeArticleFromCollection(articleId, activeCollectionId, authenticated);
+      else await addArticleToCollection(articleId, activeCollectionId, authenticated);
+    } catch (err) {
+      // The optimistic tick was previously left standing on failure, and the
+      // rejection went unhandled -- so a rejected add (the API refuses one on
+      // a smart collection, whose membership it computes) showed a ✓ that
+      // vanished on the next refresh with nothing said in between.
+      applyLocally(isMember);
+      setError(err instanceof ApiError ? err.message : "Couldn't update that collection.");
+    }
   }
 
   async function handleAccountAction() {
-    if (authenticated) await clearSession();
+    if (authenticated) {
+      try {
+        await clearSession();
+      } catch {
+        // Staying put on purpose. If the token is still in storage the user
+        // is still logged in, and App.tsx's startup check reads that same key
+        // -- so showing them the login screen would be a claim this device
+        // cannot back up, and the next launch would silently sign them back
+        // in. Previously this rejected into nothing and the tap did nothing.
+        setError("Couldn't log out on this device. Try again.");
+        return;
+      }
+    }
     onSignedOut();
   }
 
@@ -205,6 +270,7 @@ export function LibraryScreen({ authenticated, onOpenArticle, onOpenDailyReview,
       <TouchableOpacity onPress={handleUploadFile} disabled={saving} style={styles.uploadRow}>
         <Text style={styles.uploadText}>Or upload a PDF / EPUB</Text>
       </TouchableOpacity>
+      {migrationNotice && <Text style={styles.error}>{migrationNotice}</Text>}
       {error && <Text style={styles.error}>{error}</Text>}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={{ gap: 6 }}>

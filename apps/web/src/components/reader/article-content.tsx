@@ -10,6 +10,7 @@ import {
   textOffsetsForRange,
   wrapRangeInElements,
 } from "@/lib/reader/dom-range";
+import { sanitizeArticleHtml } from "@/lib/reader/sanitize";
 import { HighlightPopover } from "./highlight-popover";
 import { HighlightManagePopover } from "./highlight-manage-popover";
 import type { ReaderSize } from "./reader-toolbar";
@@ -284,7 +285,7 @@ export function ArticleContent({
       range.setStart(startPoint.node, startPoint.offset);
       range.setEnd(endPoint.node, endPoint.offset);
 
-      const marks = wrapRangeInElements(container, range, () => {
+      const marks = wrapRangeInElements(range, () => {
         const mark = document.createElement("mark");
         mark.dataset.highlightId = highlight.id;
         mark.className = "cursor-pointer rounded-[3px] text-inherit";
@@ -312,6 +313,13 @@ export function ArticleContent({
       pill.className =
         "note-pill inline-flex h-[18px] w-[18px] cursor-pointer items-center justify-center ml-1 rounded-full border border-border bg-surface align-middle text-accent";
       pill.title = "Has a note -- click to read";
+      // A real control, not decoration: it was mouse-only, so a note written
+      // on a highlight could not be read back without a pointer. role +
+      // tabindex make it reachable and announced; handleContainerKeyDown
+      // below is what makes Enter/Space actually open it. The title is its
+      // accessible name.
+      pill.setAttribute("role", "button");
+      pill.tabIndex = 0;
       pill.innerHTML =
         '<svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12M2 8h8M2 13h5"/></svg>';
       marks[marks.length - 1].after(pill);
@@ -491,16 +499,27 @@ export function ArticleContent({
     window.getSelection()?.removeAllRanges();
   }
 
+  function openManagePopoverFor(marker: HTMLElement | null) {
+    if (!marker) return;
+    const highlight = highlights.find((h) => h.id === marker.dataset.highlightId);
+    if (!highlight) return;
+    setManaging({ highlight, rect: marker.getBoundingClientRect() });
+  }
+
   function handleContainerClick(e: React.MouseEvent) {
     const target = e.target as HTMLElement;
-    const marker = target.closest<HTMLElement>("mark[data-highlight-id], .note-pill[data-highlight-id]");
-    if (!marker) return;
+    openManagePopoverFor(target.closest<HTMLElement>("mark[data-highlight-id], .note-pill[data-highlight-id]"));
+  }
 
-    const highlightId = marker.dataset.highlightId;
-    const highlight = highlights.find((h) => h.id === highlightId);
-    if (!highlight) return;
-
-    setManaging({ highlight, rect: marker.getBoundingClientRect() });
+  // Only the note pills are focusable (see where they're built above), so
+  // this only ever fires for them -- the marks themselves are inline article
+  // text and are deliberately left as they are.
+  function handleContainerKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const pill = (e.target as HTMLElement).closest<HTMLElement>(".note-pill[data-highlight-id]");
+    if (!pill) return;
+    e.preventDefault();
+    openManagePopoverFor(pill);
   }
 
   const { fontSize, lineHeight } = SIZE_STYLE[size];
@@ -509,7 +528,15 @@ export function ArticleContent({
   // *object reference* it's given is stable across renders -- a fresh
   // `{ __html: html }` literal every render makes React re-apply innerHTML
   // (and wipe the marks/pills injected above) on every unrelated re-render.
-  const dangerousHtml = useMemo(() => ({ __html: html }), [html]);
+  //
+  // Sanitized here rather than trusted from storage. The API sanitizes on
+  // save too, but this is the only point that is true for *every* article:
+  // ones saved before that existed, and local/anonymous ones that never went
+  // through the API at all. Readability strips <script> and looks like it
+  // has handled this -- it passes <img onerror>, <svg onload> and
+  // <details ontoggle> straight through, which with the access token in
+  // localStorage is account takeover from opening a saved link.
+  const dangerousHtml = useMemo(() => ({ __html: sanitizeArticleHtml(html) }), [html]);
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -518,6 +545,7 @@ export function ArticleContent({
         data-article-content
         onMouseUp={handleMouseUp}
         onClick={handleContainerClick}
+        onKeyDown={handleContainerKeyDown}
         className="font-serif text-ink [&_p]:mb-5 [&_em]:italic [&_strong]:font-semibold"
         style={{ fontSize, lineHeight }}
         dangerouslySetInnerHTML={dangerousHtml}

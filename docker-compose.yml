@@ -10,9 +10,11 @@
 # What is verified: apps/api/Dockerfile's actual build+run path (see that
 # file's own header comment) directly, by running the equivalent commands
 # without Docker in between; and both Dockerfiles building, plus the api
-# image actually booting against a real Postgres and answering a request,
-# in .github/workflows/ci.yml's docker-build job, which runs on a real
-# GitHub Actions runner.
+# image actually booting against a real Postgres and answering a request, in
+# CI's docker-build job. That job exists in both .github/workflows/ci.yml and
+# .gitlab-ci.yml, but only the Actions one has run on a real runner -- and it
+# is dormant now that the Actions allowance is exhausted. See DEPLOYMENT.md's
+# "Which CI config is live"; nothing is re-verifying this automatically today.
 #
 #   cp apps/api/.env.example apps/api/.env.docker   # fill in JWT_ACCESS_SECRET etc.
 #   docker compose up --build
@@ -77,6 +79,42 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      # Repeated from apps/api/Dockerfile's own ENV, not relied upon from it:
+      # the volume below and the path the app writes to have to be the same
+      # string, and a reader of this file should be able to see that without
+      # opening the Dockerfile. Change one and you must change both.
+      FILE_STORAGE_PATH: /var/lib/booklet/storage
+    # Uploaded PDFs/EPUBs and generated podcast enclosures. Named, exactly
+    # like postgres-data and redis-data, because it holds the same kind of
+    # thing they do: the only copy of something a user gave us. Without it,
+    # `docker compose up --build` after a code change silently destroys every
+    # uploaded book while its database row survives, pointing at bytes that
+    # are gone (#173) -- and since #172 clears the browser's IndexedDB copy
+    # once the server has the file, the server's copy is the only one left.
+    volumes:
+      - storage-data:/var/lib/booklet/storage
+    # /api/ready, not /api/health: health is liveness (the process is running)
+    # and answers ok on an instance whose every real request 500s because
+    # Postgres is unreachable. Ready runs SELECT 1, so an instance that cannot
+    # serve anything is marked unhealthy instead of being treated as a working
+    # one -- which is what makes a rolling deploy stop rather than drain the
+    # last good instance. Fetched with node because the runtime image has no
+    # curl or wget; node is by definition present.
+    #
+    # start_period covers `prisma migrate deploy`, which runs before the
+    # server starts (see command below) and takes as long as the pending
+    # migrations take on a real dataset -- failures inside it do not count
+    # against retries.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/api/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,3 +145,4 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  storage-data:

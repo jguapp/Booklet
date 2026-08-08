@@ -50,13 +50,42 @@ export function isTextSparse(pageTexts: string[]): boolean {
 }
 
 export async function extractPdfText(data: Uint8Array): Promise<PdfExtractionResult> {
-  let doc;
+  // The loading task, not just its promise: `destroy()` lives here, and it is
+  // the only handle that can release what opening a document allocated.
+  const loadingTask = getDocument({ data, useSystemFonts: true });
+
+  let doc: PDFDocumentProxy;
   try {
-    doc = await getDocument({ data, useSystemFonts: true }).promise;
+    doc = await loadingTask.promise;
   } catch (err) {
+    // Destroy before rethrowing -- a document that failed *during* init has
+    // usually still spawned its worker.
+    await loadingTask.destroy().catch(() => undefined);
     throw new PdfExtractionError(err instanceof Error ? err.message : "Failed to open that PDF.");
   }
 
+  try {
+    return await extractFromOpenDocument(doc);
+  } finally {
+    // Each getDocument() spins up its own pdf.js worker and holds page
+    // objects and font data for as long as the task is alive, and nothing
+    // here released any of it -- not on the way out, and not on the
+    // "couldn't find any extractable text" throw, which is the path every
+    // scanned PDF takes. One per upload, on a route that accepts files up to
+    // the anonymous cap, until GC happened to get to it.
+    //
+    // In a finally so the throw paths clean up too, and swallowed because a
+    // failure to tear down must not replace the real result, or the real
+    // error, with itself.
+    await loadingTask.destroy().catch(() => undefined);
+  }
+}
+
+/**
+ * Split out only so the destroy above can wrap the whole body in one finally
+ * without re-indenting it; there is no second caller.
+ */
+async function extractFromOpenDocument(doc: PDFDocumentProxy): Promise<PdfExtractionResult> {
   const coverImageUrl = await renderCoverThumbnail(doc).catch(() => null);
 
   const pageTexts: string[] = [];
