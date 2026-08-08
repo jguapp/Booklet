@@ -36,5 +36,25 @@ export default defineConfig({
     stdout: "ignore",
     stderr: "pipe",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        // Playwright normally insists on the exact Chromium build that ships
+        // with its own version and refuses to start on anything else. That is
+        // right for a machine that can download one, and wrong for a sandbox
+        // or CI image with a browser already baked in at a different build
+        // number -- there the run doesn't degrade, it fails to launch at all
+        // ("Executable doesn't exist at .../chromium_headless_shell-1234"),
+        // which reads like a broken suite rather than a missing download.
+        //
+        // Unset by default, so nothing changes for anyone who installed
+        // browsers the normal way.
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } }
+          : {}),
+      },
+    },
+  ],
 });
