@@ -158,6 +158,14 @@ test-web-e2e:
     # wrong with it.
     GLOBAL_RATE_LIMIT_MAX: "100000"
     TTS_RATE_LIMIT_MAX: "100000"
+    # The auth routes need the same treatment, for the same reason. The suite
+    # signs up dozens of times and reloads pages hundreds of times, all from
+    # one address -- against the real 10-per-15-minutes signup budget it runs
+    # out partway through and fails whichever spec happens to be next, which
+    # reads as flakiness rather than as a limit doing its job. Raising them
+    # here changes nothing about the shipped defaults.
+    AUTH_ATTEMPT_RATE_LIMIT_MAX: "100000"
+    AUTH_REFRESH_RATE_LIMIT_MAX: "100000"
   script:
     # GitLab starts a service container and moves straight on -- there is no
     # `--health-cmd` equivalent, so readiness is waited for here. A plain TCP
@@ -195,9 +203,8 @@ test-web-e2e:
     # fetches a genuine public URL so real-world extraction stays covered -- if
     # outbound network is ever restricted for this runner, exclude it with
     # `--grep-invert @live` rather than dropping the whole job and losing
-    # everything else with it. (See #167: several other specs still reach the
-    # internet without that tag, so the exclusion is not yet a clean offline
-    # switch.)
+    # everything else with it. That exclusion is now a genuine offline switch:
+    # every spec that reaches the public internet carries the tag (#167).
     - pnpm --filter @booklet/web test:e2e
   artifacts:
     when: on_failure

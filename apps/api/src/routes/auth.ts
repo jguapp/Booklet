@@ -98,7 +98,40 @@ async function issueSession(
 
 // Credential guessing and signup spam are the concerns here, not general
 // traffic -- much tighter than the API-wide default.
-const AUTH_ATTEMPT_LIMIT = { max: 10, timeWindow: "15 minutes" };
+//
+// Overridable only so the e2e suite can raise it: that suite signs up dozens
+// of times from one address in a few minutes, which is exactly the shape this
+// limit exists to stop, and there is no way to tell the two apart from
+// inside the API. Same escape hatch GLOBAL_RATE_LIMIT_MAX and
+// TTS_RATE_LIMIT_MAX already have, and the default is unchanged.
+const AUTH_ATTEMPT_LIMIT = {
+  max: Number(process.env.AUTH_ATTEMPT_RATE_LIMIT_MAX) || 10,
+  timeWindow: "15 minutes",
+};
+
+/**
+ * Refresh is deliberately NOT on the budget above (#169).
+ *
+ * It looks like an auth route, but it is ordinary application traffic: the
+ * web app calls it on load and whenever the access token expires. Sharing
+ * the credential-guessing budget meant the app spent the user's password-
+ * attempt allowance just by working -- a few tabs, or a dozen reloads in
+ * fifteen minutes, and refresh started returning 429, which surfaces as
+ * being logged out on a correct password having done nothing wrong. Since
+ * the limiter keys on IP, everyone behind one office NAT or carrier CGNAT
+ * shared those ten refreshes, making it an outage for them rather than a
+ * slowdown.
+ *
+ * Nothing was gained for it, either. A refresh token is a high-entropy
+ * random value in an httpOnly cookie -- there is no credential here to
+ * guess -- and the API-wide 300/min limit is the real backstop against a
+ * flood of invalid attempts. Signup, login and the password-reset routes
+ * keep the tight limit, because those genuinely are guessable.
+ */
+const REFRESH_LIMIT = {
+  max: Number(process.env.AUTH_REFRESH_RATE_LIMIT_MAX) || 120,
+  timeWindow: "15 minutes",
+};
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: SignupRequest }>(
@@ -180,7 +213,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     "/api/auth/refresh",
-    { config: { rateLimit: AUTH_ATTEMPT_LIMIT } },
+    { config: { rateLimit: REFRESH_LIMIT } },
     async (request, reply) => {
     const token = request.cookies[REFRESH_COOKIE_NAME];
     const unauthorized = () => {
