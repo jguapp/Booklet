@@ -25,7 +25,7 @@ export const MIN_PRODUCTION_SECRET_LENGTH = 32;
  * be secrets, because they are checked into this repository.
  *
  * Both entries are real, current values: `ci-test-secret-not-for-production`
- * is set for every job in .github/workflows/ci.yml and .gitlab-ci.yml, and
+ * is set for every job in .github/workflows/ci.yml, and
  * `verify-secret-not-for-production` is scripts/verify.mjs's default. They
  * are fine where they are -- nothing in CI signs a token anyone will ever
  * present -- but a copy-paste out of either file into a deploy's environment
