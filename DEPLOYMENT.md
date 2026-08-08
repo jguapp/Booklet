@@ -312,10 +312,9 @@ needs WSL2, which isn't installed here, and setting that up needs a
 restart -- out of scope to do unilaterally. Two things stand in for that:
 
 - A `docker-build` job builds both images and boots the api one against a
-  real throwaway Postgres container. It exists in both CI configs
-  (`.github/workflows/ci.yml` and `.gitlab-ci.yml`), and its GitHub Actions
-  form is the one that has actually run on a real runner -- see "Which CI
-  config is live" below before assuming it still does.
+  real throwaway Postgres container. It lives in `.github/workflows/ci.yml`
+  and runs on a self-hosted runner -- see "CI: the self-hosted runner" below
+  for whether one is actually registered and Idle.
 - The api image's actual production execution path -- `pnpm --filter
   @booklet/api build` (esbuild, see `apps/api/scripts/build.mjs`) then
   `node dist/index.js` under plain Node, no tsx or bundler doing module
@@ -403,36 +402,32 @@ JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toStr
   this environment doesn't have (no `gh` CLI, no API token) or you checking
   the pipeline yourself. Which one to check is the next section.
 
-## Which CI config is live
+## CI: the self-hosted runner
 
-**Two full pipelines exist in this repository and it is not safe to assume
-either is currently running on your pushes.** They are equivalent in coverage
--- the same seven jobs -- so this is a question of where they execute, not of
-what they check:
+There is **one** pipeline, `.github/workflows/ci.yml` -- the same seven jobs
+that have gone green on real hardware. It runs on a **self-hosted runner**
+rather than GitHub-hosted VMs, and the two-pipeline GitHub/GitLab split that
+used to live here is gone: the GitLab config was removed with the move.
 
-- `.github/workflows/ci.yml` -- was the live pipeline, and is the one whose
-  runs have actually gone green on real hardware. **The Actions allowance for
-  this repository is exhausted**, so it is dormant: the file is still valid
-  and still triggers, the minutes to run it are gone.
-- `.gitlab-ci.yml` -- the intended replacement, a port rather than a copy
-  (service hostnames, service readiness and Docker-in-Docker networking all
-  genuinely differ). It has never run on a GitLab runner, because the
-  repository lives on GitHub. Until it is moved or mirrored to GitLab it
-  "sits in the repository harmlessly and runs nothing," in the words of
-  [`docs/CI_GITLAB.md`](docs/CI_GITLAB.md) -- read that file before switching,
-  particularly the section on minutes: GitLab.com's free tier is **smaller**
-  than Actions', not larger, and a self-hosted runner is the only option that
-  actually solves the problem that prompted the move.
+The reason is metering. GitHub-hosted minutes and GitLab.com's (smaller) free
+tier both ran out mid-branch and left pushes silently unverified. GitHub does
+**not** meter self-hosted runners, so a machine you own has no allowance to
+run out of -- an old laptop, a spare box, or a small always-on VPS all work.
+The cost moves from a per-minute bill to keeping that machine running.
 
-So the honest current state is that **nothing is verifying pushes
-automatically**. Until one pipeline is genuinely live, `pnpm verify` is the
-stand-in: it runs everything checkable without a running service and then
-names what it skipped, including `docker-build`, which is the check that has
-caught the most real bugs and which no local command covers.
+**Whether pushes are verified right now depends on one thing: is a runner
+registered and Idle?** Setup is a single script:
 
-Do not delete either config on that basis. Deleting the Actions workflow
-throws away the only pipeline with a proven-green history for a replacement
-that has never executed; deleting the GitLab one throws away the migration
-work and the minutes analysis behind it. The drift between them is the real
-risk, and it has already started -- see the note at the top of
-`.github/workflows/ci.yml`.
+```bash
+RUNNER_TOKEN=<token from Settings > Actions > Runners > New> \
+  ./scripts/register-github-runner.sh
+```
+
+Full instructions, prerequisites (Docker + passwordless sudo, which the
+`services:` and e2e jobs need), parallelism (register more runners), and the
+security notes are in [`docs/CI_GITHUB_RUNNER.md`](docs/CI_GITHUB_RUNNER.md).
+
+Until a runner is Idle, `pnpm verify` is the stand-in: it runs everything
+checkable without a running service and names what it skipped, including
+`docker-build`, which is the check that has caught the most real bugs and
+which no local command fully covers.
