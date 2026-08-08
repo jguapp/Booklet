@@ -2,10 +2,77 @@ import type { FastifyInstance } from "fastify";
 import type { CreateWebhookRequest, Webhook, WebhookDeliverySummary } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
+import { checkPublicHost } from "../lib/private-address.js";
 import { generateWebhookSecret } from "../services/webhook-service.js";
 
 const VALID_EVENTS = ["article.created", "highlight.created"];
 const DELIVERY_HISTORY_LIMIT = 20;
+
+/**
+ * Whether a webhook URL may be registered.
+ *
+ * A webhook is SSRF by design -- the whole feature is "this server will make
+ * an HTTP request to an address you choose" -- so the only question is what
+ * bounds it, and until this existed the answer was nothing but a scheme
+ * check. Confirmed by injection: `https://169.254.169.254/latest/meta-data/`,
+ * `https://10.0.0.5/internal` and `https://[::1]:9999/` were all accepted
+ * with 201. On any cloud host the first of those is the instance metadata
+ * service, and the delivery log makes it a usable oracle rather than a blind
+ * one: GET /api/webhooks/:id/deliveries returns the status code and the
+ * fetch's error string for every attempt, which is enough to map an internal
+ * network and find which ports answer. Deliveries are POSTs with a JSON body,
+ * so an internal service that acts on unauthenticated POSTs acts on this one.
+ *
+ * The loopback allowance stays for the two hostnames it named, but only off
+ * production. Pointing a webhook at your own dev server is the reason it was
+ * written, and there is no private network reachable from a developer's
+ * laptop that they could not reach directly; on a deployed instance the same
+ * allowance is a request to every service sharing that host.
+ *
+ * Returns a message rather than throwing so the caller can answer 400 with
+ * wording that says which rule was broken.
+ */
+export async function checkWebhookUrl(
+  raw: string,
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return { ok: false, message: "That's not a valid URL." };
+  }
+
+  const isLoopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (isLoopback && nodeEnv !== "production") {
+    // http:// too -- there is no eavesdropper between a machine and itself,
+    // and a locally-trusted cert is friction rather than a security win.
+    return parsed.protocol === "https:" || parsed.protocol === "http:"
+      ? { ok: true }
+      : { ok: false, message: "Webhook URLs must use https://." };
+  }
+
+  if (parsed.protocol !== "https:") {
+    return { ok: false, message: "Webhook URLs must use https://." };
+  }
+
+  // Same resolver-level check article extraction and feed fetching already
+  // use, so a hostname that merely *resolves* to a private address is caught
+  // too -- `https://internal.corp.example` and a DNS record pointing at
+  // 10.0.0.5 are the same request.
+  const host = await checkPublicHost(parsed.hostname);
+  if (!host.ok) {
+    return {
+      ok: false,
+      message:
+        host.reason === "unresolvable"
+          ? "That host can't be resolved."
+          : "Webhook URLs must point at a public address.",
+    };
+  }
+
+  return { ok: true };
+}
 
 function toWebhook(row: { id: string; url: string; events: string[]; active: boolean; createdAt: Date }): Webhook {
   return { id: row.id, url: row.url, events: row.events, active: row.active, createdAt: row.createdAt.toISOString() };
@@ -19,20 +86,8 @@ export async function registerWebhookRoutes(app: FastifyInstance): Promise<void>
       const url = request.body?.url?.trim();
       const events = request.body?.events ?? [];
       if (!url) return reply.code(400).send({ error: "invalid_url", message: "A URL is required." });
-      try {
-        const parsed = new URL(url);
-        // localhost/127.0.0.1 are exempt from the https:// requirement --
-        // there's no meaningful network eavesdropper between a machine and
-        // itself, and requiring a locally-trusted cert just to point a
-        // webhook at your own dev server during testing isn't a real
-        // security win, only friction.
-        const isLocal = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-        if (parsed.protocol !== "https:" && !(isLocal && parsed.protocol === "http:")) {
-          return reply.code(400).send({ error: "invalid_url", message: "Webhook URLs must use https://." });
-        }
-      } catch {
-        return reply.code(400).send({ error: "invalid_url", message: "That's not a valid URL." });
-      }
+      const checked = await checkWebhookUrl(url);
+      if (!checked.ok) return reply.code(400).send({ error: "invalid_url", message: checked.message });
       if (events.length === 0 || !events.every((e) => VALID_EVENTS.includes(e))) {
         return reply
           .code(400)
