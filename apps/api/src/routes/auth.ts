@@ -33,6 +33,7 @@ import {
 import { requireAuth } from "../lib/auth/context.js";
 import { getOAuthProvider } from "../lib/auth/oauth.js";
 import { sendEmail } from "../services/email-service.js";
+import { maybePurgeExpiredAuthRows } from "../services/auth-cleanup.js";
 import { deleteStoredFile } from "../services/storage-service.js";
 import { recomputePublicHighlightStats } from "../services/aggregation-service.js";
 
@@ -395,6 +396,17 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       where: { refreshTokenHash: hashRefreshToken(token) },
     });
     if (!session || session.revokedAt || session.expiresAt < new Date()) return unauthorized();
+
+    // Hung off refresh because refresh is what creates the mess: rotation
+    // below leaves a dead Session row behind every single time, and this is
+    // the only route frequent enough to guarantee the sweep runs on a live
+    // deployment without a scheduler to run it (S8). Internally throttled to
+    // once an hour per process, so all but one refresh an hour pays nothing.
+    //
+    // After the token check, so an unauthenticated flood cannot reach it, and
+    // before the rotation only because the sweep's cutoff is a week old --
+    // there is nothing it could take that this request is about to rely on.
+    await maybePurgeExpiredAuthRows(undefined, (err) => app.log.warn(err, "expired auth row sweep failed"));
 
     // Rotate: revoke the presented token and issue a fresh one, so a stolen
     // refresh cookie stops working the next time the real client refreshes.

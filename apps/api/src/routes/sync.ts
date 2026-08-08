@@ -95,6 +95,49 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
       // be used and the localId -> server id mapping still comes back without
       // a per-row round trip.
 
+      /*
+       * Considered and rejected: wrapping all five phases below in one
+       * interactive `prisma.$transaction`. Recording it here because "this
+       * route has no transaction" reads as an oversight, and it is a choice.
+       *
+       * The failure it would prevent is real but self-healing. An
+       * interruption between the article phase and the highlight phase leaves
+       * articles with no highlights -- and the next attempt at that batch
+       * fixes it, because every phase here is idempotent on purpose: the
+       * articles come back as already-present and are skipped, and their
+       * highlights, which the dedupe query correctly finds none of, are
+       * created. The client keeps a batch in IndexedDB until the server has
+       * acknowledged it (apps/web/src/lib/data/sync.ts deletes local rows only
+       * after the response lands), so the retry has the data to send. The one
+       * phase boundary that did *not* heal was highlights -> notes, and that
+       * one is now a transaction of its own below.
+       *
+       * What wrapping everything would cost is not self-healing.
+       *
+       * 1. All-or-nothing turns partial progress into no progress. A 32MB
+       *    batch that dies at 90% currently leaves 90% committed and the
+       *    retry finishes the job. Rolled back, every attempt starts from
+       *    zero -- so the user whose connection cannot hold long enough to
+       *    finish once can never migrate at all, and it is precisely the
+       *    biggest libraries, on the worst connections, that need the most
+       *    attempts. That inverts who the transaction protects.
+       * 2. An interactive transaction holds a pooled connection for the whole
+       *    request, and the expensive part of this request is not the
+       *    database: sanitizeArticleHtml runs JSDOM over every article body,
+       *    up to 15MB of inlined images each. That is CPU time spent with a
+       *    connection pinned and a transaction open. A handful of concurrent
+       *    imports on a small pool starves every other route on the instance
+       *    -- a wider outage than the narrow inconsistency being fixed, and
+       *    one nothing retries its way out of.
+       * 3. Prisma's interactive transactions time out (5s by default). A
+       *    thousand-row batch would routinely exceed it, converting a
+       *    recoverable partial import into a guaranteed hard failure.
+       *
+       * If a genuinely atomic import is wanted later, the shape is a staging
+       * table plus a server-side merge, not a long-lived connection held open
+       * across JSDOM.
+       */
+
       // localId -> real server Article id, so highlights can attach whether
       // their article was newly created here or already existed (same URL).
       const localIdToServerId = new Map<string, string>();
@@ -259,31 +302,59 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
       }
 
       if (highlightRows.length > 0) {
-        await prisma.highlight.createMany({
-          data: highlightRows.map(({ id, articleId, highlight: h }) => ({
-            id,
-            articleId,
-            userId,
-            selectedText: h.selectedText,
-            position: h.position as object,
-            color: h.color ?? "YELLOW",
-            prompt: normalizeRecallPrompt(h.prompt),
-            lastSurfacedAt: h.lastSurfacedAt ? new Date(h.lastSurfacedAt) : null,
-            surfaceCount: typeof h.surfaceCount === "number" ? h.surfaceCount : 0,
-            lastFeedback: h.lastFeedback ?? null,
-            lastFeedbackAt: h.lastFeedbackAt ? new Date(h.lastFeedbackAt) : null,
-            resurfaceArchivedAt: h.resurfaceArchivedAt ? new Date(h.resurfaceArchivedAt) : null,
-            createdAt: h.createdAt ? new Date(h.createdAt) : new Date(),
-            ...sm2FromImport(h),
-          })),
-        });
+        const highlightData = highlightRows.map(({ id, articleId, highlight: h }) => ({
+          id,
+          articleId,
+          userId,
+          selectedText: h.selectedText,
+          position: h.position as object,
+          color: h.color ?? "YELLOW",
+          prompt: normalizeRecallPrompt(h.prompt),
+          lastSurfacedAt: h.lastSurfacedAt ? new Date(h.lastSurfacedAt) : null,
+          surfaceCount: typeof h.surfaceCount === "number" ? h.surfaceCount : 0,
+          lastFeedback: h.lastFeedback ?? null,
+          lastFeedbackAt: h.lastFeedbackAt ? new Date(h.lastFeedbackAt) : null,
+          resurfaceArchivedAt: h.resurfaceArchivedAt ? new Date(h.resurfaceArchivedAt) : null,
+          createdAt: h.createdAt ? new Date(h.createdAt) : new Date(),
+          ...sm2FromImport(h),
+        }));
 
         // Notes are a separate table, so they go in their own pass now that the
         // highlight ids are known up front instead of riding a nested create.
         const notes = highlightRows
           .map(({ id, highlight: h }) => ({ highlightId: id, userId, noteText: h.noteText?.trim() ?? "" }))
           .filter((n) => n.noteText);
-        if (notes.length > 0) await prisma.annotation.createMany({ data: notes });
+
+        // The one seam in this route that a replay cannot heal, and the only
+        // reason there is a transaction here at all.
+        //
+        // Every other phase is idempotent by construction, which is what
+        // makes the missing whole-route transaction survivable: an
+        // interruption leaves rows the next attempt recognises (articles by
+        // url, or by title+savedAt; collections by name; links by their
+        // composite PK) and skips, and the phases that never ran simply run.
+        // Highlights are the case that proves it -- articles committed
+        // without their highlights come back as *pre-existing* articles on
+        // the retry, so the dedupe query finds no highlights on them and
+        // creates the lot.
+        //
+        // Notes break that. A note is only ever written alongside the
+        // highlight it belongs to, so if the highlights commit and this
+        // insert does not, the retry dedupes those same highlights away,
+        // highlightRows comes back empty, and the note is never written by
+        // anything, ever. Silent, and permanent -- the highlight is there, so
+        // nothing looks lost until someone goes looking for what they wrote
+        // under it.
+        //
+        // Batched form (an array), deliberately not the interactive
+        // `$transaction(async tx => ...)` callback: both statements are built
+        // before either is sent, so this is one round trip that opens and
+        // commits without ever going idle waiting on this process. It holds a
+        // connection for two inserts, not for a 32MB request.
+        await prisma.$transaction([
+          prisma.highlight.createMany({ data: highlightData }),
+          ...(notes.length > 0 ? [prisma.annotation.createMany({ data: notes })] : []),
+        ]);
       }
       const importedHighlights = highlightRows.length;
 
