@@ -69,5 +69,27 @@ RUN node apps/api/scripts/prefetch-tts-model.mjs
 FROM base AS runtime
 ENV NODE_ENV=production
 COPY --from=build /repo /repo
+
+# Uploaded PDFs/EPUBs and generated podcast audio, moved off the application
+# directory and onto a path a deployment can mount over (#173). Left where
+# storage-service.ts's default puts it -- inside /repo -- every deploy
+# replaced the container filesystem and destroyed every uploaded book while
+# the database rows naming them survived. Mirrors postgres's own
+# /var/lib/postgresql/data; docker-compose.yml mounts a named volume here.
+#
+# The directory is created here so the first upload isn't the thing that
+# discovers it can't be made. This image declares no USER, so it runs as root
+# and no chown is needed -- if a USER is ever added, this line has to grow a
+# `chown` to it, or every upload fails EACCES on the mounted volume, which is
+# owned by root the moment Docker creates it.
+#
+# Deliberately no `VOLUME` instruction: with no `-v`, that only gets you an
+# anonymous volume, which is orphaned the moment the container is removed and
+# is never reattached to the replacement. That looks like persistence in a
+# restart test and loses everything on the redeploy this bug is about. The
+# mount has to be named, and has to come from compose or the platform.
+ENV FILE_STORAGE_PATH=/var/lib/booklet/storage
+RUN mkdir -p /var/lib/booklet/storage
+
 EXPOSE 4000
 CMD ["node", "apps/api/dist/index.js"]

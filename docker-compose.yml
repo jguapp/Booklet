@@ -79,6 +79,20 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      # Repeated from apps/api/Dockerfile's own ENV, not relied upon from it:
+      # the volume below and the path the app writes to have to be the same
+      # string, and a reader of this file should be able to see that without
+      # opening the Dockerfile. Change one and you must change both.
+      FILE_STORAGE_PATH: /var/lib/booklet/storage
+    # Uploaded PDFs/EPUBs and generated podcast enclosures. Named, exactly
+    # like postgres-data and redis-data, because it holds the same kind of
+    # thing they do: the only copy of something a user gave us. Without it,
+    # `docker compose up --build` after a code change silently destroys every
+    # uploaded book while its database row survives, pointing at bytes that
+    # are gone (#173) -- and since #172 clears the browser's IndexedDB copy
+    # once the server has the file, the server's copy is the only one left.
+    volumes:
+      - storage-data:/var/lib/booklet/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,3 +119,4 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  storage-data:
