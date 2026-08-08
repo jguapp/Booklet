@@ -23,16 +23,37 @@ what that means in practice.
 Optional, everything works without them (see the code comments where each
 is read for the fallback behavior):
 
+- `PORT` (API, default `4000`) and `API_ORIGIN` (API, default
+  `http://localhost:4000`) -- `API_ORIGIN` is this server's own public URL and
+  must match the redirect URI registered with each OAuth provider exactly, so
+  it is not optional once Google/GitHub sign-in is configured.
 - `RESEND_API_KEY` -- without it, password reset / email verification /
   digest emails log to the console instead of sending
+- `EMAIL_FROM` (API, default `Booklet <onboarding@resend.dev>`) -- the
+  default is Resend's shared testing sender, which is not a domain you own.
+  Set this to an address on a domain verified in your own Resend account
+  before a real deploy; the default is for getting the flow working, not for
+  sending to real users.
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` and `GITHUB_CLIENT_ID` /
+  `GITHUB_CLIENT_SECRET` (API) -- each provider's button only appears in the
+  UI once its pair is set (`GET /api/auth/oauth/providers` reports which).
 - `SENTRY_DSN` (API) / `NEXT_PUBLIC_SENTRY_DSN` (web) -- without them,
   error monitoring is a no-op
-- `TTS_POOL_SIZE` (API, default `3`) -- Kokoro text-to-speech generates
-  through this many real child processes (`apps/api/src/services/
-  tts-pool.ts`), each holding its own quantized 82M-param model instance
-  in memory for the process's whole lifetime, not per-request. Real but
-  moderate memory cost per worker; size this to the host's actual
-  headroom rather than leaving the default unexamined on a small instance.
+- `TTS_POOL_SIZE` (API, default: one worker per available core, capped at 3)
+  -- Kokoro text-to-speech generates through this many real child processes
+  (`apps/api/src/services/tts-pool.ts`), each holding its own quantized
+  82M-param model instance in memory for the process's whole lifetime, not
+  per-request. The default is derived from `availableParallelism()` rather
+  than fixed, because a fixed 3 on a 2-vCPU host made three concurrent
+  generations take 2.86x a single one instead of ~1x (#162) -- three processes
+  each sizing their ONNX thread pool to the whole machine is contention, not
+  concurrency. Real but moderate memory cost per worker; override only to size
+  down on a small instance, since above 3 the player has nothing to do with
+  the extra capacity.
+- `TTS_INTRA_OP_THREADS` (API, default: the core count divided by the pool
+  size) -- the ONNX intra-op thread budget given to each worker. The other
+  half of the #162 fix; override only if you are deliberately co-locating the
+  API with something else that needs the cores.
 - `REDIS_URL` (API) -- a shared, persistent second tier for the generated-
   speech cache (`apps/api/src/services/tts-cache.ts`). Without it the API
   uses only its in-process cache, which is correct but lost on every restart
@@ -63,6 +84,66 @@ is read for the fallback behavior):
   separate cache service), evicted LRU once this cap is hit, and lost on a
   restart -- it just repopulates as things get read again, not a real cost
   at this app's scale.
+- `API_PUBLIC_URL` (API) -- the absolute base used for the podcast feed URL
+  and every `<enclosure>` in it (`apps/api/src/routes/podcast.ts`). Derived
+  from the request's own `Host` header by default, which is right in dev and
+  in `docker-compose`. Set it explicitly behind a TLS-terminating proxy:
+  `request.protocol` reads `http` there unless `TRUST_PROXY` is on, and an
+  https feed handing out http enclosures is a downgrade iOS's ATS refuses to
+  download at all.
+- `PODCAST_VOICE` (API, default `af_heart`) -- the Kokoro voice every podcast
+  episode is generated with. The feed picks one because a podcast client has
+  no access to the reader's per-device voice preference. Changing it is a
+  cache invalidation, not a migration: the voice is recorded on each
+  `ArticleAudio` row, so episodes generated with the old one are rebuilt on
+  the next feed fetch.
+
+## Rate limits
+
+Every limit here except `AUTH_FAILED_LOGIN_LIMIT` keys on the client IP, so
+**read them together with `TRUST_PROXY` below** -- set that wrong and they all
+apply to your proxy rather than per user, at which point no value is large
+enough. Defaults are sized for a real deployment; the variables exist mainly
+so the e2e suite, which drives the whole app from one address in a couple of
+minutes, can raise them for its own run. `TTS_RATE_LIMIT_MAX` belongs to this
+group too, and is documented with the other read-aloud knobs above.
+
+- `GLOBAL_RATE_LIMIT_MAX` (API, default `300` per minute) -- the API-wide
+  ceiling every route sits under, including the ones with a tighter budget of
+  their own. This is what actually bounds a flood.
+- `AUTH_ATTEMPT_RATE_LIMIT_MAX` (API, default `100` per 15 minutes) -- signup,
+  login and the password-reset routes, the ones with a guessable credential.
+  Raised from 10 in #170: ten was sized for one person, but behind an office
+  NAT or a carrier's CGNAT hundreds of unrelated people present as one
+  address, and six of them mistyping once each spent the whole budget for
+  everybody.
+- `AUTH_REFRESH_RATE_LIMIT_MAX` (API, default `120` per 15 minutes) --
+  `/api/auth/refresh` only, deliberately *not* on the budget above (#169). It
+  looks like an auth route but is ordinary traffic the web app issues on every
+  load, so sharing the credential-guessing budget meant the app spent the
+  user's password-attempt allowance just by working.
+- `AUTH_FAILED_LOGIN_LIMIT` (API, default `5`) -- failed logins allowed per
+  *account* before the next attempt starts waiting 5s, then 10s, 20s, capped
+  at 15 minutes and decaying after an hour of quiet (#170). Unlike the others
+  this does not key on IP, which is the point: addresses are cheap to rent, so
+  a per-IP ceiling is a budget an attacker simply buys more of. It escalates a
+  wait rather than locking the account, so knowing someone's email address is
+  never a way to keep them signed out.
+- `PUBLIC_SHARE_RATE_LIMIT_MAX` (API, default `120` per minute) -- the two
+  routes anyone can reach with no session at all: `GET /api/public/shares/
+  :slug` and `GET /api/public/seeds`. Tighter than the app-wide limit because
+  it makes share-slug enumeration hopeless in wall-clock terms as well as
+  arithmetic ones, on traffic with no account behind it.
+- `TTS_WARM_RATE_LIMIT_MAX` (API, default `120` in production) -- the
+  `/api/tts/warm` route, which returns no audio and so gets its own bucket:
+  one reader-open legitimately fires one warm call plus a real chunk fetch,
+  and those shouldn't compete for the same allowance.
+- `EXTRACTION_ALLOW_PRIVATE_ADDRESSES` (API) -- **test-only.** Set to `"true"`
+  it lets article extraction fetch private/loopback addresses, which is how
+  the e2e suite hits its local fixture server instead of the real internet. It
+  is ignored outright under `NODE_ENV=production` (`apps/api/src/lib/
+  private-address.ts`), so the SSRF protection it relaxes is not overridable
+  where it matters. Never set it in a deployment.
 
 ## Observability
 
@@ -131,9 +212,11 @@ this specific environment: Docker Desktop is installed but its daemon
 needs WSL2, which isn't installed here, and setting that up needs a
 restart -- out of scope to do unilaterally. Two things stand in for that:
 
-- `.github/workflows/ci.yml`'s `docker-build` job builds both images and
-  boots the api one against a real Postgres service container on a real
-  GitHub Actions runner, on every push/PR.
+- A `docker-build` job builds both images and boots the api one against a
+  real throwaway Postgres container. It exists in both CI configs
+  (`.github/workflows/ci.yml` and `.gitlab-ci.yml`), and its GitHub Actions
+  form is the one that has actually run on a real runner -- see "Which CI
+  config is live" below before assuming it still does.
 - The api image's actual production execution path -- `pnpm --filter
   @booklet/api build` (esbuild, see `apps/api/scripts/build.mjs`) then
   `node dist/index.js` under plain Node, no tsx or bundler doing module
@@ -194,10 +277,43 @@ JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toStr
 - TLS termination, secrets management, backups, autoscaling -- all
   infrastructure concerns for whatever you deploy onto, not this repo's
   job to solve generically
-- Actually watching a GitHub Actions run complete: `.github/workflows/ci.yml`
-  is real (not just syntax-checked) and includes typecheck/lint, unit and
-  integration tests, web and extension e2e suites, and the docker-build job
-  described above -- it runs automatically on every push to `main` and
-  every PR, but confirming a specific run went green needs either repo
-  access this environment doesn't have (no `gh` CLI, no API token) or you
-  checking the Actions tab yourself
+- Actually watching a CI run complete: both pipelines are real (not just
+  syntax-checked) and each includes typecheck/lint, unit and integration
+  tests, web and extension e2e suites, and the docker-build job described
+  above -- but confirming a specific run went green needs either repo access
+  this environment doesn't have (no `gh` CLI, no API token) or you checking
+  the pipeline yourself. Which one to check is the next section.
+
+## Which CI config is live
+
+**Two full pipelines exist in this repository and it is not safe to assume
+either is currently running on your pushes.** They are equivalent in coverage
+-- the same seven jobs -- so this is a question of where they execute, not of
+what they check:
+
+- `.github/workflows/ci.yml` -- was the live pipeline, and is the one whose
+  runs have actually gone green on real hardware. **The Actions allowance for
+  this repository is exhausted**, so it is dormant: the file is still valid
+  and still triggers, the minutes to run it are gone.
+- `.gitlab-ci.yml` -- the intended replacement, a port rather than a copy
+  (service hostnames, service readiness and Docker-in-Docker networking all
+  genuinely differ). It has never run on a GitLab runner, because the
+  repository lives on GitHub. Until it is moved or mirrored to GitLab it
+  "sits in the repository harmlessly and runs nothing," in the words of
+  [`docs/CI_GITLAB.md`](docs/CI_GITLAB.md) -- read that file before switching,
+  particularly the section on minutes: GitLab.com's free tier is **smaller**
+  than Actions', not larger, and a self-hosted runner is the only option that
+  actually solves the problem that prompted the move.
+
+So the honest current state is that **nothing is verifying pushes
+automatically**. Until one pipeline is genuinely live, `pnpm verify` is the
+stand-in: it runs everything checkable without a running service and then
+names what it skipped, including `docker-build`, which is the check that has
+caught the most real bugs and which no local command covers.
+
+Do not delete either config on that basis. Deleting the Actions workflow
+throws away the only pipeline with a proven-green history for a replacement
+that has never executed; deleting the GitLab one throws away the migration
+work and the minutes analysis behind it. The drift between them is the real
+risk, and it has already started -- see the note at the top of
+`.github/workflows/ci.yml`.

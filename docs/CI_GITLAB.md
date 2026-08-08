@@ -111,8 +111,8 @@ this repository, command for command:
 |---|---|
 | `before_script` (corepack → store-dir → `pnpm install --frozen-lockfile`) | passes |
 | `typecheck-and-lint` (all four typechecks, lint, esbuild bundle) | passes |
-| `test-unit` (shared 84, web 24) | passes |
-| `test-api` against a host literally named `postgres` | 148/149 |
+| `test-unit` (shared 115, web 40) | passes |
+| `test-api` against a host literally named `postgres` | 249 passed, 1 skipped |
 | `wait-on tcp:postgres:5432` | resolves and returns |
 
 One thing that surfaced only by running it: relocating the pnpm store makes

@@ -13,9 +13,10 @@
 # normal build produces). The `docker build`/`docker run` commands
 # themselves are still unverified in this environment specifically (Docker
 # Desktop installed but its daemon needs WSL2, which isn't -- installing it
-# needs a restart, out of scope to do unilaterally); see
-# .github/workflows/ci.yml's docker-build job for that verification
-# instead, which does run on a real runner.
+# needs a restart, out of scope to do unilaterally); CI's docker-build job is
+# what covered that instead, on a real runner. Note that job is currently
+# dormant along with the rest of the Actions workflow -- see DEPLOYMENT.md's
+# "Which CI config is live".
 #
 # NEXT_PUBLIC_API_URL is baked in at build time (Next.js inlines
 # NEXT_PUBLIC_* vars into the client bundle) -- pass it as a build arg

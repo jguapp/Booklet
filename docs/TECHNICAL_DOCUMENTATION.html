@@ -2232,15 +2232,40 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
       <section id="part-7">
         <h2><span class="part-label">Part VII</span>CI/CD &amp; Deployment</h2>
         <p>
-          <code>.github/workflows/ci.yml</code> runs on every push/PR:
-          typecheck + lint for every package, the shared/api/web test suites
-          (API and web e2e against a real Postgres service container), the
-          extension's e2e suite under <code>xvfb</code> (a virtual display,
-          since a real browser extension needs a real browser window even in
-          headless CI), and a <code>docker-build</code> job that builds both
+          The pipeline is seven jobs: typecheck + lint for every package, the
+          shared/api/web test suites (API and web e2e against a real Postgres
+          service container), the extension's e2e suite under
+          <code>xvfb</code> (a virtual display, since a real browser extension
+          needs a real browser window even in headless CI), a Kokoro TTFA
+          benchmark, and a <code>docker-build</code> job that builds both
           production images and smoke-tests the API image against a real
           Postgres container.
         </p>
+        <div class="callout warn">
+          <span class="callout-label">That pipeline is written twice, and neither copy may be running</span>
+          <p>
+            <code>.github/workflows/ci.yml</code> is the version whose runs
+            have actually gone green on real hardware, but this repository's
+            Actions allowance is exhausted, so it is dormant.
+            <code>.gitlab-ci.yml</code> is an equivalent port — the same seven
+            jobs, with service hostnames, service readiness and
+            Docker-in-Docker networking genuinely rewritten rather than
+            copied — and it has never executed, because the repository lives
+            on GitHub. <code>docs/CI_GITLAB.md</code> covers the move,
+            including the part that matters most: GitLab.com's free tier is
+            <em>smaller</em> than Actions', so shared runners do not solve the
+            problem that prompted the switch. A self-hosted runner does.
+          </p>
+          <p>
+            Two configs that both exist and neither of which runs is a drift
+            hazard, and it has already bitten once: #169's auth rate limits
+            were added to the GitLab file only, leaving the Actions
+            <code>test-web-e2e</code> job unrunnable. Both files now carry a
+            header saying a change to one has to be mirrored to the other.
+            Until one is genuinely live, <code>pnpm verify</code> is the
+            stand-in — see Part VI.
+          </p>
+        </div>
         <p>
           Deployment itself (see <code>DEPLOYMENT.md</code>) is
           Docker-based — a <code>Dockerfile</code> per app, verified by CI's
@@ -2280,8 +2305,8 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             <td>Set to <code>true</code> if — and only if — a reverse proxy you control sits in front. Rate limiting keys on the client IP; without this, behind a proxy, that resolves to the proxy and every user shares one bucket. With nothing in front, leaving it unset is what stops clients spoofing <code>X-Forwarded-For</code>. Invisible in local dev and <code>docker-compose</code>, so test it against the real deployment.</td>
           </tr>
           <tr>
-            <td><code>TTS_POOL_SIZE</code> (default 3)</td>
-            <td>Worker processes, each holding a real model instance in memory for its whole lifetime — a genuine memory/CPU tradeoff to size against the host's headroom.</td>
+            <td><code>TTS_POOL_SIZE</code> (default: one per available core, capped at 3)</td>
+            <td>Worker processes, each holding a real model instance in memory for its whole lifetime — a genuine memory/CPU tradeoff to size against the host's headroom. The default is derived from <code>availableParallelism()</code> rather than fixed since #162: a fixed 3 on a 2-vCPU runner made three concurrent generations take 2.86x a single one instead of ~1x, because three processes each sizing their ONNX thread pool to the whole machine is contention, not concurrency.</td>
           </tr>
           <tr>
             <td><code>REDIS_URL</code></td>
@@ -2300,8 +2325,8 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             <td>In-process cache ceiling, evicted LRU.</td>
           </tr>
           <tr>
-            <td><code>AUTH_ATTEMPT_RATE_LIMIT_MAX</code> (default 10 per 15 minutes)</td>
-            <td>Signup, login, and the password-reset routes — the ones with a guessable credential. Deliberately tight, and leaving it alone is the right call in production; it exists as a variable only so the e2e suite, which legitimately signs up dozens of times from one address, can raise it for its own run. Read together with <code>TRUST_PROXY</code>, as with every limit here.</td>
+            <td><code>AUTH_ATTEMPT_RATE_LIMIT_MAX</code> (default 100 per 15 minutes)</td>
+            <td>Signup, login, and the password-reset routes — the ones with a guessable credential. Raised from 10 in #170: ten was sized for one person, but this keys on IP, and behind one office NAT or a carrier's CGNAT hundreds of unrelated people present as the same address — six of them mistyping once each spent the whole budget and 429'd everybody, including people who had not tried to sign in. 100 still cuts off a single host spraying one guess across a list of accounts, which is all that is left for the per-IP layer now that <code>AUTH_FAILED_LOGIN_LIMIT</code> bounds guessing per account. Otherwise leave it alone in production; it exists as a variable mainly so the e2e suite, which legitimately signs up dozens of times from one address, can raise it for its own run. Read together with <code>TRUST_PROXY</code>, as with every limit here.</td>
           </tr>
           <tr>
             <td><code>AUTH_REFRESH_RATE_LIMIT_MAX</code> (default 120 per 15 minutes)</td>
@@ -2310,6 +2335,34 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           <tr>
             <td><code>GLOBAL_RATE_LIMIT_MAX</code> (default 300 per minute)</td>
             <td>The API-wide ceiling every route sits under, including the ones with their own tighter budget. This is what genuinely bounds a flood.</td>
+          </tr>
+          <tr>
+            <td><code>AUTH_FAILED_LOGIN_LIMIT</code> (default 5)</td>
+            <td>The one limit here that does <em>not</em> key on IP, and that is the point (#170): addresses are cheap to rent, so a per-IP ceiling is a budget an attacker buys more of while the people sharing one NAT pay its cost. After this many failed logins <em>for a given account</em>, the next attempt waits 5s, then 10s, 20s — capped at 15 minutes, decaying entirely after an hour of quiet. It escalates a wait rather than locking the account, because a hard lock hands anyone who knows an email address a way to keep its owner signed out, at which point the lock is the attack. The counter lives on the <code>User</code> row rather than in Redis or process memory: in-process would read "N failures per instance" behind a load balancer and reset on every deploy, and <code>REDIS_URL</code> is optional here, so a Redis-backed counter would simply not exist in the default deployment.</td>
+          </tr>
+          <tr>
+            <td><code>PUBLIC_SHARE_RATE_LIMIT_MAX</code> (default 120 per minute)</td>
+            <td>The two routes reachable with no session at all — <code>GET /api/public/shares/:slug</code> and <code>GET /api/public/seeds</code>. Tighter than the app-wide ceiling because it makes share-slug enumeration hopeless in wall-clock terms as well as arithmetic ones, on traffic that has no account behind it to hold responsible afterwards.</td>
+          </tr>
+          <tr>
+            <td><code>TTS_WARM_RATE_LIMIT_MAX</code> (default 120 in production)</td>
+            <td><code>/api/tts/warm</code>, which returns no audio and so gets its own bucket: one reader-open legitimately fires one warm call plus one real chunk fetch, and those should not compete for the same allowance.</td>
+          </tr>
+          <tr>
+            <td><code>TTS_INTRA_OP_THREADS</code> (default: cores ÷ pool size)</td>
+            <td>The ONNX intra-op thread budget per worker — the other half of the #162 fix above. Left to ORT's default each session sizes its pool to the whole machine, so dividing the cores among the workers is what makes the pool's processes run alongside each other instead of fighting.</td>
+          </tr>
+          <tr>
+            <td><code>API_PUBLIC_URL</code></td>
+            <td>Absolute base for the podcast feed URL and every <code>&lt;enclosure&gt;</code> in it. Derived from the request's own <code>Host</code> header by default, which is correct in dev and in <code>docker-compose</code>. Set it explicitly behind a TLS-terminating proxy: <code>request.protocol</code> reads <code>http</code> there unless <code>TRUST_PROXY</code> is on, and an https feed handing out http enclosures is a downgrade iOS's ATS refuses to download at all.</td>
+          </tr>
+          <tr>
+            <td><code>PODCAST_VOICE</code> (default <code>af_heart</code>)</td>
+            <td>The voice every podcast episode is generated with — the feed has to pick one, since a podcast client cannot see the reader's per-device voice preference. Recorded on each <code>ArticleAudio</code> row, which makes changing it a cache invalidation rather than a migration.</td>
+          </tr>
+          <tr>
+            <td><code>EXTRACTION_ALLOW_PRIVATE_ADDRESSES</code> — <strong>test only</strong></td>
+            <td>Lets article extraction fetch private/loopback addresses, which is how the e2e suite reaches its local fixture server instead of the real internet. Ignored outright under <code>NODE_ENV=production</code>, so the SSRF protection it relaxes is not overridable where it matters. Never set it in a deployment.</td>
           </tr>
         </table>
 

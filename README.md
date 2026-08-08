@@ -165,10 +165,12 @@ Some other choices that aren't just "yet another CRUD app":
   zero account, backed by IndexedDB. An account exists for exactly one
   reason — syncing across devices — and nothing is gated behind creating
   one.
-- **CI that's actually green.** Typecheck/lint, unit, integration, two
-  real e2e suites (including a genuine Kokoro model download and a
-  headless-Chromium extension load), and a Docker build-and-smoke-test —
-  on every push, not just on the paths someone remembered to check.
+- **CI that actually runs the hard parts.** Typecheck/lint, unit,
+  integration, two real e2e suites (including a genuine Kokoro model
+  download and a headed-Chromium extension load under `xvfb`), and a Docker
+  build-and-smoke-test — the whole pipeline, not just the paths someone
+  remembered to check. Written twice, for GitHub Actions and GitLab; see
+  [Testing](#testing) for which is live.
 
 ## Status
 
@@ -246,6 +248,13 @@ throughout. Grouped by area rather than one flat list:
       re-rolling one on every visit; feedback ("remembered" / "forgot" /
       archive) updates the schedule. Digest emailing sends for real via
       Resend when configured, logs to the console otherwise
+- [x] Recall prompts — a highlight can carry a question whose answer is the
+      highlight. Daily Review asks it first and keeps the passage, the note,
+      *and* the grade buttons hidden until you ask for them, because
+      recognition feels like recall but isn't — showing the answer first meant
+      SM-2 was grading re-reads rather than the retrieval attempts it was
+      designed for. Additive: a highlight without a prompt renders and grades
+      exactly as before, on web and on mobile
 
 </details>
 
@@ -295,6 +304,27 @@ throughout. Grouped by area rather than one flat list:
       `highlight.created`, with a visible delivery-history log
 - [x] RSS — subscribe to a feed, see its items, save any of them into the
       library
+- [x] Podcast feed — your reading queue (unread + in-progress, not the whole
+      back catalogue) as a real RSS feed, one audio file per article, so
+      read-aloud reaches the lock screen, CarPlay, playback speed and offline
+      sync that podcast clients already solved. The feed token is
+      `bkpod_`-prefixed and cannot become a session anywhere in the app, and
+      `POST /api/tokens` refuses to mint the scope, so the boundary is the
+      token's *format* rather than a per-route check somebody has to remember.
+      Playback position deliberately does not sync back — no podcast client
+      has a field for reporting it
+- [x] Public sharing — an unlisted page for one article's highlights or one
+      collection's. Excerpts only (the reader's own selected text, never the
+      publisher's), revocation deletes the row rather than flipping a boolean
+      so a leaked URL cannot be un-revoked, and smart collections are refused
+      because their membership is a live query — sharing one would publish
+      articles saved after the link went out
+- [x] Onboarding seeds — a new, empty account has something to read on day
+      one: passages highlighted by at least three accounts that separately
+      opted in, plus 19 hand-transcribed public-domain passages for when the
+      aggregate is empty. Opt-in and separate from sharing itself, and the
+      three-account threshold is enforced at write time, since a read-side
+      filter leaves one-person rows in the table
 
 </details>
 
@@ -315,34 +345,69 @@ throughout. Grouped by area rather than one flat list:
       collections, PDF/EPUB upload (as extracted text — no real page/CFI
       rendering, which needs DOM canvas/iframe APIs React Native doesn't
       have), and Daily Review/resurfacing with the same SM-2 feedback loop
-- [x] API rate limiting, error monitoring (Sentry, no-op without a DSN)
+- [x] API rate limiting — a global per-IP ceiling plus tighter per-route
+      budgets for TTS generation, the credential-guessing auth routes, and the
+      public share pages, and a per-*account* failed-login backoff that
+      escalates a wait instead of locking anyone out. Error monitoring
+      (Sentry, no-op without a DSN) — see `DEPLOYMENT.md` for every knob
 - [x] Automated tests — unit (SM-2, highlight anchoring, URL canonicalization,
-      collection filters, recap math, Kindle-clippings parsing), integration
+      collection filters, recap math, Kindle-clippings parsing, TTS chunking,
+      read-along timing, recall prompts, plus a Vitest + jsdom runner for the
+      web app's own DOM logic and React components), integration
       (the full API surface via Fastify's `.inject()`), and e2e (Playwright:
       the local/anonymous IndexedDB path, real PDF/EPUB rendering and
       highlighting, dictionary lookup, both TTS engines — including a real
       Kokoro model download and generation, not mocked — OAuth, and the
-      browser extension loaded for real in Chromium) — see
+      browser extension loaded for real in Chromium). `pnpm verify` runs
+      everything this machine can check and names what it skipped — see
       [Testing](#testing)
-- [x] CI — GitHub Actions runs the full suite (typecheck/lint, unit,
-      integration, both e2e suites, and a Docker build-and-smoke-test) on
-      every push, and is green — see [Testing](#testing)
-- [x] Deployment configs — Dockerfiles for both apps and `docker-compose.yml`
-      are build-verified in CI (a real image build plus an API smoke test
-      against a Postgres service container on every push) — see
-      `DEPLOYMENT.md` and [Roadmap](#roadmap) for what's still needed to put
-      them on a real host
+- [x] CI — the full suite (typecheck/lint, unit, integration, both e2e
+      suites, a TTFA benchmark, and a Docker build-and-smoke-test) as seven
+      jobs, written twice: for GitHub Actions and for GitLab. Read
+      [Testing](#testing) before relying on either — the Actions allowance is
+      exhausted and the GitLab port has not run yet
+- [x] Deployment configs — Dockerfiles for both apps and `docker-compose.yml`,
+      build-verified by CI's `docker-build` job (a real image build plus an
+      API smoke test against a real Postgres) — see `DEPLOYMENT.md` and
+      [Roadmap](#roadmap) for what's still needed to put them on a real host
 
 </details>
 
 ## Testing
 
 ```bash
-pnpm --filter @booklet/shared test      # unit: SM-2 algorithm, highlight-anchor resolution
-pnpm --filter @booklet/api test         # integration: full API via Fastify .inject(), real dev DB
-pnpm --filter @booklet/web test:e2e     # e2e: local/anonymous flow, real PDF + EPUB rendering, dictionary, TTS
+pnpm verify                             # everything checkable without a running service, and it names what it skipped
+pnpm verify --e2e                       # also the browser suite (needs dev servers up; it prints the setup)
+```
+
+`pnpm verify` exists because "the tests pass" was quietly ambiguous: `pnpm
+test` runs the three unit suites and nothing else — not lint, not typecheck,
+not the production esbuild bundle, which has broken while every other signal
+stayed green. It closes with what it *cannot* cover anywhere (`docker-build`
+above all), because a verification tool that silently skips things teaches you
+to read a green summary as "safe to deploy". The individual suites:
+
+```bash
+pnpm --filter @booklet/shared test      # 115 unit tests: SM-2, highlight anchoring, URL canonicalization,
+                                        #   collection filters, recap, Kindle clippings, TTS chunking,
+                                        #   read-along timing, recall prompts, reading stats, related articles
+pnpm --filter @booklet/web test         # 40 unit tests (Vitest + jsdom): DOM-range bridging, React components
+pnpm --filter @booklet/api test         # 250 integration tests: full API via Fastify .inject(), real dev DB
+pnpm --filter @booklet/web test:e2e     # e2e: 122 Playwright tests across 48 spec files — local/anonymous
+                                        #   flow, real PDF + EPUB rendering, dictionary, TTS, recall prompts
 pnpm --filter @booklet/extension test:e2e   # e2e: loads the real built extension in Chromium (headed -- see its README)
 ```
+
+The web unit runner (#165) is newer than the rest: until it existed, ~19,000
+lines of the app's own logic had no runner at all, and three real bugs shipped
+that a sub-second test here would have caught — both chunk-0 sizing bugs in
+the TTS chunker, the read-along section anchor resolving to the wrong element
+at a text-node boundary, and the highlight popover dismissing itself on a
+scroll event that arrived after it opened. Every one surfaced as a slow,
+intermittent e2e failure that read like flakiness. Rendering React there needs
+a 40-line local helper rather than `@testing-library/react`; see
+`apps/web/vitest.config.ts` for why (three React copies, and a resolution
+order Vite never gets to influence).
 
 `apps/web/e2e` covers the local/anonymous save→read→highlight loop, the
 real PDF (`pdf-reader.spec.ts`) and EPUB (`epub-reader.spec.ts`) readers
@@ -354,24 +419,36 @@ generation and playback, not mocked, covering the persistent player bar,
 read-along highlighting, and a regression guard against a chunking bug
 that once turned one Wikipedia article into 2,283 separate TTS
 requests**, Kindle import/export
-(`kindle-sync.spec.ts`), the command palette, smart/nested collections,
-duplicate detection, related articles, and tags/search/reading-progress
-persistence (`tags-search-progress.spec.ts`). `apps/mobile` has no
-automated test suite (`tsc --noEmit` only); its web target was verified
-manually the same way, see `apps/mobile/README.md`.
+(`kindle-sync.spec.ts`), recall prompts (`recall-prompts.spec.ts`), the
+command palette, smart/nested collections, duplicate detection, related
+articles, and tags/search/reading-progress persistence
+(`tags-search-progress.spec.ts`). `apps/mobile` has no automated test suite
+(`tsc --noEmit` only); its web target was verified manually the same way, see
+`apps/mobile/README.md`.
 
-`.github/workflows/ci.yml` runs the shared/api/web suites (the API and web
-e2e jobs against a real Postgres service container), typecheck/lint for
-every package, the extension's e2e suite under `xvfb`, and a `docker-build`
-job that builds both production images and smoke-tests the API image
-against a real Postgres container — all green on every push to `main`.
+### CI
 
-The same pipeline exists for GitLab in [`.gitlab-ci.yml`](.gitlab-ci.yml) —
-same seven jobs, ported rather than copied (service hostnames, service
-readiness, and Docker-in-Docker networking all differ). See
-[`docs/CI_GITLAB.md`](docs/CI_GITLAB.md) for what changed, the project
-settings the file cannot set itself, and a note on runner minutes worth
-reading before switching.
+Two equivalent pipelines exist, and **it is not safe to assume either is
+running on your pushes right now**:
+
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — seven jobs:
+  typecheck/lint for every package, the shared/web unit suites, the API suite
+  and both e2e suites against a real Postgres service container, the
+  extension's under `xvfb`, a Kokoro TTFA benchmark, and a `docker-build` job
+  that builds both production images and smoke-tests the API image. Its runs
+  have gone green on real hardware — but this repository's Actions allowance
+  is exhausted, so it is dormant.
+- [`.gitlab-ci.yml`](.gitlab-ci.yml) — the same seven jobs, ported rather than
+  copied (service hostnames, service readiness, and Docker-in-Docker
+  networking all genuinely differ). It has never executed, because the
+  repository is on GitHub. See [`docs/CI_GITLAB.md`](docs/CI_GITLAB.md) for
+  what changed, the project settings the file cannot set itself, and the
+  runner-minutes analysis worth reading before switching — GitLab.com's free
+  tier is *smaller* than Actions'.
+
+Until one of them is genuinely live, `pnpm verify` above is the stand-in.
+`DEPLOYMENT.md`'s "Which CI config is live" has the full picture, including
+why neither file should be deleted.
 
 ## Roadmap
 
@@ -407,8 +484,8 @@ breakdown, one issue per item below:
   more than a handful of screens; real page/CFI rendering for mobile
   PDF/EPUB (needs a WebView bridge to reuse the web app's pdfjs-dist/
   epub.js code, or a native renderer — a real project of its own, not a
-  scaffold-stage add-on); a shareable read-only link for a single article
-  or highlight (Markdown/Anki export already ship)
+  scaffold-stage add-on); prompt authoring on mobile, which honors a recall
+  prompt written on the web but cannot yet write one
 
 See each app's own README (`apps/mobile`, `apps/extension`) for exactly
 what's verified and what isn't within these constraints.
@@ -447,8 +524,11 @@ packages/
                   (request/response DTOs, highlight anchoring, SM-2 resurfacing)
 docker-compose.yml, apps/*/Dockerfile, DEPLOYMENT.md
                   Deployment configs (see DEPLOYMENT.md for verification status)
-.github/workflows/ci.yml
-                  CI: typecheck/lint, unit + integration + e2e tests, Docker build
+.github/workflows/ci.yml, .gitlab-ci.yml
+                  CI: typecheck/lint, unit + integration + e2e tests, Docker build.
+                  Two equivalent pipelines -- see DEPLOYMENT.md for which is live
+scripts/verify.mjs
+                  `pnpm verify`: everything this machine can check, and what it can't
 ```
 
 ## Getting started

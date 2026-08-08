@@ -14,8 +14,10 @@
 # The actual `docker build`/`docker run` commands are still unverified in
 # this environment (Docker Desktop installed but its daemon needs WSL2,
 # which isn't -- installing it needs a restart, out of scope to do
-# unilaterally); see .github/workflows/ci.yml's docker-build job for that
-# verification instead, which does run on a real runner. What *is* verified
+# unilaterally); CI's docker-build job is what covered that instead, on a
+# real runner. Note that job is currently dormant along with the rest of the
+# Actions workflow -- see DEPLOYMENT.md's "Which CI config is live", and run
+# the build by hand before trusting a change here. What *is* verified
 # directly: `pnpm --filter @booklet/api build` (see scripts/build.mjs) then
 # `node dist/index.js` under plain Node with no tsx/bundler help at
 # runtime -- which is exactly what this image's CMD does -- actually boots
