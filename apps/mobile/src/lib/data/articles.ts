@@ -3,7 +3,7 @@
  * lib/data/articles.ts. Screens call these with the current auth state
  * instead of talking to lib/local/db.ts or lib/api.ts directly.
  */
-import type { Article, ArticleListResponse, ExtractedContent } from "@booklet/shared";
+import type { Article, ArticleListResponse, ArticleStatus, ExtractedContent } from "@booklet/shared";
 import { canonicalizeUrl } from "@booklet/shared";
 import { apiFetch, ApiError } from "../api";
 import { generateLocalId, localArticles } from "../local/db";
@@ -15,15 +15,14 @@ async function extractContent(url: string): Promise<ExtractedContent> {
 }
 
 /**
- * Deliberately narrower than the web app's articles.ts, which also exposes
- * loadTrash / trashArticle / restoreArticle / permanentlyDeleteArticle /
- * emptyTrash, plus rename, tags, favorite, status, progress and
- * send-to-Kindle. None of those has a control on any mobile screen. The one
- * consequence worth naming: because nothing here can ever set `deletedAt`,
- * the local branch below does not filter trashed rows out the way
- * apps/web/src/lib/local/db.ts's localArticles.getAll() does. If a Trash
- * feature ever lands here, that filter has to land with it -- otherwise
- * deleted articles come straight back into the library list.
+ * Still narrower than the web app's articles.ts -- no tags, progress,
+ * listening-position or send-to-Kindle, since mobile has no screen that needs
+ * them yet -- but the everyday library actions now have counterparts here:
+ * favorite, status, rename, and the whole trash lifecycle
+ * (trash / restore / permanentlyDelete / emptyTrash / loadTrash). The trash
+ * filter the older comment warned about landed with them, in
+ * lib/local/db.ts's localArticles.getAll(); a soft-deleted local article no
+ * longer comes back into the library list.
  */
 export async function loadArticles(authenticated: boolean): Promise<Article[]> {
   if (!authenticated) return localArticles.getAll();
@@ -51,6 +50,126 @@ export async function loadArticle(id: string, authenticated: boolean): Promise<A
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;
   }
+}
+
+/** The soft-deleted articles -- the Trash screen's source. Signed in, the
+ * list route returns them under `?trashed=true`; locally they're the
+ * complement of loadArticles (see localArticles.getTrash). */
+export async function loadTrash(authenticated: boolean): Promise<Article[]> {
+  if (!authenticated) return localArticles.getTrash();
+
+  const articles: Article[] = [];
+  let cursor: string | null = null;
+  let hasMore = true;
+  while (hasMore) {
+    const query = `limit=100&trashed=true${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res: ArticleListResponse = await apiFetch<ArticleListResponse>(`/api/articles?${query}`);
+    articles.push(...(res.articles as Article[]));
+    cursor = res.nextCursor;
+    hasMore = cursor !== null;
+  }
+  return articles;
+}
+
+// Every write below follows the same shape as the web app's articles.ts: a
+// PATCH when signed in, a read-modify-put against the local store when not.
+// AsyncStorage has no partial-update primitive, so the local branch always
+// writes the whole record back -- which is why these take the full Article
+// rather than an id (except the two that only ever have an id in hand).
+
+export async function updateArticleStatus(
+  article: Article,
+  status: ArticleStatus,
+  authenticated: boolean,
+): Promise<Article> {
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+  }
+  const now = new Date().toISOString();
+  const updated: Article = {
+    ...article,
+    status,
+    readAt: status === "READING" && !article.readAt ? now : article.readAt,
+    archivedAt: status === "ARCHIVED" ? (article.archivedAt ?? now) : status === "UNREAD" ? null : article.archivedAt,
+    updatedAt: now,
+  };
+  await localArticles.put(updated);
+  return updated;
+}
+
+export async function updateArticleFavorited(
+  article: Article,
+  favorited: boolean,
+  authenticated: boolean,
+): Promise<Article> {
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, { method: "PATCH", body: JSON.stringify({ favorited }) });
+  }
+  const updated: Article = { ...article, favorited, updatedAt: new Date().toISOString() };
+  await localArticles.put(updated);
+  return updated;
+}
+
+/** Replaces the title -- there's no separate "original" kept to fall back to,
+ * same as the web app. */
+export async function renameArticle(article: Article, title: string, authenticated: boolean): Promise<Article> {
+  const cleaned = title.trim();
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: cleaned }),
+    });
+  }
+  const updated: Article = { ...article, title: cleaned, updatedAt: new Date().toISOString() };
+  await localArticles.put(updated);
+  return updated;
+}
+
+/** The everyday "delete": moves the article to Trash (a soft delete via
+ * `deletedAt`), recoverable for 30 days. permanentlyDeleteArticle is the
+ * irreversible one the Trash screen uses. */
+export async function trashArticle(article: Article, authenticated: boolean): Promise<Article> {
+  const now = new Date().toISOString();
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ deletedAt: now }),
+    });
+  }
+  const updated: Article = { ...article, deletedAt: now, updatedAt: now };
+  await localArticles.put(updated);
+  return updated;
+}
+
+export async function restoreArticle(article: Article, authenticated: boolean): Promise<Article> {
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${article.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ deletedAt: null }),
+    });
+  }
+  const updated: Article = { ...article, deletedAt: null, updatedAt: new Date().toISOString() };
+  await localArticles.put(updated);
+  return updated;
+}
+
+export async function permanentlyDeleteArticle(id: string, authenticated: boolean): Promise<void> {
+  if (authenticated) {
+    await apiFetch(`/api/articles/${id}`, { method: "DELETE" });
+    return;
+  }
+  await localArticles.delete(id);
+}
+
+export async function emptyTrash(authenticated: boolean): Promise<void> {
+  if (authenticated) {
+    await apiFetch("/api/articles/trash", { method: "DELETE" });
+    return;
+  }
+  // A batched deleteMany, not one delete() per row -- concurrent single-id
+  // deletes race the shared JSON map (see localArticles.deleteMany's note).
+  const trashed = await localArticles.getTrash();
+  await localArticles.deleteMany(trashed.map((a) => a.id));
 }
 
 export async function saveArticleFromUrl(url: string, authenticated: boolean): Promise<Article> {
