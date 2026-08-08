@@ -120,6 +120,8 @@ if (parsedDb && (await reachable(parsedDb.host, parsedDb.port))) {
   skip("unit @booklet/api", `no database at ${parsedDb ? `${parsedDb.host}:${parsedDb.port}` : dbUrl} — start one with 'pnpm dev:db'`);
 }
 
+let needsE2eSetupNote = false;
+
 if (withE2e) {
   const webUp = await reachable("127.0.0.1", 3000);
   const apiUp = await reachable("127.0.0.1", 4000);
@@ -135,10 +137,12 @@ if (withE2e) {
     ]);
   } else {
     const missing = [!apiUp && "api :4000", !webUp && "web :3000"].filter(Boolean).join(" and ");
-    skip("e2e web", `${missing} not running — start with 'pnpm dev:api' and 'pnpm dev:web'`);
+    skip("e2e web", `${missing} not running — see the e2e setup note below`);
+    needsE2eSetupNote = true;
   }
 } else {
-  skip("e2e web", "not requested — pass --e2e (needs dev servers running)");
+  skip("e2e web", "not requested — pass --e2e (needs dev servers, see note below)");
+  needsE2eSetupNote = true;
 }
 
 const failed = results.filter((r) => r.status === "fail");
@@ -149,6 +153,27 @@ console.log(`\n${BOLD}Summary${OFF}`);
 console.log(`  ${GREEN}${passed.length} passed${OFF}${failed.length ? `, ${RED}${failed.length} failed${OFF}` : ""}${skipped.length ? `, ${YELLOW}${skipped.length} skipped${OFF}` : ""}`);
 for (const r of failed) console.log(`  ${RED}fail${OFF} ${r.name}`);
 for (const r of skipped) console.log(`  ${YELLOW}skip${OFF} ${r.name} — ${r.note}`);
+
+// "Start the dev servers" is not enough, and finding that out costs a full
+// 8-minute run: without these the API refuses to fetch the fixture server on
+// 127.0.0.1 (its SSRF guard, correctly) and every article-saving spec fails
+// on a modal that never closes, while the auth limits run out partway through
+// and take down whichever specs happen to be next. Both failures look like
+// broken code rather than missing setup.
+if (needsE2eSetupNote) {
+  console.log(`\n${BOLD}Running the e2e suite${OFF}`);
+  console.log(`  ${DIM}pnpm dev:db                       # or point DATABASE_URL at any Postgres`);
+  console.log(`  DATABASE_URL=... \\`);
+  console.log(`  EXTRACTION_ALLOW_PRIVATE_ADDRESSES=true \\   # ignored under NODE_ENV=production`);
+  console.log(`  AUTH_ATTEMPT_RATE_LIMIT_MAX=100000 \\        # the suite signs up dozens of times`);
+  console.log(`  AUTH_REFRESH_RATE_LIMIT_MAX=100000 \\`);
+  console.log(`  GLOBAL_RATE_LIMIT_MAX=100000 \\`);
+  console.log(`    pnpm dev:api &`);
+  console.log(`  pnpm dev:web &`);
+  console.log(`  pnpm verify --e2e`);
+  console.log(`  ${DIM}(set PLAYWRIGHT_CHROMIUM_EXECUTABLE if a browser is already installed`);
+  console.log(`   at a build number Playwright doesn't recognise.)${OFF}`);
+}
 
 // The part that keeps a green run honest.
 console.log(`\n${BOLD}Not covered by this command, anywhere${OFF}`);
