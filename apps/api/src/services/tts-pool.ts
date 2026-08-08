@@ -436,6 +436,26 @@ export function ttsPoolStatus(): { started: boolean; workers: number; loaded: nu
 }
 
 /**
+ * How many real (non-speculative) requests are waiting for a worker.
+ *
+ * Exported so /api/tts can shed load before enqueuing. The route's rate limit
+ * is per IP over ten minutes, which bounds one caller and says nothing about
+ * how many callers there are -- so the queue is the only place the aggregate
+ * is visible, and unbounded queueing on a route where each item costs a
+ * multi-second forward pass means every one of those callers holds a
+ * connection open waiting for audio that arrives long after they stopped
+ * caring.
+ *
+ * Deliberately excludes lowPriorityQueue: warming is already drained only by
+ * capacity that would otherwise be idle, so counting it would shed real
+ * requests on the strength of work that is by construction not competing
+ * with them.
+ */
+export function ttsQueueDepth(): number {
+  return queue.length;
+}
+
+/**
  * Requests already being served, keyed identically to the cache. Without
  * this, N concurrent requests for the same chunk all miss the cache (nothing
  * is written until the first one *finishes*), all occupy a worker, and all
