@@ -342,7 +342,7 @@
   <button class="mobile-toc-toggle" id="mobileTocToggle" type="button">☰ Contents</button>
   <nav class="toc" id="toc">
     <div class="toc-title">📖 Booklet</div>
-    <div class="toc-sub">The Coding Bible — v6, living document</div>
+    <div class="toc-sub">The Coding Bible — v7, living document</div>
     <ol>
       <li><a href="#part-0">0. How to Use This Document</a></li>
       <li><a href="#part-1">I. The Big Picture</a>
@@ -416,7 +416,21 @@
           <li><a href="#post-deploy-roadmap">The roadmap after launch</a></li>
         </ol>
       </li>
-      <li><a href="#part-10">XI. Changelog of This Document</a></li>
+      <li>
+        <a href="#part-audit">XI. The Audit: What a Full Sweep Actually Found</a>
+        <ol>
+          <li><a href="#audit-shapes">The four shapes almost everything fell into</a></li>
+          <li><a href="#audit-scope">Confining a credential beats checking it everywhere</a></li>
+          <li><a href="#audit-time">Two bugs about time</a></li>
+          <li><a href="#audit-dedupe">The direction a failure points</a></li>
+          <li><a href="#audit-blank">Eight pages that showed nothing</a></li>
+          <li><a href="#audit-bundle">Two libraries on routes that never used them</a></li>
+          <li><a href="#audit-shed">Rate limiting bounds one caller</a></li>
+          <li><a href="#audit-clients">The secondary clients</a></li>
+          <li><a href="#audit-nonfindings">What the audit did not find</a></li>
+        </ol>
+      </li>
+      <li><a href="#part-10">XII. Changelog of This Document</a></li>
     </ol>
   </nav>
 
@@ -3929,10 +3943,425 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <hr class="divider">
 
+      <section id="part-audit">
+        <h2><span class="part-label">Part XI</span>The Audit: What a Full Sweep Actually Found</h2>
+        <p>
+          Every part above this one describes decisions made while building.
+          This one describes what was found by going back over the finished
+          thing and trying to break it — a full pass across the API routes,
+          the services, the shared logic, the web app, and the two secondary
+          clients, with the standing rule that nothing counted as a bug
+          until it had been made to happen.
+        </p>
+        <p>
+          That rule is the reason this part is worth reading. A list of
+          things that <em>look</em> wrong is cheap and mostly noise. The
+          findings below each came with a reproduction and a failing test
+          first, which changed the outcome more than once: several things
+          that read as bugs were not, and several that read as fine were
+          considerably worse than they looked.
+        </p>
+
+        <h3 id="audit-shapes">The four shapes almost everything fell into</h3>
+        <p>
+          Sorted by kind rather than by file, because the kinds repeat and
+          the files do not. If there is one thing to take from this part, it
+          is that a codebase's bugs cluster by <em>mechanism</em>, and once
+          you have named the mechanism you can go find the rest of them.
+        </p>
+
+        <div class="callout warn">
+          <span class="callout-label">1. The throw that arrives from outside control flow</span>
+          <p>
+            The most dangerous class in this codebase, because a
+            <code>try/catch</code> around the call site does not catch it and
+            the consequence is the whole process rather than one request.
+          </p>
+          <p>
+            #163 was the first: a failed <code>tesseract.js</code> download
+            threw from a <code>nextTick</code> callback, so one unauthenticated
+            PDF upload could take the API down if the CDN was unreachable. The
+            audit found the same shape twice more in the TTS pool. A
+            <code>ChildProcess</code> is an <code>EventEmitter</code>, and an
+            <code>EventEmitter</code> with no <code>"error"</code> listener
+            <em>rethrows</em> — there was no listener at all. Worse,
+            <code>send()</code> on a closed IPC channel does not throw where
+            you can catch it; it schedules
+            <code>emit("error", ERR_IPC_CHANNEL_CLOSED)</code> on the next
+            tick. And a dead worker was reachable: Node delivers
+            <code>"disconnect"</code> strictly before <code>"exit"</code>, and
+            only <code>"exit"</code> removed a worker from the pool, so every
+            crashed worker spent a real interval sitting in the array
+            advertising itself as idle with a channel nobody could write to.
+            Any request arriving in that window ended the server.
+          </p>
+          <p>
+            The fix is the same each time and it is not "add a try/catch":
+            give the emitter a listener so the failure re-enters ordinary
+            control flow. <strong>If you add a child process, a stream, or
+            anything else that is an EventEmitter, it needs an
+            <code>"error"</code> handler before it needs anything
+            else.</strong>
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <span class="callout-label">2. The number that is quietly NaN</span>
+          <p>
+            <code>Number(process.env.X || 200)</code> looks like it has a
+            default. It does not: <code>TTS_CACHE_MAX_MB="200MB"</code> — a
+            units typo, and the most likely way anyone gets this wrong —
+            yields <code>NaN</code>, and <code>currentBytes &gt; NaN</code>
+            is <code>false</code>. So the misconfiguration did not fall back
+            to 200 MB; it switched eviction <em>off</em> and let the
+            "bounded" in-memory cache grow until the container was OOM-killed.
+            Measured: 800 MB retained against a 200 MB cap, and it would have
+            retained any amount.
+          </p>
+          <p>
+            Every comparison against <code>NaN</code> is false, which means a
+            <code>NaN</code> limit is not a small limit or a large one — it is
+            <em>no limit</em>, and it fails in the permissive direction every
+            time. Environment numbers are now validated and a bad one is
+            logged, because a silent fallback would leave the operator
+            believing in a cap that is not in force.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <span class="callout-label">3. The concurrent read-modify-write</span>
+          <p>
+            <code>inlineImages</code> ran four workers, each computing its
+            budget as <code>MAX_TOTAL_IMAGE_BYTES - totalBytes</code>
+            <em>before</em> any of them had added its own image. All four
+            sized themselves against a budget the other three were already
+            spending. Measured 20 MB inlined under a 15 MB cap, with a real
+            ceiling of 24 MB — on input a hostile page fully controls, which
+            then lands in <code>Article.html</code> and is re-sent on every
+            open.
+          </p>
+          <p>
+            The fix is not a lock; it is to re-check and commit the budget
+            after the <code>await</code>, with no <code>await</code> in
+            between, so the test and the increment are atomic with respect to
+            the other workers. <strong>A limit read before an await and
+            enforced after it is not a limit.</strong>
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <span class="callout-label">4. The validated-once, used-forever value</span>
+          <p>
+            Webhook URLs were checked when registered and never again. That
+            is a bound, not a control: the hostname is resolved on every
+            delivery, so a record that pointed somewhere public when saved and
+            was re-pointed at <code>169.254.169.254</code> afterwards was
+            fetched happily — as was any public URL that answered
+            <code>302</code>, since <code>fetch</code> follows redirects by
+            default.
+          </p>
+          <p>
+            This one was confirmed live rather than argued: a delivery aimed
+            at the metadata endpoint came back with a real <code>403</code>
+            status code, and that code lands in the
+            <code>WebhookDelivery</code> row that
+            <code>GET /api/webhooks/:id/deliveries</code> hands straight back
+            to the caller. That makes it an oracle, not a blind SSRF —
+            enough to map an internal network and learn which ports answer.
+          </p>
+          <p>
+            Redirects are now not followed <em>at all</em> here, which is a
+            deliberate departure from how extraction and RSS handle the same
+            risk. Those are GETs of public documents, so re-checking each hop
+            is enough. This is a <em>signed</em> POST: replaying it to a
+            redirect target would hand that target both the payload and a
+            valid <code>X-Booklet-Signature</code> for it, turning a
+            <code>302</code> into a way to make this server vouch for a body
+            to a host the user never registered. A webhook endpoint is a fixed
+            URL by definition, so a redirect is reported as the
+            misconfiguration it is.
+          </p>
+        </div>
+
+        <h3 id="audit-scope">Confining a credential beats checking it everywhere</h3>
+        <p>
+          The single worst finding was not a crash. Personal access tokens
+          were accepted by the auth hook on <em>every</em> route, while the
+          internal <code>/api</code> routes carry no scope check at all —
+          they had only ever been reached by a session, so there was nothing
+          to check. The result was that <code>scopes: ["read"]</code>, the
+          thing you hand a third-party integration precisely because it
+          cannot change anything, was decorative.
+        </p>
+        <p>
+          Confirmed by injection: a read-only token could
+          <code>PATCH</code> and <code>DELETE</code> articles, mint itself a
+          fresh read+write token via <code>POST /api/tokens</code>, mint a
+          bearer podcast URL for the audio of the entire library, and
+          <code>DELETE /api/auth/me</code> — the account really went, which
+          cascaded four later tests into 404s and is how the severity became
+          obvious.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why confinement, not per-route checks</span>
+          <p>
+            The obvious fix is to add a scope check to each internal route.
+            That fix has to be remembered on every route added afterwards,
+            forever, and the failure mode is silence. The credential is now
+            confined instead: a PAT authenticates only where the matched
+            route pattern begins <code>/api/v1/</code> — the surface the
+            developer settings page already told users PATs were for. Same
+            reasoning as the podcast feed token being confined to its own URL.
+          </p>
+          <p>
+            Matched on <code>request.routeOptions.url</code>, never on
+            <code>request.url</code>. The raw URL is a string the caller
+            wrote; anything that normalizes differently between the check and
+            the router — a <code>..</code> segment, an encoded slash — makes
+            the two disagree, and a security check that disagrees with the
+            router is not a check. The route pattern is what the router
+            actually matched, so they cannot.
+          </p>
+          <p>
+            The deeper point: <strong>a token that can mint a token is not
+            revocable</strong>, because revoking it leaves behind the one it
+            made. Any credential that can reach a credential-issuing endpoint
+            has effectively infinite lifetime, whatever its expiry says.
+          </p>
+        </div>
+
+        <h3 id="audit-time">Two bugs about time, and why both were invisible</h3>
+        <p>
+          <code>startOfDay</code> returns <em>local</em> midnight, and
+          consecutive local midnights are 23 or 25 hours apart across a DST
+          transition, not 24. Stepping between days with a fixed
+          <code>86_400_000</code> therefore lands an hour to one side and
+          matches nothing. A reader in America/New_York who finished
+          something on the 6th, 7th, 8th and 9th of March 2026 got a current
+          streak of 1 instead of 4. The same data in UTC gave 4. It happens
+          to every user in a DST timezone, twice a year, and it destroys the
+          streak the entire stats page is built around — which reads as "the
+          app forgot my streak", not as a date bug. Calendar arithmetic now
+          goes through the <code>Date</code> constructor, which also makes
+          month and year boundaries free.
+        </p>
+        <p>
+          The second: SM-2's interval is <code>previous × easinessFactor</code>
+          and nothing in it converges. Running the recurrence out at the
+          quality value the <em>Remembered</em> button maps to, review 20
+          produces roughly 3.5 billion days — past <code>Int4</code>'s
+          2,147,483,647, so the write is rejected — and review 21 throws
+          <code>RangeError: Invalid time value</code> out of
+          <code>new Date(...).toISOString()</code>. That is a bare throw from
+          a pure function every caller treats as total, on the client, while
+          recording a review the reader has already given. Capped at a
+          hundred years: a highlight due in 5.8 million years and one due in
+          a century are the same highlight.
+        </p>
+
+        <h3 id="audit-dedupe">The direction a failure points matters more than its size</h3>
+        <p>
+          <code>canonicalizeUrl</code> re-joined query parameters by pasting
+          decoded values back between <code>=</code> and <code>&amp;</code>.
+          Since <code>searchParams.entries()</code> decodes, a value's own
+          separators became structural ones: <code>?a=1%26b=2</code> (one
+          parameter whose value is the literal <code>1&amp;b=2</code>) and
+          <code>?a=1&amp;b=2</code> (two parameters) both produced
+          <code>a=1&amp;b=2</code>.
+        </p>
+        <p>
+          Two different pages, one canonical URL — so saving the second after
+          the first is silently discarded as a duplicate. The comment at the
+          top of the tracking-parameter list already said this was the
+          direction that must not fail, about a different mechanism.
+          Re-encoding changes stored values for URLs containing escaped
+          characters, so previously-saved rows miss dedupe once. That is the
+          right way round on purpose: <strong>a missed dedupe saves a second
+          copy the user can see and delete; a false dedupe drops an article
+          and says nothing.</strong>
+        </p>
+
+        <h3 id="audit-blank">Eight pages that showed nothing, forever</h3>
+        <p>
+          A pattern repeated across the web app: <code>refresh()</code> with a
+          <code>.then(() =&gt; setLoaded(true))</code> and no
+          <code>.catch</code>, gated by <code>if (!loaded) return null</code>.
+          When the API was unreachable the result was an empty frame — no
+          spinner, no message, no retry — which to a user reads as "my
+          library is gone". The highlights page was worse than blank: it
+          rendered its empty state, so a failed request became the claim
+          <em>"No highlights yet"</em>, which is a statement about their
+          account rather than about the network.
+        </p>
+        <p>
+          The fix is deliberately narrow. Only the <em>first</em> load turns
+          into an error block; a failed background refresh over content
+          already on screen stays quiet, because replacing working content
+          with an error is its own bug. The same audit found the write side
+          of this: highlight create and delete, note save, status change,
+          rename, tag add, collection membership, export and CSV import all
+          failed silently — the sidebar's comment even claimed it surfaced
+          errors inline, and it did not.
+        </p>
+
+        <h3 id="audit-bundle">Two libraries on routes that never used them</h3>
+        <p>
+          <code>epub.js</code> and its bundled JSZip — a 501 KB chunk — sat in
+          the initial JavaScript of <code>/highlights</code>,
+          <code>/resurface</code> and every reader page, for exactly two
+          things: reading a CFI's spine position, and comparing two CFIs.
+          <code>@sentry/browser</code> (81 KB) was in the shared entry of
+          every route whether or not it was configured, while
+          <code>lib/rum.ts</code> two files away already imported Datadog
+          dynamically and explained why.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">How the CFI replacement was made trustworthy</span>
+          <p>
+            Replacing a dependency with a hand-written parser is normally a
+            bad trade, because a parser that is merely plausible is
+            <em>worse</em> than the library it replaced: a subtly mis-ordered
+            highlight list looks exactly like a correctly-ordered one, and
+            nobody will ever notice.
+          </p>
+          <p>
+            So the test asserts no hand-written expectations. It runs the
+            local implementation and the real <code>EpubCFI</code> over a
+            corpus of CFI shapes that actually occur, compares all 196 ordered
+            pairs in both directions, and requires identical answers. The real
+            library is imported in the test, where its size costs nothing.
+            <strong>When you replace something, the replacement's test should
+            be a differential against the original, not a restatement of what
+            you think it does.</strong>
+          </p>
+        </div>
+
+        <h3 id="audit-shed">Rate limiting bounds one caller, not the aggregate</h3>
+        <p>
+          <code>/api/tts</code> is unauthenticated and rate-limited per IP
+          over ten minutes. That bounds one caller and says nothing about how
+          many callers there are, so nothing stood between a few hundred
+          distinct addresses and an unbounded queue of multi-second Kokoro
+          forward passes.
+        </p>
+        <p>
+          Queueing is the wrong response to more work than the machine can do.
+          Every waiting caller holds a connection open for audio that arrives
+          long after they stopped caring — and because the client fetches
+          chunks in order, someone waiting two minutes for chunk 3 hears
+          <em>nothing at all</em> rather than something slightly late. The
+          route now sheds with <code>503</code> and <code>Retry-After</code>
+          past a queue depth of eight per worker, roughly forty seconds of
+          backlog. The client's chunk loop already tolerates a failed chunk,
+          so this degrades to a gap rather than a hang. Speculative warming is
+          excluded from the count, since it is drained only by capacity that
+          would otherwise be idle and therefore is not competing.
+        </p>
+
+        <h3 id="audit-clients">The secondary clients had the worst finding of all</h3>
+        <p>
+          The browser extension's background script had <em>no sender check</em>.
+          With no <code>externally_connectable</code> declared, the default is
+          not "nobody" — any other installed extension could
+          <code>sendMessage</code> to it and drive authenticated API calls
+          with the user's token. The fix is one comparison,
+          <code>sender.id !== chrome.runtime.id</code>, and nothing else in
+          the extension was standing in for it.
+        </p>
+        <p>
+          Both clients also read their stored session with a bare cast. A
+          record missing <code>accessTokenExpiresAt</code> makes the expiry
+          comparison <code>NaN &lt;= now</code>, which is <code>false</code> —
+          so garbage read as a <em>valid</em> session, every request went out
+          as <code>Bearer undefined</code>, and the app sat on the library
+          screen 401ing with no route back to the login form. The same NaN
+          rule as the cache limit above, in a completely different file, with
+          a completely different consequence.
+        </p>
+        <p>
+          And #164 — the migration bug that silently emptied the library on
+          signup — was reproduced on mobile, where the fix had never been
+          applied: the entire local library posted as one body against a 32 MB
+          cap, with the error swallowed by <code>App.tsx</code>. That route,
+          <code>POST /api/sync/import</code>, has now been wrong in six
+          separate fields across four passes. It is the seam where "accounts
+          are optional and exist only for sync" is actually tested, and every
+          single failure has been silent.
+        </p>
+
+        <h3 id="audit-nonfindings">What the audit did not find, and why that is worth recording</h3>
+        <p>
+          Negative results are evidence too, and they are the part of an audit
+          that never gets written down. Checked and clean: every
+          <code>:id</code> route scopes by <code>userId</code> (the one gap
+          was collection <code>parentId</code> on create, now fixed); no route
+          spreads <code>request.body</code> into a Prisma write; no raw SQL
+          outside the readiness probe's <code>SELECT 1</code>; no open
+          redirect; no regex with nested quantifiers; pagination cursors
+          neither leak nor error across tenants; share slugs are 128-bit and
+          revocation is a row delete, so revoked and never-existed are
+          indistinguishable; password comparison is
+          <code>timingSafeEqual</code> and unknown emails still run scrypt
+          against a dummy hash.
+        </p>
+        <p>
+          Three things were suspected and deliberately <em>not</em> changed,
+          which matters as much as the fixes. A concurrent-rebuild race in the
+          public highlight aggregate is real but self-healing, and it is a
+          privacy-sensitive path where a speculative fix is worse than a known
+          bug. <code>fetchHtml</code> decodes as UTF-8 unconditionally, so a
+          Shift_JIS page extracts as mojibake — real, but the fix is a
+          charset-detection feature, not a patch. And an access token outlives
+          session revocation by up to fifteen minutes; closing that means a
+          session lookup on every request, which is a latency and
+          architecture decision, not a route-layer one. It is flagged in
+          <a href="#part-ship">Part X</a> as something to decide before
+          launch rather than discover after it.
+        </p>
+
+        <div class="callout">
+          <span class="callout-label">The one habit worth taking from this part</span>
+          <p>
+            Nothing above was found by reading carefully. Every one of them
+            was found by writing something that ran the real code and
+            watching what it did — the real pool against a stand-in worker
+            whose channel had gone, the real extractor against a real PDF,
+            the real Readability against a crafted page, a real delivery to
+            a real metadata endpoint. Several of the reproductions
+            contradicted the hypothesis that motivated them, and that is the
+            point: a bug you have not reproduced is a guess about a bug, and
+            the fix for a guess is a guess.
+          </p>
+        </div>
+      </section>
+
+      <hr class="divider">
+
       <section id="part-10">
-        <h2><span class="part-label">Part XI</span>Changelog of This Document</h2>
+        <h2><span class="part-label">Part XII</span>Changelog of This Document</h2>
         <table>
           <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-08</td>
+            <td>
+              v7 — added <a href="#part-audit">Part XI, The Audit</a>: what a
+              full sweep across the routes, services, shared logic, web app
+              and both secondary clients actually found, organised by
+              mechanism rather than by file because the mechanisms repeat.
+              The four recurring shapes (a throw arriving from outside
+              control flow, a limit that is quietly <code>NaN</code>, a
+              concurrent read-modify-write, and a value validated once and
+              trusted forever), why confining a credential beats checking it
+              on every route, the DST and integer-overflow bugs in the
+              scheduling maths, the eight pages that rendered nothing forever
+              on a failed load, the two libraries shipped to routes that
+              never used them and how the replacement was made trustworthy,
+              why rate limiting bounds one caller rather than the aggregate,
+              and the extension's missing sender check. Includes the negative
+              results and the three things deliberately left alone, since an
+              audit that only records its findings is not reproducible.
+            </td>
+          </tr>
           <tr>
             <td>2026-08-08</td>
             <td>
@@ -4175,7 +4604,7 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <footer class="doc-footer">
         <p>
-          Booklet — Technical Documentation, v6. Written collaboratively by
+          Booklet — Technical Documentation, v7. Written collaboratively by
           the project's owner and Claude (Anthropic), grounded in the real
           implementation and real development history rather than written
           from scratch after the fact. Keep it that way: when this file is
