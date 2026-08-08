@@ -40,8 +40,63 @@ unpacked** → select `apps/extension/dist`. In Firefox:
 select `apps/extension/dist/manifest.json`.
 
 Points at `http://localhost:4000` by default (see `src/config.ts`). Change
-that -- and the matching `host_permissions` entry in `manifest.json` -- to
-point at a deployed API instead.
+that -- and the matching `host_permissions` entry in `manifest.json`, and the
+`content_scripts.exclude_matches` entry for the web app's own origin -- to
+point at a deployed API and web app instead.
+
+## Permissions
+
+Worth stating plainly, because "what can this thing see" is the question a
+reviewer and a user both ask:
+
+- `storage` -- the session token and each page's pending highlights, both in
+  `chrome.storage.local`.
+- `contextMenus` -- "Save page to Booklet" and the log-out item on the icon.
+- `activeTab` -- the popup and the background script read the current tab's
+  URL, which needs either this or the far broader `tabs`. `activeTab` is
+  granted only for the tab the user just invoked the extension on, and only
+  until they navigate away, so it is the narrower of the two by a long way.
+- `host_permissions: ["http://localhost:4000/*"]` -- the API, and nothing
+  else. Deliberately not `<all_urls>`: the extension never fetches a page's
+  content itself, the API does the extraction server-side from the URL it is
+  given.
+
+The one broad grant is the content script's `matches`, which covers every
+http(s) page. Highlighting cannot ask the user to declare up front which
+pages they might highlight on, so that breadth is inherent to the feature
+rather than incidental. Two things bound it:
+
+- **Nothing is injected until the feature is used.** `content.ts` registers
+  listeners at `document_idle` and builds nothing; the shadow-root host and
+  the `<mark>` stylesheet are created on the first real text selection, the
+  first click on an existing mark, or a page that already has stored
+  highlights. A page the user only reads is left byte-for-byte alone. See
+  `ensureUi()`.
+- **`exclude_matches` skips the Booklet web app itself**, whose reader has
+  its own highlighting UI -- two toolbars fighting over the same selection is
+  a conflict, not a feature.
+
+The shadow root is `mode: "open"`, so a page's own scripts can reach into the
+extension's UI. That is a deliberate tradeoff, not an oversight: `closed`
+would hide the toolbar from Playwright too, which is how `e2e/extension.spec.ts`
+drives it, and there is nothing behind it worth hiding -- no token, and the
+`<mark>` elements are in the page's DOM regardless.
+
+The session token lives in `chrome.storage.local`, which a web page cannot
+read. A *content script* can, though, and this extension runs one on every
+page -- in an isolated world, so page JavaScript still cannot reach it, but
+that isolation is the only thing between the two. `content.ts` deliberately
+imports nothing from `src/api.ts` for that reason: the import runs in the
+background script, which is also where the token is read.
+
+`src/api.ts` sends `credentials: "include"`, so the API's httpOnly refresh
+cookie rides along with extension requests. It is only actually needed by
+`logout()`, which revokes the server-side session via that cookie. Note that
+`isAllowedOrigin` in the API allows *any* `chrome-extension://` or
+`moz-extension://` origin -- it cannot pin an extension id the way it pins
+`WEB_ORIGIN` -- so any extension on the profile can reach the API
+cross-origin with credentials. It still needs a bearer token to get past
+`requireAuth`, and that token is not in a cookie.
 
 ## Firefox support
 
@@ -112,10 +167,12 @@ coverage now, not one-off manual checks.
 
 ## Highlighting the open web
 
-`src/content.ts` runs on every http(s) page: select text, click **Highlight**,
-and it's painted and stored locally. Once a page has any, a floating bar
-offers **Open in Booklet**, which saves the article and attaches every
-highlight to it.
+`src/content.ts` runs on every http(s) page (except the Booklet web app
+itself): select text, click **Highlight**, and it's painted and stored
+locally. Once a page has any, a floating bar offers **Open in Booklet**,
+which saves the article and attaches every highlight to it. Nothing is
+injected into the page until one of those things actually happens -- see
+Permissions above.
 
 The interesting part is anchoring. Booklet stores highlights against
 `Article.extractedText` -- Readability's output -- which is a *different
@@ -142,7 +199,12 @@ Two things that look like over-engineering and aren't:
 - **The import runs in the background script**, not the content script. The
   page's origin can't reach the API (CORS only allows the extension origin),
   and the session token deliberately lives in extension storage where page
-  scripts can't read it.
+  scripts can't read it. That listener treats its input as untrusted:
+  `isImportRequest` validates the whole message (not just its `type`), and
+  `isTrustedImportSender` requires the sender to be this extension's own
+  content script, in a tab, on the origin the message claims -- because
+  without a declared `externally_connectable`, Chrome lets every other
+  installed extension call `chrome.runtime.sendMessage` here.
 
 Local highlights are cleared only once the server confirms the import, so a
 failure can't silently lose them. Highlights that no longer resolve in the
@@ -165,7 +227,9 @@ matches the same raw-or-canonical way the duplicate check does.
   install/startup, since an MV3 worker is torn down freely and the whole
   thing is one storage read.
 - `src/content.ts` -- the in-page highlighting UI (shadow-root toolbar and
-  bar), injected on every http(s) page.
+  bar). Matched on every http(s) page, but built lazily on first use.
+- `src/messages.ts` -- the content script → background message contract, and
+  the validation the background script runs on it.
 - `src/text-anchor.ts` -- DOM range ↔ text offset mapping, anchor
   re-resolution, and the `<mark>` painting/unpainting.
 - `src/highlight-store.ts` -- per-page pending highlights in
@@ -205,6 +269,26 @@ referenced from both `icons` and `action.default_icon` in `manifest.json`.
 After editing the SVG, regenerate with `pnpm --filter @booklet/extension
 icons` (`icons/render.mjs` -- rasterizes via headless Chromium, already a
 devDependency for e2e, so no image-editing dependency was needed).
+
+### Changed since that pass, and not re-run
+
+`pnpm exec tsc --noEmit`, `pnpm build` and `pnpm lint:firefox` (0 errors) all
+pass, but the Playwright suite above **was not re-run** for these -- it needs
+a headed browser and a live API on :4000. Anything here that the suite covers
+should be re-run before shipping:
+
+- **The in-page UI is built lazily** (`ensureUi()` in `content.ts`) instead of
+  at `document_idle`. The highlight/import flow the suite drives is exactly
+  the path that triggers it, so this is the change most worth re-running.
+- **`manifest.json`** gained `exclude_matches` for the web app's origin and an
+  explicit `all_frames: false`.
+- **The background message listener** validates its input and its sender. The
+  origin check compares `sender.url` (not permission-gated) and deliberately
+  skips rather than fails if the browser supplies no URL at all, so that it
+  cannot take the import down if that assumption is ever wrong.
+- **`getSession`** rejects a malformed stored session instead of treating it
+  as valid, and `content.ts` reports a failed `chrome.storage` write instead
+  of dropping the rejection.
 
 Not yet done: publishing to the Chrome Web Store or addons.mozilla.org
 (both need developer accounts this environment doesn't have).

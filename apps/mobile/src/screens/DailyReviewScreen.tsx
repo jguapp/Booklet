@@ -26,6 +26,7 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
   // by id, not one flag: a single flag would reveal the next card's answer
   // before its question had been asked.
   const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const loadedArticles = await loadArticles(authenticated);
@@ -53,7 +54,22 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
   }, [authenticated]);
 
   useEffect(() => {
-    refresh().finally(() => setLoading(false));
+    let cancelled = false;
+    refresh()
+      .catch(() => {
+        // A rejection here used to be unhandled, and left batchIds at null --
+        // which renders no cards, no "nothing eligible" box and no "done for
+        // today" box, because all three are gated on batchIds. The screen
+        // just sat there blank, permanently, whether the API was down or the
+        // session had expired.
+        if (!cancelled) setError("Couldn't load your review. Check your connection and try again.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
 
   const articleById = useMemo(() => new Map(articles.map((a) => [a.id, a])), [articles]);
@@ -77,24 +93,35 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
         )
       : null;
 
-    const updated = await updateHighlightFeedback(
-      target,
-      {
-        lastSurfacedAt: nowIso,
-        surfaceCount: target.surfaceCount + 1,
-        ...(feedback ? { lastFeedback: feedback, lastFeedbackAt: nowIso } : {}),
-        ...(archive ? { resurfaceArchivedAt: nowIso } : {}),
-        ...(sm2
-          ? {
-              easinessFactor: sm2.easinessFactor,
-              intervalDays: sm2.intervalDays,
-              repetitions: sm2.repetitions,
-              nextDueAt: sm2.nextDueAt,
-            }
-          : {}),
-      },
-      authenticated,
-    );
+    setError(null);
+    let updated: Highlight;
+    try {
+      updated = await updateHighlightFeedback(
+        target,
+        {
+          lastSurfacedAt: nowIso,
+          surfaceCount: target.surfaceCount + 1,
+          ...(feedback ? { lastFeedback: feedback, lastFeedbackAt: nowIso } : {}),
+          ...(archive ? { resurfaceArchivedAt: nowIso } : {}),
+          ...(sm2
+            ? {
+                easinessFactor: sm2.easinessFactor,
+                intervalDays: sm2.intervalDays,
+                repetitions: sm2.repetitions,
+                nextDueAt: sm2.nextDueAt,
+              }
+            : {}),
+        },
+        authenticated,
+      );
+    } catch {
+      // The card stays on screen and un-reviewed, which is the truth: nothing
+      // was written. Before this the rejection was unhandled and the button
+      // simply did nothing, so the obvious response -- tap it again -- would
+      // have double-counted the review the moment the network came back.
+      setError("Couldn't save that. Check your connection and try again.");
+      return;
+    }
     setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
     setReviewedIds((prev) => new Set(prev).add(highlightId));
   }
@@ -118,6 +145,8 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
       <Text style={styles.subtitle}>
         {batchIds ? `${batchIds.length} highlight${batchIds.length === 1 ? "" : "s"} selected for today.` : ""}
       </Text>
+
+      {error && <Text style={styles.error}>{error}</Text>}
 
       {batchIds && batchIds.length === 0 && (
         <View style={styles.emptyBox}>
@@ -183,6 +212,7 @@ const styles = StyleSheet.create({
   back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
   title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 4 },
   subtitle: { fontSize: 13, color: "#6b6558", marginBottom: 20 },
+  error: { color: "#b5502f", fontSize: 13, marginBottom: 12 },
   emptyBox: { borderWidth: 1, borderStyle: "dashed", borderColor: "#ddd6c7", borderRadius: 8, padding: 24, alignItems: "center" },
   emptyText: { fontSize: 14, color: "#6b6558", textAlign: "center" },
   card: { backgroundColor: "#fff", borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#ece6d8" },
