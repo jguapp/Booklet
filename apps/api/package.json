@@ -30,6 +30,7 @@
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
     "@sentry/node": "^10.68.0",
+    "dompurify": "3.2.3",
     "fastify": "^5.10.0",
     "ioredis": "^6.0.0",
     "jsdom": "^29.1.1",

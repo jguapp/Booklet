@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { ImportRequest, ImportResponse } from "@booklet/shared";
 import { canonicalizeUrl, normalizeRecallPrompt } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
+import { sanitizeArticleHtml } from "../lib/sanitize.js";
 import { requireAuth } from "../lib/auth/context.js";
 
 /**
@@ -151,7 +152,11 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
             sourceType: a.sourceType ?? "HTML",
             extractionStatus: a.extractionStatus ?? "SUCCESS",
             extractionError: a.extractionError ?? null,
-            extractedHtml: a.extractedHtml ?? null,
+            // Sanitized like every other stored article, and with more reason:
+            // this value is whatever the client posted, not something this
+            // server's extraction produced. A migration payload is the one
+            // place hostile HTML can be uploaded directly.
+            extractedHtml: sanitizeArticleHtml(a.extractedHtml),
             extractedText: a.extractedText ?? null,
             readingTimeEstimate: a.readingTimeEstimate ?? null,
             progressFraction: typeof a.progressFraction === "number" ? a.progressFraction : 0,

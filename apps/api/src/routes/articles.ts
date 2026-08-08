@@ -9,6 +9,7 @@ import type {
 } from "@booklet/shared";
 import { canonicalizeUrl } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
+import { sanitizeArticleHtml } from "../lib/sanitize.js";
 import { utcMidnight } from "../lib/dates.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
@@ -187,7 +188,10 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           sourceType: "HTML",
           extractionStatus: extracted ? "SUCCESS" : "FAILED",
           extractionError,
-          extractedHtml: extracted?.html ?? null,
+          // Sanitized before storage. Readability strips <script> and looks
+          // like it has handled this; it passes <img onerror>, <svg onload>
+          // and <details ontoggle> through untouched.
+          extractedHtml: sanitizeArticleHtml(extracted?.html),
           extractedText: extracted?.text ?? null,
           readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
           skippedImageCount: extracted?.skippedImageCount ?? 0,
