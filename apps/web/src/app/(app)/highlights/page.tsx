@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, Highlight } from "@booklet/shared";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
+import { SeedCollections } from "@/components/highlights/seed-collections";
+import { SharePanel } from "@/components/highlights/share-panel";
 import { SourceIcon } from "@/components/library/source-icon";
 import { Input } from "@/components/ui/input";
 import { IconSearch } from "@/components/ui/icons";
@@ -143,6 +145,18 @@ export default function HighlightsPage() {
             <h1 className="font-serif text-2xl font-semibold text-ink">
               {selectedArticle?.title ?? "Untitled"}
             </h1>
+            {/* Sharing is offered per article, and only once one is in view
+                (#158) -- a link to "all your highlights" would publish every
+                book you have ever read, which is not a thing anyone means to
+                send to a friend. */}
+            <div className="mt-4">
+              {/* Keyed so switching articles remounts it: without that, the
+                  panel keeps showing the previous article's link until its
+                  refetch lands, and a share URL for the wrong page is the
+                  one stale value here that could actually be copied and
+                  sent. */}
+              <SharePanel key={articleFilter} articleId={articleFilter} authenticated={isAuthenticated} />
+            </div>
           </>
         ) : (
           <h1 className="font-serif text-2xl font-semibold text-ink">Highlights</h1>
@@ -229,10 +243,17 @@ export default function HighlightsPage() {
           </div>
         )
       ) : visible.length === 0 ? (
-        <div className="rounded-md border border-dashed border-border px-6 py-16 text-center">
-          <p className="font-sans text-sm text-ink-muted">
-            {search.trim() ? "No highlights match that search." : "No highlights yet for this filter."}
-          </p>
+        <div>
+          <div className="rounded-md border border-dashed border-border px-6 py-16 text-center">
+            <p className="font-sans text-sm text-ink-muted">
+              {search.trim() ? "No highlights match that search." : "No highlights yet for this filter."}
+            </p>
+          </div>
+          {/* Only when the library is genuinely empty, not when a filter or
+              search happens to match nothing -- someone with 400 highlights
+              searching for a word they didn't use is not looking for
+              onboarding suggestions. */}
+          {highlights.length === 0 && !isSearching && <SeedCollections />}
         </div>
       ) : (
         <div className="flex flex-col gap-3">
