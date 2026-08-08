@@ -14,6 +14,25 @@ import { toHighlight } from "./highlights.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * "Email me this digest" had no limit beyond the API-wide 300/minute, which
+ * is 300 messages a minute through this server's mail provider for one signed-in
+ * account. The recipient is always the account's own address, so this is not a
+ * relay the way send-to-kindle was -- but a provider does not care who the
+ * victim is when it decides the sending domain is a spam source, and the same
+ * domain sends every password reset and verification link.
+ *
+ * Keyed on the account rather than the IP (the route is behind requireAuth,
+ * so the better key exists), and sized for the feature: a digest is generated
+ * once a day or once a week, so six sends an hour is already generous for
+ * "I pressed it again because the first one hadn't arrived".
+ */
+const DIGEST_EMAIL_LIMIT = {
+  max: Number(process.env.DIGEST_EMAIL_RATE_LIMIT_MAX) || 6,
+  timeWindow: "1 hour",
+  keyGenerator: (request: { userId: string | null; ip: string }) => request.userId ?? request.ip,
+};
+
 /** DAILY -> still the same calendar day; WEEKLY -> generated within the last 7 days. */
 function isStillCurrent(generatedAt: Date, frequency: "DAILY" | "WEEKLY", now: Date): boolean {
   if (frequency === "WEEKLY") return now.getTime() - generatedAt.getTime() < 7 * DAY_MS;
@@ -75,7 +94,7 @@ export async function registerDigestRoutes(app: FastifyInstance): Promise<void> 
 
   app.post<{ Params: { id: string } }>(
     "/api/digests/:id/email",
-    { preHandler: requireAuth },
+    { preHandler: requireAuth, config: { rateLimit: DIGEST_EMAIL_LIMIT } },
     async (request, reply) => {
       const digest = await prisma.digest.findFirst({
         where: { id: request.params.id, userId: request.userId! },

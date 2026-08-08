@@ -59,6 +59,34 @@ const WEB_ORIGIN = process.env.WEB_ORIGIN ?? "http://localhost:3000";
 // registered with each OAuth provider (a mismatch is one of the most common
 // "invalid_redirect_uri" support questions for this kind of flow).
 const API_ORIGIN = process.env.API_ORIGIN ?? "http://localhost:4000";
+/**
+ * The only addresses "Send to Kindle" will mail to.
+ *
+ * The field validated as any well-formed email address, which made
+ * POST /api/articles/:id/send-to-kindle a general-purpose mail relay: set
+ * kindleEmail to a stranger, import an article whose title and HTML you wrote
+ * (POST /api/sync/import takes both verbatim), and this server sends your
+ * document to them, from our envelope sender, with our SPF/DKIM on it. The
+ * recipient list is the part that made it a relay rather than a nuisance, so
+ * the recipient list is what is bounded.
+ *
+ * These two domains are the whole feature as documented -- the settings page
+ * says "Your @kindle.com address, from Amazon's Manage Your Content and
+ * Devices", and this route's own comment says @kindle.com/@free.kindle.com.
+ * Narrowing to them takes nothing away that Send to Kindle ever did; an
+ * address at any other domain was never going to reach a Kindle.
+ */
+const KINDLE_EMAIL_DOMAINS = ["kindle.com", "free.kindle.com"];
+
+/** Exported because the check has to happen again where the mail is actually
+ * sent (routes/articles.ts): validating only on write leaves every address
+ * stored before this rule existed still deliverable. */
+export function isKindleAddress(email: string): boolean {
+  const at = email.lastIndexOf("@");
+  if (at < 1) return false;
+  return KINDLE_EMAIL_DOMAINS.includes(email.slice(at + 1).toLowerCase());
+}
+
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -570,8 +598,17 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           .code(400)
           .send({ error: "invalid_highlights_per_digest", message: "Must be an integer between 1 and 50." });
       }
-      if (kindleEmail !== undefined && kindleEmail.trim() !== "" && !EMAIL_RE.test(kindleEmail.trim())) {
-        return reply.code(400).send({ error: "invalid_kindle_email", message: "Enter a valid email address." });
+      if (kindleEmail !== undefined && kindleEmail.trim() !== "") {
+        const trimmed = kindleEmail.trim();
+        if (!EMAIL_RE.test(trimmed)) {
+          return reply.code(400).send({ error: "invalid_kindle_email", message: "Enter a valid email address." });
+        }
+        if (!isKindleAddress(trimmed)) {
+          return reply.code(400).send({
+            error: "invalid_kindle_email",
+            message: `Send to Kindle only delivers to Amazon addresses (${KINDLE_EMAIL_DOMAINS.map((d) => `@${d}`).join(" or ")}).`,
+          });
+        }
       }
 
       const user = await prisma.user.update({
@@ -767,24 +804,32 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.post<{ Body: VerifyEmailRequest }>("/api/auth/verify-email", async (request, reply) => {
-    const token = request.body?.token;
-    const invalid = () =>
-      reply.code(400).send({ error: "invalid_token", message: "That verification link is invalid or has expired." });
+  // The one auth route that was left on the API-wide 300/minute rather than
+  // the credential budget. Guessing a 256-bit token is not the threat -- it
+  // is that this is the only unauthenticated route that reads a token table
+  // and writes a User row, so it should cost what every other one costs.
+  app.post<{ Body: VerifyEmailRequest }>(
+    "/api/auth/verify-email",
+    { config: { rateLimit: AUTH_ATTEMPT_LIMIT } },
+    async (request, reply) => {
+      const token = request.body?.token;
+      const invalid = () =>
+        reply.code(400).send({ error: "invalid_token", message: "That verification link is invalid or has expired." });
 
-    if (typeof token !== "string" || !token) return invalid();
+      if (typeof token !== "string" || !token) return invalid();
 
-    const record = await prisma.emailVerificationToken.findUnique({ where: { tokenHash: hashOpaqueToken(token) } });
-    if (!record || record.usedAt || record.expiresAt < new Date()) return invalid();
+      const record = await prisma.emailVerificationToken.findUnique({ where: { tokenHash: hashOpaqueToken(token) } });
+      if (!record || record.usedAt || record.expiresAt < new Date()) return invalid();
 
-    const [user] = await prisma.$transaction([
-      prisma.user.update({ where: { id: record.userId }, data: { emailVerifiedAt: new Date() } }),
-      prisma.emailVerificationToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
-    ]);
+      const [user] = await prisma.$transaction([
+        prisma.user.update({ where: { id: record.userId }, data: { emailVerifiedAt: new Date() } }),
+        prisma.emailVerificationToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+      ]);
 
-    const body: UserProfile = toUserProfile(user);
-    return reply.send(body);
-  });
+      const body: UserProfile = toUserProfile(user);
+      return reply.send(body);
+    },
+  );
 
   app.post(
     "/api/auth/resend-verification",
