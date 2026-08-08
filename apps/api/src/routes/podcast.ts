@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from "fastify";
 import {
   DEFAULT_PODCAST_FEED_FILTER,
   PODCAST_FEED_SCOPE,
@@ -9,6 +9,7 @@ import {
   type PodcastFeedSecret,
   type PodcastFeedStatus,
 } from "@booklet/shared";
+import type { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { hashApiToken } from "../lib/auth/api-token.js";
@@ -16,6 +17,11 @@ import { concatPcm16Wavs, pcm16WavDurationSeconds } from "../services/audio-conc
 import { buildPodcastFeedXml, type PodcastEpisodeInput } from "../services/podcast-feed.js";
 import { generateSpeechPooled } from "../services/tts-pool.js";
 import { deleteStoredFile, saveFile, streamStoredFile } from "../services/storage-service.js";
+import {
+  PODCAST_AUDIO_QUOTA_BYTES,
+  evictEpisodesOutsideFeed,
+  podcastAudioBytesUsed,
+} from "../services/podcast-storage.js";
 
 /**
  * The personal podcast feed (#154): the reading queue as an RSS feed a normal
@@ -68,7 +74,12 @@ function generateFeedToken(): string {
 
 /** How many items the feed lists. A podcast client renders everything it is
  * given, so an unbounded feed means a 400-item episode list and a document
- * that grows without limit for someone who never archives anything. */
+ * that grows without limit for someone who never archives anything.
+ *
+ * Since the S5 fix this is also the disk ceiling, not only the document one: audio
+ * outside this window is deleted rather than kept forever (see
+ * services/podcast-storage.ts), so raising this number raises how many WAVs
+ * an account stores at rest. */
 const MAX_FEED_ITEMS = 50;
 
 /**
@@ -129,6 +140,29 @@ type FeedArticle = {
   extractedText: string | null;
   audio: { storageKey: string; bytes: number; durationSeconds: number; voice: string; speed: number } | null;
 };
+
+/**
+ * Which articles a given filter's feed would list, as one definition used by
+ * both the fetch and the eviction pass.
+ *
+ * Shared rather than repeated because the two must not drift: eviction
+ * deletes exactly what this does not select, so a clause added to one and not
+ * the other deletes audio the feed is still advertising.
+ */
+function feedWindowWhere(userId: string, filter: PodcastFeedFilter): Prisma.ArticleWhereInput {
+  return {
+    userId,
+    deletedAt: null,
+    // No text means nothing to read aloud -- a failed extraction, or a
+    // scanned PDF that never went through OCR. Filtered in the query rather
+    // than after, so the item budget is spent on articles that can actually
+    // become episodes.
+    extractedText: { not: null },
+    ...(filter === "queue" ? { status: { in: ["UNREAD", "READING"] } } : {}),
+  };
+}
+
+const FEED_WINDOW_ORDER: Prisma.ArticleOrderByWithRelationInput[] = [{ savedAt: "desc" }, { id: "desc" }];
 
 /**
  * Absolute base for the feed URL and every <enclosure> in it.
@@ -225,9 +259,38 @@ let chain: Promise<unknown> = Promise.resolve();
  * and then race to write the row. */
 const building = new Set<string>();
 
-async function buildEpisodeAudio(userId: string, article: FeedArticle): Promise<void> {
+async function buildEpisodeAudio(userId: string, article: FeedArticle, log: FastifyBaseLogger): Promise<void> {
   const chunks = toSafeTextChunks(article.extractedText ?? "");
   if (chunks.length === 0 || chunks.length > MAX_EPISODE_CHUNKS) return;
+
+  /**
+   * The quota, checked here rather than at queue time for two reasons: builds
+   * are serialized on `chain`, so this reading already includes whatever the
+   * previous build in the same fetch just wrote, and refusing before the
+   * first chunk is generated means an over-quota account costs no TTS work at
+   * all rather than 40 minutes of inference thrown away at the end.
+   *
+   * Refusing is the whole action. Nothing existing is touched -- no row
+   * rewritten, no file deleted, no half-written episode -- because the
+   * over-quota state is nearly always transient: the next poll's eviction
+   * pass frees whatever has left the window, and generation resumes on its
+   * own. Deleting someone's oldest episodes to make room for a newer one is a
+   * policy this has no business inventing while the feed still lists them.
+   *
+   * Accepted imprecision: an episode's size is not known until it is
+   * assembled, so this admits any build that starts under the limit and can
+   * therefore overshoot by at most one episode (~115 MB at
+   * MAX_EPISODE_CHUNKS). Bounding growth is the point; exact accounting is
+   * not worth a second check that throws away finished audio.
+   */
+  const used = await podcastAudioBytesUsed(userId, article.id);
+  if (used >= PODCAST_AUDIO_QUOTA_BYTES) {
+    log.warn(
+      { userId, articleId: article.id, used, quota: PODCAST_AUDIO_QUOTA_BYTES },
+      "[podcast] episode not generated: account is at its audio storage quota",
+    );
+    return;
+  }
 
   const parts: Buffer[] = [];
   for (const chunk of chunks) {
@@ -263,12 +326,12 @@ async function buildEpisodeAudio(userId: string, article: FeedArticle): Promise<
   if (previous && previous !== storageKey) await deleteStoredFile(previous).catch(() => undefined);
 }
 
-function queueEpisodeAudio(userId: string, article: FeedArticle, onError: (err: unknown) => void): void {
+function queueEpisodeAudio(userId: string, article: FeedArticle, log: FastifyBaseLogger): void {
   if (building.has(article.id)) return;
   building.add(article.id);
   chain = chain
-    .then(() => buildEpisodeAudio(userId, article))
-    .catch(onError)
+    .then(() => buildEpisodeAudio(userId, article, log))
+    .catch((err) => log.warn({ err, articleId: article.id }, "[podcast] episode generation failed"))
     .finally(() => building.delete(article.id));
 }
 
@@ -333,11 +396,32 @@ export async function registerPodcastRoutes(app: FastifyInstance): Promise<void>
   });
 
   app.delete("/api/podcast/feed", { preHandler: requireAuth }, async (request, reply) => {
+    const userId = request.userId!;
     const { count } = await prisma.apiToken.updateMany({
-      where: { userId: request.userId!, revokedAt: null, scopes: { has: PODCAST_FEED_SCOPE } },
+      where: { userId, revokedAt: null, scopes: { has: PODCAST_FEED_SCOPE } },
       data: { revokedAt: new Date() },
     });
     if (count === 0) return reply.code(404).send({ error: "not_found", message: "No podcast feed to turn off." });
+
+    // Everything, because a poll is the only thing that evicts (see the feed
+    // route) and this is the request that guarantees there will never be
+    // another one. Without this, turning the feature off is the one way to
+    // leave a full feed's worth of WAVs on the disk permanently -- the exact
+    // shape of the S5 leak, reached by the button that means "stop".
+    //
+    // Re-enabling regenerates, three episodes per poll, the same as a first
+    // subscribe. That is the right trade: the audio is a cache of text the
+    // database still holds, and nothing here is the only copy of anything.
+    //
+    // One episode can still slip past: a build already running on `chain`
+    // writes its row after this returns. It is bounded by one file, and the
+    // first poll after re-enabling collects it. Cancelling a running
+    // generation would need an interrupt onnxruntime does not offer -- the
+    // same limitation buildEpisodeAudio's header describes.
+    await evictEpisodesOutsideFeed(userId, new Set(), request.log).catch((err) => {
+      request.log.warn({ err, userId }, "[podcast] episode eviction failed after turning the feed off");
+    });
+
     return reply.code(204).send();
   });
 
@@ -361,17 +445,8 @@ export async function registerPodcastRoutes(app: FastifyInstance): Promise<void>
       const filter = isPodcastFeedFilter(rawFilter) ? rawFilter : DEFAULT_PODCAST_FEED_FILTER;
 
       const articles: FeedArticle[] = await prisma.article.findMany({
-        where: {
-          userId,
-          deletedAt: null,
-          // No text means nothing to read aloud -- a failed extraction, or a
-          // scanned PDF that never went through OCR. Filtered in the query
-          // rather than after, so the item budget is spent on articles that
-          // can actually become episodes.
-          extractedText: { not: null },
-          ...(filter === "queue" ? { status: { in: ["UNREAD", "READING"] as const } } : {}),
-        },
-        orderBy: [{ savedAt: "desc" }, { id: "desc" }],
+        where: feedWindowWhere(userId, filter),
+        orderBy: FEED_WINDOW_ORDER,
         take: MAX_FEED_ITEMS,
         select: {
           id: true,
@@ -422,10 +497,48 @@ export async function registerPodcastRoutes(app: FastifyInstance): Promise<void>
       }
 
       for (const article of missing.slice(0, MAX_GENERATIONS_PER_FETCH)) {
-        queueEpisodeAudio(userId, article, (err) => {
-          request.log.warn({ err, articleId: article.id }, "[podcast] episode generation failed");
-        });
+        queueEpisodeAudio(userId, article, request.log);
       }
+
+      /**
+       * Eviction (audit S5): audio for articles this poll did not list is
+       * deleted, rows and files both.
+       *
+       * A poll is the only clock this app has -- there is no background
+       * worker, which is why articles.ts's purgeExpiredTrash piggybacks on a
+       * read too -- and here it is also the right one: which articles are
+       * advertisable changes exactly when someone asks, so the disk is
+       * reconciled exactly when the answer changes.
+       *
+       * The keep set is the window just served. Scoping it to the *fetched*
+       * filter is the decision worth stating, because the alternative was
+       * tempting: one token serves both `feed.xml` and `feed.xml?filter=all`,
+       * so keeping the union of both windows would stop two differently
+       * filtered clients on one token from deleting and regenerating each
+       * other's episodes. It was rejected. Under the union, archiving an
+       * article frees nothing -- it is still inside the top-MAX_FEED_ITEMS
+       * `all` window for however many weeks it takes newer saves to push it
+       * out -- so the default subscriber, who has one URL and reads their
+       * queue, keeps every finished episode and stores twice as much. That is
+       * the case the audit is about. The two-filter case is a deliberate,
+       * unusual configuration and it degrades in CPU (low-priority
+       * regeneration, three per poll) rather than in disk.
+       *
+       * `building` is folded in because a queued generation is about to write
+       * a row for an article that a concurrent poll's window may not contain;
+       * evicting it there would delete the row moments before it exists and
+       * orphan the file the build then writes.
+       *
+       * Awaited rather than fired and forgotten: in steady state it is one
+       * indexed query returning nothing, and a poll that returns before the
+       * disk is reconciled makes "how much is stored" depend on scheduling.
+       * Best-effort all the same -- a feed that 500s because an unlink failed
+       * would be a worse bug than the leak it is fixing.
+       */
+      const keep = new Set<string>([...articles.map((article) => article.id), ...building]);
+      await evictEpisodesOutsideFeed(userId, keep, request.log).catch((err) => {
+        request.log.warn({ err, userId }, "[podcast] episode eviction failed");
+      });
 
       const xml = buildPodcastFeedXml({
         title: "Booklet — your reading queue",
