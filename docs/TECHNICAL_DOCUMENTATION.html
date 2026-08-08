@@ -342,7 +342,7 @@
   <button class="mobile-toc-toggle" id="mobileTocToggle" type="button">☰ Contents</button>
   <nav class="toc" id="toc">
     <div class="toc-title">📖 Booklet</div>
-    <div class="toc-sub">The Coding Bible — v1, living document</div>
+    <div class="toc-sub">The Coding Bible — v5, living document</div>
     <ol>
       <li><a href="#part-0">0. How to Use This Document</a></li>
       <li><a href="#part-1">I. The Big Picture</a>
@@ -393,6 +393,8 @@
         <a href="#part-6">VI. Testing Philosophy</a>
         <ol>
           <li><a href="#e2e-fixtures">The e2e suite, switched off and back on</a></li>
+          <li><a href="#web-unit-tests">The 19,000 lines with no test runner</a></li>
+          <li><a href="#verify-command">One command, and what it did not check</a></li>
         </ol>
       </li>
       <li>
@@ -1103,6 +1105,16 @@
           the highlight row — see <a href="#feat-resurface">Resurfacing</a>
           for the algorithm itself.
         </p>
+        <p>
+          <code>prompt</code> is a nullable question whose answer is the
+          highlight. When set, Daily Review asks it before revealing the
+          passage, which is what makes the SM-2 grade above a measure of
+          recall rather than recognition — see
+          <a href="#recall-prompts">Recall prompts</a>. Nullable with no
+          default, so adding it was a metadata-only change in Postgres: no
+          table rewrite, no backfill, and every pre-existing highlight keeps
+          the review behavior it already had.
+        </p>
 
         <h4>Collection</h4>
         <p>
@@ -1739,6 +1751,112 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           reviewing today" a moving target.
         </p>
 
+        <h4 id="recall-prompts">Recall prompts: what SM-2 was actually scheduling</h4>
+        <p>
+          All of the machinery above was correct and pointed at the wrong
+          thing. Resurfacing showed you the highlight, and
+          <em>then</em> asked whether you had remembered it. Read that
+          ordering back and the problem is obvious: you are being asked to
+          grade a recall attempt you were never given the chance to make.
+        </p>
+        <p>
+          That is the classic illusion-of-knowing failure. Recognition feels
+          like recall — a passage you have read before reads as familiar
+          whether or not you could have produced it — and re-reading
+          something and judging it familiar is close to the weakest thing
+          you can do for retention. So the binary fed into
+          <code>feedbackToQuality</code> was measuring recognition, and SM-2,
+          an algorithm designed to schedule <em>retrieval attempts</em>, was
+          being used to schedule re-reads. Every part of the implementation
+          was right; the input was the wrong quantity.
+        </p>
+        <p>
+          A highlight can now carry an optional <strong>prompt</strong>: a
+          question whose answer is the highlight
+          (<code>Highlight.prompt</code>, <code>packages/shared/src/recall-prompt.ts</code>).
+          Daily Review shows the prompt, keeps the passage hidden until the
+          reader asks for it, and only then offers the grade buttons.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why the grade buttons disappear too</span>
+          <p>
+            Concealing the passage but leaving "Remembered this" on screen
+            would have been a cosmetic change. The reason to hide the answer
+            is to make the grade mean something, and a grade you can click
+            before attempting recall is the same recognition judgment as
+            before — just with an extra step in front of it. Withholding
+            both is what actually changes what SM-2 receives.
+          </p>
+          <p>
+            <strong>Archive stays available throughout.</strong> Deciding
+            you are done with a highlight is not a recall judgment and needs
+            no answer, so making someone reveal a passage in order to
+            dismiss it would be gatekeeping for its own sake.
+          </p>
+        </div>
+        <p>
+          The note is concealed alongside the passage. This is not
+          over-caution: a note on a highlight is usually the reader's own
+          paraphrase of what the passage says, which means showing it gives
+          the answer away as thoroughly as showing the highlight would.
+        </p>
+        <p>
+          The feature is additive by construction. <code>prompt</code> is
+          <code>null</code> on every highlight saved before it existed, and
+          a highlight without one renders and grades exactly as it always
+          has — no migration of behavior, no prompt to write before
+          resurfacing works. Mobile's Daily Review honors the same reveal
+          step, so a prompt written on the web is respected there too, even
+          though mobile has no prompt-authoring UI yet.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Two small things that would have been bugs</span>
+          <p>
+            <strong>The revealed set is keyed by highlight id</strong>, not
+            held as a single "revealed" flag for the card on screen. Daily
+            Review renders the batch as a list, so one flag would leak
+            across it — reveal the first card's answer and the second card
+            would show its own answer before its question had been asked.
+            A set keyed by id cannot do that.
+          </p>
+          <p>
+            <strong>A whitespace-only prompt normalizes to <code>null</code></strong>,
+            in one shared place. <code>"   "</code> is truthy and non-null,
+            so it reads as "prompted" to every check in the app while asking
+            the reader nothing: the review card would conceal the answer
+            behind a blank question. Four routes accept a prompt and three
+            local-mode constructors build one, and each of them would
+            otherwise have had to remember this independently.
+          </p>
+        </div>
+        <p>
+          Prompts are written from the Highlights page and from Daily
+          Review's library section, not from the reader. Going through a
+          book's highlights and turning the ones worth keeping into
+          questions is a browsing activity; interrupting a reading session
+          to compose a question is not the same act and does not want the
+          same surface.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Deliberately not done yet: finer grades, and generated prompts</span>
+          <p>
+            SM-2 expects a 0-5 quality grade and this app collects a binary,
+            which is a real simplification. It is arguably too coarse now
+            that there is a genuine retrieval attempt to grade — but only
+            <em>now</em>: grading a re-read on a five-point scale would have
+            been false precision on a measurement that was wrong anyway.
+            Worth revisiting with prompts in place, not before.
+          </p>
+          <p>
+            Generating prompts from the passage is the obvious follow-up and
+            a good fit for the paid AI tier — turning a passage into a good
+            question is exactly what an LLM is useful for, and unlike
+            summarization it produces something the spaced-repetition system
+            consumes directly. Manual entry ships first because it is what
+            proves the ordering change is worth anything.
+          </p>
+        </div>
+
         <h3 id="feat-search">Search</h3>
         <p>
           Plain, case-insensitive <code>contains</code> matching across
@@ -1830,13 +1948,22 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
       <section id="part-6">
         <h2><span class="part-label">Part VI</span>Testing Philosophy</h2>
         <p>
-          Three layers, each answering a different question:
+          Four layers, each answering a different question:
         </p>
         <ul>
           <li><strong>Unit (Vitest, <code>packages/shared</code>)</strong> —
             pure logic with no I/O: the SM-2 algorithm, highlight-anchor
             resolution, URL canonicalization, collection filters, Kindle-
-            clippings parsing. Fast, deterministic, no database.</li>
+            clippings parsing, TTS chunking. Fast, deterministic, no
+            database.</li>
+          <li><strong>Unit in jsdom (Vitest, <code>apps/web</code>)</strong> —
+            the app's own DOM logic and its React components: offset↔node
+            bridging, section anchoring, the highlight popover's dismissal
+            rule, recall-prompt concealment. Added late, for reasons worth
+            reading — see
+            <a href="#web-unit-tests">the 19,000 lines with no test
+            runner</a> below. jsdom does no layout, so anything
+            geometry-dependent still belongs one layer down.</li>
           <li><strong>Integration (Vitest, <code>apps/api</code>)</strong> —
             the full API surface exercised through Fastify's own
             <code>.inject()</code> — real route handlers, real Prisma
@@ -1975,6 +2102,129 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           Result: the suite runs green in about <strong>8.7 minutes</strong>,
           with no dependency on Wikipedia being up or unedited.
         </p>
+
+        <h3 id="web-unit-tests">The 19,000 lines with no test runner</h3>
+        <p>
+          <code>packages/shared</code> had Vitest. <code>apps/api</code> had
+          Vitest. Everything in between — roughly 19,000 lines of
+          <code>apps/web</code>, including all the reader's offset-to-DOM
+          logic — had <strong>no unit test runner at all</strong>. Its only
+          coverage was Playwright, at whole-browser cost and whole-browser
+          latency.
+        </p>
+        <p>
+          That gap has a measured price. Three real bugs shipped that a unit
+          test would have caught in under a second each: both chunk-0 sizing
+          bugs in the TTS chunker, the read-along section anchor resolving to
+          the wrong element at a text-node boundary, and the highlight
+          popover dismissing itself on a scroll event that arrived after it
+          opened. Every one surfaced as a slow, intermittent e2e failure that
+          read like flakiness — which is the expensive way to find a pure
+          function returning the wrong number.
+        </p>
+        <p>
+          <code>apps/web</code> now runs Vitest in jsdom. jsdom does no
+          layout, so <code>getBoundingClientRect</code> and
+          <code>Range#getClientRects</code> return zeros: anything
+          geometry-dependent still belongs in Playwright, and this runner is
+          for offset↔node bridging, section anchoring, concealment rules and
+          the like.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Rendering React components needed a 40-line
+          <code>render</code>, and it is not a matter of taste</span>
+          <p>
+            <code>@testing-library/react</code> cannot resolve the same React
+            instance the components use. This workspace sets
+            <code>nodeLinker: hoisted</code> (Metro cannot traverse pnpm's
+            junctions on Windows), so packages land in the <em>root</em>
+            <code>node_modules</code> and resolve their dependencies from
+            there. The library therefore picks up root's <code>react</code>
+            19.0.0 — hoisted from <code>apps/mobile</code>, which Expo pins —
+            and root's <code>react-dom</code> 19.2.8, hoisted from Prisma
+            Studio of all things. <code>apps/web</code> has its own matched
+            19.2.4 pair nested, because it conflicts with root.
+          </p>
+          <p>
+            Rendering across two React instances fails as a bare "Cannot read
+            properties of null (reading 'useState')", or silently renders
+            nothing.
+            <code>resolve.alias</code>, <code>resolve.dedupe</code> and
+            <code>server.deps.inline</code> were all tried and none work: the
+            renderer resolves React through Node before Vite ever sees the
+            import. A helper that <em>lives inside</em>
+            <code>apps/web</code> resolves <code>apps/web</code>'s React,
+            which is the entire trick — one instance, no resolver games, and
+            no fourth React version added to a workspace that already has too
+            many.
+          </p>
+        </div>
+        <p>
+          A concrete example of what this buys, from the recall-prompt work:
+          the assertion that matters is that a concealed highlight's text is
+          <strong>absent</strong>. "The answer leaked" is a silent failure —
+          a card that renders too much still renders, still grades, and still
+          looks right in a screenshot. Only an explicit absence assertion
+          catches it, and that is a millisecond in jsdom.
+        </p>
+
+        <h3 id="verify-command">One command, and an honest list of what it did not check</h3>
+        <p>
+          "The tests pass" was quietly ambiguous. <code>pnpm test</code>
+          (Turborepo) runs the three unit suites and nothing else — not lint,
+          not typecheck, not the production bundle, not the browser suite.
+          Four of the seven things CI checks were invisible to it.
+        </p>
+        <p>
+          <code>pnpm verify</code> runs everything this machine can check,
+          and — the part that actually matters — <strong>names what it
+          skipped and why</strong>, then closes with a section listing what
+          it cannot cover anywhere. A verification tool that silently skips
+          what it cannot do is worse than one that runs less: it teaches you
+          to read a green summary as "safe to deploy".
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Why the production bundle is in there</span>
+          <p>
+            The esbuild bundle has broken while every other signal stayed
+            green. A direct <code>@huggingface/transformers</code> import
+            pulled a native <code>.node</code> binding into the bundle;
+            externals are derived from <code>pkg.dependencies</code>, and the
+            package was only a transitive at the time. <code>tsc</code>
+            resolves through <code>node_modules</code> and never asks who
+            <em>declared</em> a package, so it was perfectly happy. The
+            bundle costs about a second and is the only local signal for that
+            whole class of failure.
+          </p>
+        </div>
+        <p>
+          What it still cannot cover, and says so: <code>docker-build</code>
+          (needs a daemon, and is the check that has caught the most real
+          bugs), the <code>@live</code> specs, and the TTFA benchmark.
+        </p>
+
+        <div class="callout warn">
+          <span class="callout-label">When the test suite is the messenger, not the victim</span>
+          <p>
+            Adding one more spec that signs up made three unrelated specs
+            start failing, and <em>which</em> three depended on ordering — the
+            exact signature of flakiness. It was not flakiness. Every auth
+            route shared a 10-per-15-minutes-per-IP budget meant for
+            credential guessing, and <code>POST /api/auth/refresh</code> was
+            on it despite being ordinary traffic the web app issues on every
+            load. The suite drained the budget and signup got the 429.
+          </p>
+          <p>
+            The reflex — raise the limit for CI and move on — would have
+            shipped the bug. One browser making many page loads from one
+            address <em>is</em> a real user with a few tabs open, and because
+            the limiter keys on IP, it is also everyone behind one office NAT
+            sharing ten refreshes. The fix was to give refresh its own budget
+            (see <a href="#part-7">the environment table</a>); raising the
+            limits for CI was then a separate, honest accommodation of a
+            suite that legitimately signs up dozens of times.
+          </p>
+        </div>
       </section>
 
       <hr class="divider">
@@ -2048,6 +2298,18 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           <tr>
             <td><code>TTS_CACHE_MAX_MB</code> (default 200)</td>
             <td>In-process cache ceiling, evicted LRU.</td>
+          </tr>
+          <tr>
+            <td><code>AUTH_ATTEMPT_RATE_LIMIT_MAX</code> (default 10 per 15 minutes)</td>
+            <td>Signup, login, and the password-reset routes — the ones with a guessable credential. Deliberately tight, and leaving it alone is the right call in production; it exists as a variable only so the e2e suite, which legitimately signs up dozens of times from one address, can raise it for its own run. Read together with <code>TRUST_PROXY</code>, as with every limit here.</td>
+          </tr>
+          <tr>
+            <td><code>AUTH_REFRESH_RATE_LIMIT_MAX</code> (default 120 per 15 minutes)</td>
+            <td><code>/api/auth/refresh</code>, deliberately <em>not</em> on the budget above. It looks like an auth route but is ordinary traffic: the web app calls it on load and on every access-token expiry, so sharing the credential-guessing budget meant the app spent the user's password-attempt allowance simply by working — a few tabs, or a dozen reloads inside fifteen minutes, and refresh started returning 429, which surfaces as being logged out on a correct password. Since the limiter keys on IP, everyone behind one NAT shared those ten. Nothing was gained for it: a refresh token is a high-entropy value in an httpOnly cookie, so there is no credential to guess, and the API-wide limit is the real backstop.</td>
+          </tr>
+          <tr>
+            <td><code>GLOBAL_RATE_LIMIT_MAX</code> (default 300 per minute)</td>
+            <td>The API-wide ceiling every route sits under, including the ones with their own tighter budget. This is what genuinely bounds a flood.</td>
           </tr>
         </table>
 
@@ -2474,6 +2736,46 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
         <h2><span class="part-label">Part X</span>Changelog of This Document</h2>
         <table>
           <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-08</td>
+            <td>
+              v5 — added
+              <a href="#recall-prompts">Recall prompts</a> to the
+              resurfacing section, on the ordering bug underneath a correct
+              implementation: the app showed you the highlight and
+              <em>then</em> asked whether you had remembered it, so SM-2 — an
+              algorithm for scheduling retrieval attempts — was being fed a
+              recognition judgment and scheduling re-reads. Covers why the
+              grade buttons disappear along with the passage (concealing the
+              answer alone would have been cosmetic), why the note is
+              concealed too, the two things that would have been bugs (a
+              single reveal flag leaking across a list of cards, and a
+              whitespace-only prompt reading as "prompted" while asking
+              nothing), and the two follow-ups deliberately not taken yet —
+              finer SM-2 grades, which only start to mean something now that
+              there is a real retrieval attempt to grade, and generated
+              prompts.
+              Added two sections to <a href="#part-6">Part VI</a>:
+              <a href="#web-unit-tests">the 19,000 lines with no test
+              runner</a>, including why rendering React components needed a
+              40-line local <code>render</code> rather than
+              <code>@testing-library/react</code> (three React copies, and a
+              resolution order Vite never gets to influence), and
+              <a href="#verify-command">one command with an honest list of
+              what it did not check</a>. Recorded the auth rate-limit finding
+              there as well, because the lesson generalizes: one added spec
+              made three unrelated ones fail in an order-dependent way, which
+              looked exactly like flakiness and was a real bug —
+              <code>/api/auth/refresh</code> was sharing the
+              credential-guessing budget with signup, so the app spent the
+              user's password-attempt allowance just by working, and everyone
+              behind one NAT shared ten refreshes. Fixed, with the two new
+              variables added to the
+              <a href="#part-7">environment table</a> (along with
+              <code>GLOBAL_RATE_LIMIT_MAX</code>, which was in use but
+              undocumented).
+            </td>
+          </tr>
           <tr>
             <td>2026-08-07</td>
             <td>
