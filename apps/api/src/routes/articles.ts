@@ -300,6 +300,71 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
     },
   );
 
+  /**
+   * Attaches the original bytes to an article that already exists. Exists for
+   * exactly one caller: the local -> account migration, which imports the
+   * *row* for an anonymously-uploaded PDF/EPUB via POST /api/sync/import and
+   * then has to send the file separately, because the bytes live in the
+   * browser's IndexedDB and JSON is the wrong transport for them (#172).
+   *
+   * A separate route rather than a mode on POST /api/articles/upload above:
+   * that route derives a title, runs extraction, enriches from Open Library,
+   * creates the row and fires `article.created`. None of that is wanted here
+   * -- the article already exists with the title, text and reading time the
+   * anonymous client extracted, and firing `article.created` for a row that
+   * was created by a previous request would be a lie to webhook subscribers.
+   * A mode flag would have to branch around nearly every line of it. This
+   * also sits on the path that already serves the same bytes back (the GET
+   * below), which is where "attach a file to this article" belongs.
+   */
+  app.post<{ Params: { id: string } }>(
+    "/api/articles/:id/file",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const article = await prisma.article.findFirst({
+        where: { id: request.params.id, userId: request.userId! },
+      });
+      if (!article) return reply.code(404).send({ error: "not_found", message: "Article not found." });
+
+      // The client clears a file from IndexedDB only once this route has
+      // accepted it, so an accepted upload whose response was lost gets sent
+      // again -- the same batch-then-clear rule #164 established for
+      // articles. Writing a second copy would orphan the first on disk with
+      // nothing left pointing at it, so a replay is a no-op, not an error.
+      if (article.fileStorageKey) return reply.send(toArticle(article));
+
+      const file = await request.file();
+      if (!file) return reply.code(400).send({ error: "no_file", message: "No file was uploaded." });
+
+      const originalFilename = file.filename;
+      const ext = originalFilename.toLowerCase().split(".").pop();
+      if (ext !== "pdf" && ext !== "epub") {
+        return reply.code(400).send({ error: "unsupported_type", message: "Only .pdf and .epub files are supported." });
+      }
+      // GET /api/articles/:id/file picks its Content-Type from sourceType
+      // alone, so an EPUB stored on a row that says PDF would be served as
+      // application/pdf and fail to open in a reader that trusts the header.
+      if (article.sourceType !== (ext === "pdf" ? "PDF" : "EPUB")) {
+        return reply
+          .code(400)
+          .send({ error: "type_mismatch", message: `This article is not a ${ext.toUpperCase()}.` });
+      }
+
+      const buffer = await file.toBuffer();
+      const fileStorageKey = await saveFile(request.userId!, originalFilename, buffer);
+
+      // Deliberately narrow: nothing else on the row is touched. The
+      // extracted text, title and reading time already came across in the
+      // import payload, and re-deriving them from the file here would
+      // overwrite what the user has been reading with a second opinion.
+      const updated = await prisma.article.update({
+        where: { id: article.id },
+        data: { fileStorageKey, originalFilename: article.originalFilename ?? originalFilename },
+      });
+      return reply.send(toArticle(updated));
+    },
+  );
+
   app.get<{ Params: { id: string } }>(
     "/api/articles/:id/file",
     { preHandler: requireAuth },

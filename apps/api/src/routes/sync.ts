@@ -290,6 +290,12 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
         importedHighlights,
         importedCollections,
         skippedCollections,
+        // The client needs these to finish the job: an uploaded PDF/EPUB's
+        // bytes are still in IndexedDB under the *local* id, and only this
+        // map says which server article they belong to (#172). Sent for
+        // skipped articles too -- a re-sent batch must be able to attach a
+        // file to the row the previous attempt created.
+        localIdToServerId: Object.fromEntries(localIdToServerId),
       };
       return reply.send(body);
     },
