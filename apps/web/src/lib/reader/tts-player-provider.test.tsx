@@ -5,6 +5,15 @@ import { ToastProvider } from "@/lib/toast/toast-provider";
 import { cleanup, fire, render } from "@/test/render";
 import { TtsPlayerProvider, useTtsPlayer } from "./tts-player-provider";
 
+// The provider persists the listening position (#152) and reads
+// isAuthenticated to decide local vs. synced -- which pulls in useAuth. These
+// tests are about which engine pause/resume act on, not about auth, so the
+// context is mocked rather than standing up a real AuthProvider (which would
+// fetch a session in jsdom). Local mode is the honest default here.
+vi.mock("@/lib/auth/auth-provider", () => ({
+  useAuth: () => ({ status: "unauthenticated", isAuthenticated: false }),
+}));
+
 /**
  * Which engine pause/resume act on.
  *

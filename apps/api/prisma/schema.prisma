@@ -292,6 +292,28 @@ model Article {
   // anything that isn't an HTML save, or where nothing was skipped.
   skippedImageCount   Int   @default(0)
   progressFraction    Float @default(0) // 0.0-1.0, normalized regardless of sourceType (page/total, CFI/total, or scroll position)
+
+  // Read-aloud position, the listening sibling of progressFraction (#152).
+  //
+  // A fraction rather than a chunk index, deliberately. Chunk boundaries are a
+  // function of FIRST_CHUNK_MAX_CHARS/MAX_CHUNK_CHARS, which are latency tuning
+  // knobs that have already moved once (200 -> 140, see kokoro-tts.ts) -- an
+  // index stored under one chunking silently points at different audio under
+  // the next, and re-extracting an article changes the text underneath it too.
+  // A fraction over the article's text survives both, and matches how
+  // progressFraction already normalizes across wildly different source types.
+  //
+  // Nullable, unlike progressFraction: "never listened" has to be
+  // distinguishable from "listened, at the very start", or the resume prompt
+  // fires on every article nobody has ever played.
+  listeningFraction   Float?
+  listeningUpdatedAt  DateTime?
+  // Which device wrote the position above. The resume prompt says "last played
+  // on another device", and that claim needs somewhere to come from -- without
+  // this, the tab that just wrote the position would offer to resume from
+  // itself. Opaque client-generated id (see lib/reader/device-id.ts); it
+  // identifies a browser, not a person, and is never shown to the user.
+  listeningDeviceId   String?
   // Actual active reading time, seconds -- only accrues while the reader tab
   // is visible (reader-view.tsx). Written as an atomic increment (a delta
   // since the last flush), not an overwrite, same periodic timer as
@@ -322,10 +344,25 @@ model Article {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Weighted tsvector over title/author/siteName/tags/excerpt/extractedText,
+  /// backing ranked full-text search (#155). A Postgres GENERATED ALWAYS ...
+  /// STORED column, so it can never drift from the row the way a trigger or
+  /// application-maintained column can -- there is no write path that could
+  /// forget to update it.
+  ///
+  /// Declared here purely so Prisma knows it exists. `Unsupported` means the
+  /// client cannot read or write it, which is exactly right (search.ts reads
+  /// it through raw SQL), but declaring it is not optional: without it,
+  /// Prisma treats the column as drift and the next `migrate dev` offers to
+  /// drop it. Its expression and GIN index live in the migration, since
+  /// neither is expressible in this schema language.
+  searchVector Unsupported("tsvector")?
+
   highlights  Highlight[]
   collections ArticleCollection[]
   audio       ArticleAudio?
   shares      Share[]
+  embeddings  ArticleEmbedding[]
 
   @@unique([userId, url])
   @@index([userId, status])
@@ -333,6 +370,13 @@ model Article {
   @@index([userId, favorited])
   @@index([userId, deletedAt])
   @@index([userId, canonicalUrl])
+  /// The GIN index backing search (#155). Declared here as well as in its
+  /// migration for the same reason searchVector itself is: anything Prisma
+  /// cannot see, it treats as drift. Leaving it out made the very next
+  /// `migrate dev` emit a DROP for it against the shadow database, which
+  /// failed the whole migration -- a raw-SQL index is not a thing you can
+  /// create once and forget about.
+  @@index([searchVector], type: Gin)
 }
 
 // One row per (user, calendar day) that had any active reading time, for
@@ -358,6 +402,43 @@ model ReadingActivityDay {
   seconds Int      @default(0)
 
   @@id([userId, date])
+}
+
+/// One embedded window of an article's text, for semantic search (#156).
+///
+/// Several rows per article, not one: all-MiniLM-L6-v2 truncates at 256 word
+/// pieces, so embedding a whole article does not average it -- it embeds the
+/// opening and silently discards the rest, making a mid-article passage
+/// unfindable. See chunkForEmbedding in packages/shared.
+///
+/// `vector` is a plain Float[] (Postgres double precision[]) rather than a
+/// pgvector column, and that is a decision this issue asked to be recorded
+/// rather than a shortcut. pgvector is not available in the postgres:16 image
+/// that CI and docker-compose both run -- `SELECT * FROM
+/// pg_available_extensions WHERE name = 'vector'` returns nothing -- so
+/// adopting it would mean changing the image in CI, in compose, and in
+/// whatever a real deployment ends up using, plus an extension this app
+/// otherwise has no need for. At one person's library, similarity over a few
+/// thousand 384-float vectors is milliseconds in process. Revisit if a
+/// library ever grows to where a scan is the bottleneck, which is the point
+/// at which an ANN index actually earns its dependency.
+model ArticleEmbedding {
+  id        String  @id @default(cuid())
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  /// Denormalized from article.userId so a search can scope by user without
+  /// joining -- same reasoning as Highlight.userId. Deliberately not a
+  /// relation: it is a query-scoping copy, and the cascade that actually
+  /// matters (article deleted -> embeddings deleted) comes from `article`.
+  userId String
+
+  chunkIndex Int
+  vector     Float[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([articleId, chunkIndex])
+  @@index([userId])
 }
 
 model Highlight {

@@ -17,22 +17,6 @@ const FIXTURE_ORIGIN = `http://127.0.0.1:${process.env.FIXTURE_SERVER_PORT ?? 43
  * Real-world extraction is still covered: save-real-url.spec.ts deliberately
  * fetches a genuine public URL.
  */
-/**
- * `@live` in a test title means it needs the public internet, and
- * `--grep-invert @live` is meant to be a genuine offline switch:
- *
- *   pnpm --filter @booklet/web test:e2e --grep-invert @live
- *
- * That was only aspirational before -- #148 tagged one spec and moved the
- * article saves onto the fixture server, but rss.spec.ts (xkcd),
- * dictionary-lookup.spec.ts (dictionaryapi.dev) and tts-player.spec.ts
- * (Kokoro weights from Hugging Face) all still reached out untagged, so the
- * exclusion left seven specs that would fail anyway (#167). RSS is now served
- * locally; the rest carry the tag.
- *
- * Keep it accurate: a spec that starts needing a public host needs the tag, or
- * the switch quietly stops meaning anything again.
- */
 export const FIXTURES = {
   /** The default article. Ordinary shape -- short opening sentence, a few
    * normal paragraphs. Use this unless a spec needs something specific. */
@@ -46,9 +30,8 @@ export const FIXTURES = {
   longArticle: `${FIXTURE_ORIGIN}/long-article.html`,
   /** Returns 404, for asserting the app's own save-failure handling. */
   notFound: `${FIXTURE_ORIGIN}/not-an-article.html`,
-  /** A real RSS 2.0 document, fetched and parsed for real by rss-service.ts.
-   * Its items link back at this same server, so saving one exercises real
-   * extraction too. */
+  /** A local RSS feed served by the fixture server, so the rss specs never
+   * touch a live third-party feed (#148/#167). */
   feed: `${FIXTURE_ORIGIN}/feed.xml`,
 } as const;
 
@@ -68,32 +51,37 @@ export async function waitForSaveModalToClose(page: Page): Promise<void> {
 
 /**
  * Selects the first span of a rendered PDF text layer and fires the mouseup
- * the reader listens for, returning the selected text.
+ * the reader listens for, returning the text that ended up selected.
  *
- * The wait matters and is the whole reason this is shared. pdf.js renders a
- * page's canvas and its selectable text layer separately, so the text layer
- * can lag whatever a spec waited on to decide the page was ready -- without
- * waiting for a real span, the evaluate below throws "no text layer span to
- * select" on whichever run loses the race. That fired for real in CI, failing
- * highlight-citations.spec.ts twice in a row.
+ * The wait is the whole point. pdf.js renders a page's canvas and its
+ * selectable text layer separately, so the text layer lags whatever a spec
+ * waited on to decide the page was ready -- a page indicator, a canvas, a
+ * page-slot count. Any copy that skips the wait throws "no text layer span
+ * to select" on whichever run loses that race, which is not hypothetical:
+ * it failed highlight-citations.spec.ts twice in a row in CI on a spec that
+ * had been passing. Waiting rather than retrying is deliberate -- a reader
+ * cannot select text that hasn't rendered either, so there is nothing here
+ * for the product to do differently.
  *
- * Four spec files had their own copy of this, two of which were missing the
- * wait; fixing them one at a time is exactly how the next copy rots (#167).
- * Waiting is the right fix rather than a retry: a reader cannot select text
- * that hasn't rendered either, so there is nothing for the product to do
- * differently.
+ * This lived in four separate copies (three named, one inlined twice), and
+ * the wait got added to them one at a time as each failed -- which is
+ * exactly the pattern that leaves the next copy to rot until it costs
+ * another red CI run to find. See #167.
  *
- * `containerSelector` scopes both the wait and the selection to one page's
- * container, which continuous-scroll mode needs since every page's text layer
- * is in the DOM at once.
+ * `containerSelector` scopes both the wait and the query, for continuous-
+ * scroll mode where every page slot has its own text layer and "the first
+ * one on the page" is not the one the spec means. The mouseup is dispatched
+ * on the layer rather than the container in every case: it bubbles, so a
+ * listener on either still sees it, and the layer is the element that
+ * exists in both shapes.
  */
 export async function selectFirstTextLayerSpan(page: Page, containerSelector?: string): Promise<string> {
   const scope = containerSelector ? `${containerSelector} ` : "";
   await page.locator(`${scope}[class*="textLayer"] span`).first().waitFor({ state: "attached", timeout: 15_000 });
 
   return page.evaluate((selector) => {
-    const container: ParentNode = selector ? document.querySelector(selector)! : document;
-    const span = container.querySelector('[class*="textLayer"] span');
+    const layer = document.querySelector(selector ? `${selector} [class*="textLayer"]` : '[class*="textLayer"]');
+    const span = layer?.querySelector("span");
     if (!span?.firstChild) throw new Error("no text layer span to select");
     const range = document.createRange();
     range.setStart(span.firstChild, 0);
@@ -101,10 +89,7 @@ export async function selectFirstTextLayerSpan(page: Page, containerSelector?: s
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-    // Dispatched on the scoped container when there is one (the reader listens
-    // per page in scroll mode), otherwise on the text layer itself.
-    const target = selector ? (container as Element) : span.closest('[class*="textLayer"]')!;
-    target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    layer!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     return range.toString();
   }, containerSelector ?? null);
 }

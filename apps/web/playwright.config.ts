@@ -1,5 +1,22 @@
 import { defineConfig, devices } from "@playwright/test";
 
+/**
+ * The `@live` tag marks every test that genuinely reaches the public
+ * internet, so `--grep-invert @live` gives a suite that runs offline:
+ *
+ *   pnpm --filter @booklet/web test:e2e -- --grep-invert @live
+ *
+ * That is the whole point of the tag, and for a while it did not hold. Only
+ * save-real-url.spec.ts carried it, while six other tests quietly needed a
+ * network -- xkcd's RSS feed, dictionaryapi.dev, and Hugging Face for the
+ * Kokoro weights -- so excluding `@live` still left a suite that failed
+ * without egress. All seven are tagged now (see #167).
+ *
+ * Tag a test if it contacts a host this repo does not control. Do not tag one
+ * that only talks to the fixture server on 127.0.0.1: three of rss.spec.ts's
+ * four tests are tagged and the fourth is not, precisely because it points at
+ * a fixture URL to assert the not-a-feed error path.
+ */
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,

@@ -1,0 +1,357 @@
+/**
+ * Client-side cache for generated TTS audio (#150).
+ *
+ * #147 made the *server* cache generated audio (in-process LRU, plus Redis
+ * when configured), so a repeat request is fast. But it is still a request:
+ * every replay of an article and every reload re-downloads every chunk. This
+ * makes the second play cost nothing at all -- no network, no server, no
+ * pool worker.
+ *
+ * Its own IndexedDB database, deliberately not the `booklet` one in
+ * lib/local/db.ts. That database holds the user's real data (articles,
+ * highlights) and must never be cleared casually; this one holds bytes that
+ * can always be regenerated, wants its own eviction policy, and needs to be
+ * discardable wholesale when the audio format changes. Mixing the two would
+ * mean an eviction pass or a format reset lives one bug away from the
+ * irreplaceable data.
+ *
+ * ## Why this stores bytes rather than Blobs
+ *
+ * The first attempt at this (recorded in #150, written and then backed out)
+ * stored the `Blob` from `fetch` directly and could not be made to produce a
+ * hit -- writes succeeded with plausible byte counts, keys were byte-identical
+ * across passes, and every subsequent read still missed. Key derivation,
+ * transaction commit, and the circuit-breaker flag were each eliminated as
+ * the cause.
+ *
+ * A `Blob` is a *handle*, not bytes: structured-cloning one into IndexedDB
+ * stores a reference to a backing store whose lifetime the browser owns, and
+ * a Blob whose backing store came from somewhere unusual (a stubbed response,
+ * a revoked object URL, a snapshot the browser decided not to persist) can
+ * clone into the database and read back as something that is no longer the
+ * audio. Reading `arrayBuffer()` before the put sidesteps the entire class of
+ * problem: an ArrayBuffer is bytes, it structured-clones by value, and what
+ * comes back is unconditionally what went in. The Blob is reconstructed on
+ * read, where the MIME type is the only thing that needs preserving.
+ *
+ * This costs one extra copy per chunk (~96KB) and removes the only hypothesis
+ * the previous attempt could not rule out.
+ */
+
+const DB_NAME = "booklet-tts-audio";
+const DB_VERSION = 1;
+const STORE = "chunks";
+/** Eviction reads keys in last-used order rather than loading every record. */
+const LAST_USED_INDEX = "lastUsedAt";
+
+/** ~48MB, i.e. roughly 500 chunks at the ~96KB a real chunk measures. Big
+ * enough that replaying any single article is a complete hit; small enough
+ * to be a polite tenant of an origin quota shared with the user's actual
+ * library in the `booklet` database. */
+const DEFAULT_BUDGET_BYTES = 48 * 1024 * 1024;
+
+/** Lets a test force a small budget and watch eviction actually happen,
+ * without a test-only export that ships to users. Same shape as the
+ * `booklet:tts-debug` switch in tts-metrics.ts. */
+const BUDGET_OVERRIDE_KEY = "booklet:tts-cache-budget";
+
+interface CachedChunk {
+  key: string;
+  /** The full tuple the key was derived from, stored so a hash collision is
+   * *detected* on read rather than silently serving one article's audio for
+   * another's text. FNV-1a is a fast non-cryptographic hash, not a unique
+   * identifier, and `crypto.subtle` is secure-context-only so it cannot be
+   * relied on here at all. */
+  voice: string;
+  speed: number;
+  text: string;
+  bytes: ArrayBuffer;
+  type: string;
+  size: number;
+  lastUsedAt: number;
+}
+
+function budgetBytes(): number {
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(BUDGET_OVERRIDE_KEY) : null;
+    if (!raw) return DEFAULT_BUDGET_BYTES;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BUDGET_BYTES;
+  } catch {
+    return DEFAULT_BUDGET_BYTES;
+  }
+}
+
+/**
+ * FNV-1a, twice with different offset bases, to get 64 bits of key out of two
+ * 32-bit passes. `Math.imul` because the FNV prime multiply overflows 32 bits
+ * and plain `*` would silently go through float64 and lose the low bits.
+ *
+ * The text length is appended because it is free and makes the accidental
+ * collisions this can produce require matching length as well as matching
+ * hash -- the stored tuple above is what makes a collision *safe*, this just
+ * makes it rarer.
+ */
+function fnv1a(input: string, seed: number): number {
+  let hash = seed >>> 0;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+export function cacheKey(text: string, voice: string, speed: number): string {
+  // NUL-delimited: it cannot appear in a voice id or a number, so ("af",
+  // "1|x") and ("af|1", "x") cannot collapse to the same input string the way
+  // a printable separator allows. Written as an escape rather than a literal
+  // NUL byte -- a raw one in the source makes git treat this entire file as
+  // binary, which costs every future diff and blame on it.
+  const input = `${voice}\u0000${speed}\u0000${text}`;
+  const hi = fnv1a(input, 0x811c9dc5).toString(16).padStart(8, "0");
+  const lo = fnv1a(input, 0x01000193).toString(16).padStart(8, "0");
+  return `${hi}${lo}-${text.length}`;
+}
+
+/**
+ * Latches on the first sign that storage is unusable -- private browsing,
+ * a blocked origin, a quota that cannot be satisfied, a corrupt database.
+ * Playback must never be worse than it was without a cache, so every failure
+ * here degrades to "just use the network" permanently rather than retrying
+ * a broken database on every chunk.
+ */
+let disabled = false;
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+/**
+ * Strictly-increasing "last used" stamps.
+ *
+ * `Date.now()` alone is millisecond-resolution, and chunks are written far
+ * faster than that -- a prefetch window fills several in the same millisecond,
+ * giving them identical stamps and leaving their order in the lastUsedAt index
+ * undefined. Eviction then drops an arbitrary one of the tied records instead
+ * of the genuinely least-recently-used one, which is how an LRU quietly stops
+ * being an LRU. Clamping upward keeps the value a real wall-clock time across
+ * sessions (so ordering still means something after a reload) while
+ * guaranteeing uniqueness within one.
+ */
+let lastStamp = 0;
+function nextStamp(): number {
+  const now = Date.now();
+  lastStamp = now > lastStamp ? now : lastStamp + 1;
+  return lastStamp;
+}
+
+/** The most recent fire-and-forget touch, so a test can wait for the LRU
+ * bookkeeping the read path deliberately does not await. */
+let pendingTouch: Promise<void> = Promise.resolve();
+
+function openDb(): Promise<IDBDatabase> {
+  if (disabled) return Promise.reject(new Error("TTS audio cache disabled."));
+  if (dbPromise) return dbPromise;
+  if (typeof indexedDB === "undefined") {
+    disabled = true;
+    return Promise.reject(new Error("IndexedDB is not available in this environment."));
+  }
+
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+    let req: IDBOpenDBRequest;
+    try {
+      req = indexedDB.open(DB_NAME, DB_VERSION);
+    } catch (err) {
+      // Firefox in private browsing throws synchronously from open() rather
+      // than firing onerror, so this branch is load-bearing, not defensive.
+      disabled = true;
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        const store = db.createObjectStore(STORE, { keyPath: "key" });
+        store.createIndex(LAST_USED_INDEX, "lastUsedAt");
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => {
+      disabled = true;
+      reject(req.error ?? new Error("Failed to open the TTS audio cache."));
+    };
+  });
+
+  // A rejected promise must not be left cached, or every later call inherits
+  // the same failure even if it was transient.
+  dbPromise.catch(() => {
+    dbPromise = null;
+  });
+  return dbPromise;
+}
+
+/**
+ * Resolves when the transaction has actually *committed*, not merely when the
+ * request produced a result. Awaiting only the IDBRequest is the subtle,
+ * genuinely wrong pattern the first attempt used: the request fires success
+ * while the transaction is still open, so a write can be reported as done and
+ * then be rolled back by an abort nothing was watching for.
+ */
+function done<T>(tx: IDBTransaction, result: () => T): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    tx.oncomplete = () => resolve(result());
+    tx.onabort = () => reject(tx.error ?? new Error("TTS audio cache transaction aborted."));
+    tx.onerror = () => reject(tx.error ?? new Error("TTS audio cache transaction failed."));
+  });
+}
+
+function request<T>(req: IDBRequest<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error ?? new Error("TTS audio cache request failed."));
+  });
+}
+
+/**
+ * Returns the cached audio for this exact (text, voice, speed), or null on
+ * any miss -- including "the cache is broken", which is why nothing here
+ * throws. A miss costs one indexed lookup, single-digit milliseconds, well
+ * under the network round trip it is trying to avoid.
+ */
+export async function readCachedAudio(text: string, voice: string, speed: number): Promise<Blob | null> {
+  if (disabled) return null;
+  const key = cacheKey(text, voice, speed);
+  try {
+    const db = await openDb();
+    const tx = db.transaction(STORE, "readonly");
+    const req = tx.objectStore(STORE).get(key) as IDBRequest<CachedChunk | undefined>;
+    const record = await request(req);
+    // Still awaits the commit rather than returning on the request alone --
+    // see done()'s comment for why that distinction matters even on a read.
+    await done(tx, () => undefined);
+
+    if (!record) return null;
+    // Collision check -- see CachedChunk.text. A mismatch means this key was
+    // derived from different content, so the bytes are somebody else's audio
+    // and must not be played.
+    if (record.text !== text || record.voice !== voice || record.speed !== speed) return null;
+
+    // Touch for LRU. Deliberately not awaited: the read path's whole value is
+    // being fast, and a lost touch only costs eviction accuracy.
+    pendingTouch = touch(key).catch(() => {});
+    return new Blob([record.bytes], { type: record.type || "audio/wav" });
+  } catch {
+    return null;
+  }
+}
+
+async function touch(key: string): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction(STORE, "readwrite");
+  const store = tx.objectStore(STORE);
+  const existing = await request(store.get(key) as IDBRequest<CachedChunk | undefined>);
+  if (existing) store.put({ ...existing, lastUsedAt: nextStamp() });
+  await done(tx, () => undefined);
+}
+
+/**
+ * Stores this chunk's audio. Fire-and-forget by design -- the caller already
+ * has the Blob it needs, so a failed write must not fail, or even delay,
+ * playback.
+ */
+export async function writeCachedAudio(text: string, voice: string, speed: number, blob: Blob): Promise<void> {
+  if (disabled) return;
+  try {
+    // Read the bytes out *before* opening the transaction: awaiting anything
+    // that isn't an IDB request inside a transaction lets it auto-close, and
+    // arrayBuffer() is exactly such an await.
+    const bytes = await blob.arrayBuffer();
+    const db = await openDb();
+    const tx = db.transaction(STORE, "readwrite");
+    const record: CachedChunk = {
+      key: cacheKey(text, voice, speed),
+      voice,
+      speed,
+      text,
+      bytes,
+      type: blob.type || "audio/wav",
+      size: bytes.byteLength,
+      lastUsedAt: nextStamp(),
+    };
+    tx.objectStore(STORE).put(record);
+    await done(tx, () => undefined);
+    await evictIfOverBudget();
+  } catch {
+    // Quota exceeded is the expected failure here and is not a reason to give
+    // up on the cache entirely -- eviction below is what resolves it.
+  }
+}
+
+/**
+ * Drops least-recently-used chunks until the store is back under budget.
+ * Walks the lastUsedAt index oldest-first rather than reading every record,
+ * so the cost is proportional to what gets deleted, not to what is kept.
+ */
+async function evictIfOverBudget(): Promise<void> {
+  const budget = budgetBytes();
+  const db = await openDb();
+
+  const sizeTx = db.transaction(STORE, "readonly");
+  let total = 0;
+  await new Promise<void>((resolve, reject) => {
+    const cursorReq = sizeTx.objectStore(STORE).openCursor();
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result;
+      if (!cursor) return;
+      total += (cursor.value as CachedChunk).size ?? 0;
+      cursor.continue();
+    };
+    cursorReq.onerror = () => reject(cursorReq.error ?? new Error("Cache size scan failed."));
+    sizeTx.oncomplete = () => resolve();
+    sizeTx.onabort = () => reject(sizeTx.error ?? new Error("Cache size scan aborted."));
+  });
+
+  if (total <= budget) return;
+
+  const evictTx = db.transaction(STORE, "readwrite");
+  let remaining = total;
+  await new Promise<void>((resolve, reject) => {
+    const cursorReq = evictTx.objectStore(STORE).index(LAST_USED_INDEX).openCursor();
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result;
+      if (!cursor || remaining <= budget) return;
+      remaining -= (cursor.value as CachedChunk).size ?? 0;
+      cursor.delete();
+      cursor.continue();
+    };
+    cursorReq.onerror = () => reject(cursorReq.error ?? new Error("Cache eviction failed."));
+    evictTx.oncomplete = () => resolve();
+    evictTx.onabort = () => reject(evictTx.error ?? new Error("Cache eviction aborted."));
+  });
+}
+
+/** Wholesale discard -- for a change in audio format, or a user clearing
+ * their data. Regenerable bytes only; nothing here is worth recovering. */
+export async function clearAudioCache(): Promise<void> {
+  if (disabled) return;
+  try {
+    const db = await openDb();
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).clear();
+    await done(tx, () => undefined);
+  } catch {
+    /* Nothing to do -- an unclearable cache is still evicted under budget. */
+  }
+}
+
+/** Test seam: forget the memoized handle and the latched circuit so a spec
+ * can exercise a fresh database. Not part of the runtime path. */
+export function __resetAudioCacheForTests(): void {
+  disabled = false;
+  dbPromise = null;
+  lastStamp = 0;
+  pendingTouch = Promise.resolve();
+}
+
+/** Test seam: wait for the LRU touch that readCachedAudio deliberately does
+ * not await, so eviction order can be asserted deterministically. */
+export function __settleAudioCacheForTests(): Promise<void> {
+  return pendingTouch;
+}

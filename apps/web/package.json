@@ -9,23 +9,31 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:worker": "node scripts/build-embedding-worker.mjs",
+    "predev": "node scripts/build-embedding-worker.mjs",
+    "prebuild": "node scripts/build-embedding-worker.mjs"
   },
   "dependencies": {
     "@booklet/shared": "workspace:*",
     "@datadog/browser-rum": "^7.7.0",
+    "@huggingface/transformers": "^3.8.1",
     "@sentry/browser": "^10.68.0",
     "dompurify": "3.2.3",
     "epubjs": "^0.3.93",
     "jszip": "^3.10.1",
+    "minisearch": "^7.2.0",
     "next": "16.2.11",
     "pdfjs-dist": "^6.1.200",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "stemmer": "^2.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

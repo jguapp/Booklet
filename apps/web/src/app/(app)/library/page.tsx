@@ -61,7 +61,7 @@ function LibraryPageInner() {
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [searchResults, setSearchResults] = useState<{ articles: Article[]; highlights: Highlight[] } | null>(null);
+  const [searchResults, setSearchResults] = useState<{ articles: Article[]; highlights: Highlight[]; snippets?: Record<string, string> } | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [confirmingHoarding, setConfirmingHoarding] = useState<number | null>(null); // current unread count, while the "you sure?" prompt is up
   const [renaming, setRenaming] = useState<Article | null>(null);
@@ -112,7 +112,7 @@ function LibraryPageInner() {
         return;
       }
       const results = await searchLibrary(debouncedSearch, isAuthenticated);
-      if (!cancelled) setSearchResults(results as { articles: Article[]; highlights: Highlight[] });
+      if (!cancelled) setSearchResults(results as { articles: Article[]; highlights: Highlight[]; snippets?: Record<string, string> });
     }
     runSearch();
     return () => {
@@ -130,10 +130,17 @@ function LibraryPageInner() {
   const isSearching = debouncedSearch.length > 0;
   const visible = useMemo(() => {
     const base = isSearching ? (searchResults?.articles ?? []) : articles;
-    return base
+    const filtered = base
       .filter((a) => tab === "ALL" || a.status === tab)
-      .filter((a) => !tagFilter || a.tags.includes(tagFilter))
-      .sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+      .filter((a) => !tagFilter || a.tags.includes(tagFilter));
+    // Search results arrive ordered by relevance (#155) -- re-sorting them by
+    // savedAt here would throw that away and put the best match wherever it
+    // happened to be saved, which is exactly the behaviour ranking replaced.
+    // Outside a search there is no ranking to preserve, so newest-first is
+    // still the right default for a library.
+    return isSearching
+      ? filtered
+      : filtered.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
   }, [articles, searchResults, isSearching, tab, tagFilter]);
 
   async function retrySync() {
@@ -335,6 +342,10 @@ function LibraryPageInner() {
             <ArticleCard
               key={article.id}
               article={article}
+              // Only while searching -- outside a search there is no query for
+              // a snippet to be "about", and the card is a library item rather
+              // than a result.
+              snippet={isSearching ? searchResults?.snippets?.[article.id] : undefined}
               onToggleArchived={handleToggleArchived}
               onToggleFavorited={handleToggleFavorited}
               onRename={setRenaming}
