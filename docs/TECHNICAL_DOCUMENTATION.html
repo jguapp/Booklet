@@ -342,7 +342,7 @@
   <button class="mobile-toc-toggle" id="mobileTocToggle" type="button">☰ Contents</button>
   <nav class="toc" id="toc">
     <div class="toc-title">📖 Booklet</div>
-    <div class="toc-sub">The Coding Bible — v5, living document</div>
+    <div class="toc-sub">The Coding Bible — v6, living document</div>
     <ol>
       <li><a href="#part-0">0. How to Use This Document</a></li>
       <li><a href="#part-1">I. The Big Picture</a>
@@ -381,6 +381,8 @@
           <li><a href="#feat-ocr">OCR</a></li>
           <li><a href="#feat-tts">Text-to-Speech (the full story)</a></li>
           <li><a href="#feat-resurface">Resurfacing (SM-2)</a></li>
+          <li><a href="#feat-sharing">Sharing &amp; onboarding seeds</a></li>
+          <li><a href="#feat-podcast">The podcast feed</a></li>
           <li><a href="#feat-search">Search</a></li>
           <li><a href="#feat-collections">Collections</a></li>
           <li><a href="#feat-import-export">Import / Export</a></li>
@@ -405,7 +407,15 @@
       </li>
       <li><a href="#part-8">VIII. Glossary</a></li>
       <li><a href="#part-9">IX. Roads Not Taken</a></li>
-      <li><a href="#part-10">X. Changelog of This Document</a></li>
+      <li>
+        <a href="#part-ship">X. Shipping: What Blocks It, and What Comes After</a>
+        <ol>
+          <li><a href="#ship-blockers">What must be fixed first</a></li>
+          <li><a href="#ship-nice-to-have">Worth adding before deploying</a></li>
+          <li><a href="#post-deploy-roadmap">The roadmap after launch</a></li>
+        </ol>
+      </li>
+      <li><a href="#part-10">XI. Changelog of This Document</a></li>
     </ol>
   </nav>
 
@@ -1857,6 +1867,155 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           </p>
         </div>
 
+        <h3 id="feat-sharing">Sharing, and the aggregate underneath it</h3>
+        <p>
+          Everything here was private, which is the right default and left
+          the app with <strong>no distribution mechanism at all</strong> —
+          nothing to send anyone, and nothing for a new account to look at.
+        </p>
+        <p>
+          A <code>Share</code> is an unlisted public page for one article's
+          highlights or one collection's. The slug is 128 bits of
+          <code>randomBytes</code>; it is the entire access control, so it
+          is sized against guessing rather than against looking tidy.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">Revocation deletes the row, and that is a security decision twice over</span>
+          <p>
+            The obvious implementation is a <code>revokedAt</code> column.
+            It is wrong for two separate reasons. A soft-deleted row still
+            holds the old slug, so revocation becomes reversible by flipping
+            a column back — the guarantee a user thinks they are getting is
+            "that link is dead", not "that link is dormant".
+          </p>
+          <p>
+            And it creates a side channel. With the row gone, a revoked slug
+            takes a byte-identical code path to one that never existed: same
+            single index lookup, same <code>NOT_FOUND</code>. A soft delete
+            is exactly what would have introduced a measurable branch,
+            letting whoever holds a leaked URL confirm the page was once
+            real. The same reasoning drives the single error constant for
+            never-existed, revoked and trashed alike.
+          </p>
+        </div>
+        <p>
+          The public payload is a Prisma <code>select</code>, not a filtered
+          spread — the private columns are never fetched, so a careless
+          spread added later has nothing to leak. Only the reader's own
+          <code>selectedText</code> goes out, plus title, author, site and a
+          link to the original. <code>extractedText</code>,
+          <code>extractedHtml</code>, the cover image and the publisher's
+          own <code>excerpt</code> are all excluded: publishing highlights of
+          a copyrighted article means publishing excerpts, and the line is
+          the reader's selection, not the publisher's content.
+        </p>
+        <p>
+          <strong>Sharing a smart collection is refused outright.</strong>
+          Its membership is a live query, so the page would silently publish
+          articles saved after the link went out — the owner would be
+          consenting to publish things that do not exist yet.
+        </p>
+        <h4 id="onboarding-seeds">Seeds, and why the threshold is enforced on write</h4>
+        <p>
+          <code>PublicHighlightStat</code> aggregates which passages people
+          highlight, to give a new account something worth reading on day
+          one. It stores a hash, the display text, denormalized attribution
+          and a count — <strong>no user ids and no highlight ids</strong>.
+          It cannot deanonymize anyone by construction rather than by
+          policy, which is the only version of that claim worth making.
+        </p>
+        <p>
+          Two conditions must both hold before a passage counts: the account
+          opted in <em>and</em> the highlight is already public. Publishing
+          one page for one friend is not consent to be mined for everyone,
+          so <code>contributesToPublicHighlights</code> is separate from
+          sharing and off by default.
+        </p>
+        <div class="callout warn">
+          <span class="callout-label">Two details that look like fussiness and are not</span>
+          <p>
+            <strong>The threshold of 3 is enforced at write time, not read
+            time.</strong> A read-side filter leaves the one-person rows
+            sitting in the table, one forgotten where-clause away from being
+            served. At a threshold of 2, an attacker who is one of the two
+            contributors learns that exactly one other account highlighted a
+            specific passage — real membership inference. At 3 they would
+            need two colluding accounts to learn only that some unnamed
+            third exists.
+          </p>
+          <p>
+            <strong>Recompute is a full rebuild, not incremental
+            counters.</strong> Unsharing, opting out, deleting a highlight
+            and trashing an article all have to <em>decrement</em>. A
+            counter that only climbs keeps publishing passages their authors
+            have withdrawn, which is the failure that matters here.
+          </p>
+        </div>
+        <p>
+          With no users the aggregate is empty, so day one is covered by 19
+          hand-transcribed public-domain passages. Nothing scraped —
+          explicitly not Amazon's Kindle popular highlights, which is a
+          terms-of-service and copyright gray area. Every work is pre-1929
+          and so is every <em>translation</em>, with the translator named,
+          because a modern translation is its own copyrighted work. Several
+          popular "Marcus Aurelius" and "Sun Tzu" lines were left out as
+          modern paraphrases rather than translations.
+        </p>
+
+        <h3 id="feat-podcast">The podcast feed</h3>
+        <p>
+          Read-aloud only worked inside Booklet, while the listening habit
+          people already have lives in a podcast player that has solved
+          lock-screen controls, CarPlay, playback speed, sleep timers and
+          offline sync. An RSS feed reaches all of it for comparatively
+          little work.
+        </p>
+        <p>
+          The hard part is not the feed. Clients want <strong>one file per
+          item</strong> and TTS generates per chunk, so
+          <code>audio-concat.ts</code> splices past each 44-byte header and
+          rewrites the RIFF and data sizes. It also clamps the declared data
+          size to what the buffer actually holds and floors to a whole
+          frame: a stray odd byte mid-chain byte-shifts every later chunk
+          and turns the rest of the article into noise — silently, because
+          it still plays.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">The feed token's boundary is its format, not a scope check</span>
+          <p>
+            The obvious design is a <code>feed</code> scope checked on the
+            feed routes. That works and has to be remembered on every route
+            written afterwards; the failure mode is a new endpoint that
+            forgets, years later, with nothing to catch it.
+          </p>
+          <p>
+            Instead feed tokens are <code>bkpod_</code>-prefixed and
+            <code>looksLikeApiToken()</code> matches only
+            <code>blk_</code>. A feed token therefore falls through to JWT
+            verification, fails, and leaves <code>request.userId</code>
+            null. It cannot become a session <em>anywhere</em> in the app,
+            including code not yet written. The reverse is closed too:
+            <code>POST /api/tokens</code> refuses to mint the feed scope, so
+            a valid read-only personal access token gets a 404 at the feed
+            URL.
+          </p>
+        </div>
+        <p>
+          The feed defaults to the queue (UNREAD + READING) rather than the
+          library, because a podcast client auto-downloads everything it has
+          not seen — defaulting to everything hands someone with a
+          400-article backlog 400 unplayed episodes and tens of gigabytes on
+          first subscribe.
+        </p>
+        <p>
+          <strong>Playback position does not write back, and cannot.</strong>
+          Podcast clients have no field, callback or standard for reporting
+          it; the only signal is that someone fetched an enclosure, which
+          does not imply listening. Stated in the route, in the feed's own
+          description, and in the settings UI, so it is not filed as a bug
+          later.
+        </p>
+
         <h3 id="feat-search">Search</h3>
         <p>
           Plain, case-insensitive <code>contains</code> matching across
@@ -2785,10 +2944,262 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <hr class="divider">
 
+      <section id="part-ship">
+        <h2><span class="part-label">Part X</span>Shipping: What Blocks It, and What Comes After</h2>
+        <p>
+          This project has never met a user. Everything in it — every
+          feature, every latency decision, every schema choice — was made
+          without a single piece of usage data. That is the largest
+          outstanding risk in the codebase, and it is not a risk any amount
+          of further building reduces.
+        </p>
+        <p>
+          What follows is the honest state of readiness: what must be fixed
+          before deploying, what is worth adding first, and what the work
+          looks like once real people are using it. It is deliberately
+          separated that way, because the third list is mostly guesses and
+          the first two are not.
+        </p>
+
+        <h3 id="ship-blockers">What must be fixed first</h3>
+        <div class="callout warn">
+          <span class="callout-label">1. Uploaded files do not survive a deploy (#173)</span>
+          <p>
+            <code>storage-service.ts</code> writes inside the application
+            directory. <code>docker-compose.yml</code> declares volumes for
+            Postgres and Redis and <strong>none for storage</strong>. On
+            Fly, Railway, Render, Cloud Run, or a plain rebuild, every
+            uploaded PDF and EPUB and every generated podcast enclosure is
+            destroyed, while the database rows survive and go on pointing at
+            them. The library looks intact and the readers open empty.
+          </p>
+          <p>
+            <a href="#local-migration">#172</a> raised the stakes: uploaded
+            files now migrate <em>to</em> the server and are cleared from
+            IndexedDB once it accepts them, so the server holds the only
+            copy. This is the fourth member of the family #164, #171 and
+            #172 belong to — silent, invisible when it happens, discovered
+            far too late — and the only one that fires without anyone doing
+            anything wrong. Shipping a routine change is enough.
+          </p>
+        </div>
+        <div class="callout warn">
+          <span class="callout-label">2. Nothing is verifying pushes</span>
+          <p>
+            The GitHub Actions allowance is exhausted; the GitLab port has
+            never executed, because the repository is on GitHub. Three
+            documents claimed CI "runs on every push" and none of it was
+            true. Deploying without a pipeline means the first regression
+            ships silently. <code>pnpm verify</code> stands in locally, but
+            it is a thing a person has to remember.
+          </p>
+          <p>
+            The move to GitLab does not, by itself, fix this: GitLab.com's
+            shared runners give 400 minutes a month against Actions' 2,000,
+            and a run costs 20-25 minutes. A self-hosted runner (free,
+            unlimited, and faster) or making the repository public (which
+            makes Actions free) are the options that actually work.
+          </p>
+        </div>
+        <div class="callout warn">
+          <span class="callout-label">3. No way to delete an account (#174)</span>
+          <p>
+            There is no deletion route and no UI. For an app storing what
+            someone reads and what they thought about it, that is a trust
+            problem before it is a legal one — and it is a legal one too.
+            Sharpened by <a href="#part-5">#158</a>: a departing user
+            reasonably expects their public pages and their contribution to
+            the cross-user aggregate to go with them.
+          </p>
+          <p>
+            Most of the work already exists — export works, and every table
+            cascades from <code>User</code>. The gap is a route, a
+            confirmation, and the two things that <em>don't</em> cascade:
+            stored files (which orphan permanently) and
+            <code>PublicHighlightStat</code>, which by design holds no user
+            ids and therefore needs a recompute rather than a cascade.
+          </p>
+        </div>
+        <p>
+          Three more, smaller but real. <strong>The Docker build has never
+          run in this environment</strong> and is the single check that has
+          caught the most — it must pass once before any deploy.
+          <strong>Nothing rejects a weak production secret</strong>:
+          <code>tokens.ts</code> throws when <code>JWT_ACCESS_SECRET</code>
+          is missing but accepts the placeholder from
+          <code>.env.example</code>, and a startup refusal under
+          <code>NODE_ENV=production</code> is a few lines against a whole
+          class of launch-day mistake. And <strong>there is no privacy
+          policy or terms page</strong>, which an app with accounts, email,
+          public sharing and cross-user aggregation needs.
+        </p>
+        <div class="callout why">
+          <span class="callout-label">The multi-instance question, which has to be answered before it is discovered</span>
+          <p>
+            Several things assume one process. The rate limiter's store is
+            in-memory and says so; #170's unknown-email failure map is too
+            (its real counter is in Postgres, so a guesser spreading across
+            instances can still distinguish the two — documented in the
+            code); the TTS L1 cache is per-process, which is fine because it
+            is a cache. Object storage has the same shape: a mounted disk
+            works for one instance and stops working for two, because
+            instance A cannot serve what instance B wrote.
+          </p>
+          <p>
+            Either deploy deliberately as a single instance and write that
+            down, or move the limiter to Redis and storage to S3 before
+            scaling. What must not happen is scaling to two and finding out:
+            the failure is silent in exactly the same way as the rest of
+            this list — the limits simply become N times looser.
+          </p>
+        </div>
+
+        <h3 id="ship-nice-to-have">Worth adding before deploying, but not blocking</h3>
+        <ul>
+          <li><strong>The <code>upload → signup → open</code> e2e case.</strong>
+            #172's one unchecked criterion. The server half is
+            integration-tested; the browser half is the part that actually
+            broke.</li>
+          <li><strong>Opus for podcast audio (#153).</strong> WAV is ~2.9 MB
+            a minute. A forty-minute article is over 100 MB pushed to a
+            phone, and articles past 250 chunks are currently skipped
+            outright rather than truncated — a truncated episode plays
+            cleanly and hides the loss, which is why skipping is the safer
+            default and a bad permanent answer.</li>
+          <li><strong>Orphaned-file cleanup.</strong> Deleting an article
+            cascades the <code>ArticleAudio</code> row and leaves the WAV.
+            Storage grows and nothing reclaims it. Cheap now, annoying later,
+            and it pairs naturally with #173.</li>
+          <li><strong>Upload quota.</strong> Deferred in #172 because doing
+            it properly needs a stored per-user byte count rather than
+            walking the disk per upload. With durable storage it stops being
+            theoretical and becomes a cost line.</li>
+          <li><strong>Mobile prompt authoring.</strong> Mobile honors recall
+            prompts but cannot write them, so a mobile-only user can never
+            create one.</li>
+        </ul>
+
+        <h3 id="post-deploy-roadmap">The roadmap after launch</h3>
+        <p>
+          Ordered by what usage data unlocks rather than by appeal. The
+          first phase exists to make the later ones decidable, which is the
+          whole reason for deploying sooner rather than building more.
+        </p>
+        <table>
+          <tr><th>Phase</th><th>Work</th><th>Why it waits for users</th></tr>
+          <tr>
+            <td><strong>0 — Watch</strong><br>first weeks</td>
+            <td>Actually read the Datadog traces #151 wired up. Real-world
+              TTFA distribution from RUM. Error triage from Sentry. Confirm
+              <code>TRUST_PROXY</code> resolved correctly by checking whether
+              rate limits key on real client addresses.</td>
+            <td>The observability exists and has never had anything to
+              observe. Every performance number in
+              <a href="#feat-tts">Part V</a> came from a local run or a
+              2-vCPU CI box, and neither is a user.</td>
+          </tr>
+          <tr>
+            <td><strong>1 — Finish the measurements</strong></td>
+            <td>Run <code>bench-readalong-alignment.ts</code> and close
+              <a href="#part-6">#159</a> either way. Run the podcast feed
+              through a real validator and a real client, closing #154's two
+              unverified criteria.</td>
+            <td>Both are blocked here only by network access, not by
+              difficulty. A deployed environment has it.</td>
+          </tr>
+          <tr>
+            <td><strong>2 — Fix what real usage breaks</strong></td>
+            <td>Whatever phase 0 surfaces. Expect: cold-start latency on the
+              first TTS request after idle, extraction failures on sites the
+              fixture server never modelled, and at least one thing nobody
+              predicted.</td>
+            <td>This is the phase that cannot be planned, which is precisely
+              why the plan should not extend past it in detail.</td>
+          </tr>
+          <tr>
+            <td><strong>3 — Growth loops</strong></td>
+            <td>Measure whether shared pages actually bring anyone back.
+              Switch onboarding seeds from the public-domain set to the real
+              cross-user aggregate once enough accounts have opted in to
+              clear the threshold of 3.</td>
+            <td>#158 part 2 is built and structurally empty until there are
+              users. The seed set is scaffolding for exactly this moment.</td>
+          </tr>
+          <tr>
+            <td><strong>4 — Scale, if the numbers say so</strong></td>
+            <td>Redis-backed rate limiting, S3, more than one instance.
+              Postgres full-text search if library sizes make
+              <code>contains</code> matching hurt.</td>
+            <td>Every one of these is a real cost with no benefit at low
+              volume. The search tradeoff in particular was made
+              consciously (see <a href="#feat-search">Search</a>) and should
+              be revisited on evidence, not on principle.</td>
+          </tr>
+          <tr>
+            <td><strong>5 — Platform reach</strong></td>
+            <td>Chrome Web Store, addons.mozilla.org, Safari conversion, the
+              two app stores. Mobile PDF/EPUB page rendering.</td>
+            <td>Store review is slow and each listing is a commitment to
+              keep shipping there. Worth doing once the web app has shown
+              which features people use.</td>
+          </tr>
+        </table>
+        <div class="callout why">
+          <span class="callout-label">The thing this roadmap is really for</span>
+          <p>
+            The backlog before this pass contained a podcast feed, semantic
+            search, forced alignment and cross-user aggregation — all
+            plausible, none informed by anyone's behaviour. Some of them are
+            now built and may turn out to matter to nobody.
+          </p>
+          <p>
+            The build-document-review loop that produced this codebase has
+            no exit condition: a review pass always finds something. What
+            ends it is deployment, because after that the backlog gets
+            ordered by evidence instead of by inference.
+          </p>
+        </div>
+      </section>
+
+      <hr class="divider">
+
       <section id="part-10">
-        <h2><span class="part-label">Part X</span>Changelog of This Document</h2>
+        <h2><span class="part-label">Part XI</span>Changelog of This Document</h2>
         <table>
           <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-08</td>
+            <td>
+              v6 — added <a href="#part-ship">Part X, Shipping</a>: the three
+              things that must be fixed before deploying (files destroyed on
+              redeploy, nothing verifying pushes, no way to delete an
+              account), the multi-instance assumptions that have to be
+              answered deliberately rather than discovered, what is worth
+              adding first, and a post-launch roadmap ordered by what usage
+              data unlocks rather than by appeal. Added
+              <a href="#feat-sharing">Sharing</a> and
+              <a href="#feat-podcast">the podcast feed</a> to Part V,
+              including why revocation deletes the row (it is a security
+              decision twice — a soft delete is both reversible and a timing
+              side channel), why the aggregation threshold is enforced on
+              write rather than read, and why the feed token's boundary is
+              its format rather than a scope check that has to be remembered
+              on every future route.
+              Recorded <a href="#recall-prompts">#159's negative result</a>:
+              the shipped read-along estimate and an independent model
+              disagree by 150-1340ms against a 100ms threshold fixed before
+              measuring, which cannot rule the question out, so the
+              ground-truth harness is written and deliberately marked as
+              never executed.
+              Corrected the environment table throughout — twelve variables
+              the code reads were undocumented, and both
+              <code>AUTH_ATTEMPT_RATE_LIMIT_MAX</code> (10, now 100) and
+              <code>TTS_POOL_SIZE</code> (a fixed 3, actually one per core
+              capped at 3) had stale defaults. Removed the claim, repeated
+              in three documents, that CI runs on every push; it does not,
+              and Part X says what is true instead.
+            </td>
+          </tr>
           <tr>
             <td>2026-08-08</td>
             <td>
