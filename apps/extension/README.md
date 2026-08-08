@@ -39,10 +39,24 @@ unpacked** → select `apps/extension/dist`. In Firefox:
 `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** →
 select `apps/extension/dist/manifest.json`.
 
-Points at `http://localhost:4000` by default (see `src/config.ts`). Change
-that -- and the matching `host_permissions` entry in `manifest.json`, and the
-`content_scripts.exclude_matches` entry for the web app's own origin -- to
-point at a deployed API and web app instead.
+Points at `http://localhost:4000` by default (see `src/config.ts`). For a
+deployed build, set `BOOKLET_API_URL` (the API) and `BOOKLET_WEB_APP_URL`
+(the web app) when building:
+
+```bash
+BOOKLET_API_URL=https://api.example.com BOOKLET_WEB_APP_URL=https://app.example.com \
+  pnpm --filter @booklet/extension build
+```
+
+`build.mjs` bakes both into the bundle (esbuild `define`) *and* rewrites the
+matching manifest entries -- `host_permissions` for the API origin, and the
+content script's `exclude_matches` for the web app's own pages. Those had to
+be edited by hand alongside `src/config.ts` before, and forgetting the
+manifest half shipped a build whose every API fetch the browser silently
+blocked. The build refuses to run if the localhost entries it rewrites
+aren't where it expects them, for the same reason. `BOOKLET_API_URL` is the
+same variable the e2e suite reads, so a build and a test run pointed at the
+same non-default API need only one variable set.
 
 ## Permissions
 
