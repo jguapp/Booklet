@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type {
   AuthResponse,
+  DeleteAccountRequest,
   ForgotPasswordRequest,
   LoginRequest,
   RefreshResponse,
@@ -32,6 +33,8 @@ import {
 import { requireAuth } from "../lib/auth/context.js";
 import { getOAuthProvider } from "../lib/auth/oauth.js";
 import { sendEmail } from "../services/email-service.js";
+import { deleteStoredFile } from "../services/storage-service.js";
+import { recomputePublicHighlightStats } from "../services/aggregation-service.js";
 
 type UserRow = Awaited<ReturnType<typeof prisma.user.findUniqueOrThrow>>;
 
@@ -41,6 +44,7 @@ function toUserProfile(user: UserRow): UserProfile {
     email: user.email,
     name: user.name,
     emailVerified: user.emailVerifiedAt !== null,
+    hasPassword: user.passwordHash !== null,
     resurfaceFrequency: user.resurfaceFrequency,
     highlightsPerDigest: user.highlightsPerDigest,
     kindleEmail: user.kindleEmail,
@@ -570,6 +574,115 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
 
       const body: UserProfile = toUserProfile(user);
       return reply.send(body);
+    },
+  );
+
+  /**
+   * Delete this account and everything attached to it (#174).
+   *
+   * Immediate, not a 30-day soft delete. Three reasons, in order of weight:
+   *
+   * 1. Two of the acceptance criteria are "shared pages 404 immediately" and
+   *    "PublicHighlightStat no longer counts the departing user". A grace
+   *    period is precisely a window in which neither is true -- the Share
+   *    rows are still there serving pages, and the aggregate is still
+   *    counting a library its owner has asked to be rid of. A deletion that
+   *    leaves your reading published for another month is not the thing
+   *    anyone pressed the button for.
+   * 2. The misclick this would protect against is already covered from the
+   *    other side: export (exportAsMarkdownZip) has existed since before
+   *    this route did, so "get your data out first" is a path a user can
+   *    take, and the confirmation below is deliberately not a single click.
+   * 3. Restorability would have to be a `deletedAt` column on User and a
+   *    `deletedAt: null` clause in every query that reads a user -- a
+   *    soft-delete that half the codebase forgets is worse than no
+   *    soft-delete, because rows that look deleted keep being served.
+   *
+   * The cost, stated plainly: an attacker who has taken over an account can
+   * destroy it, and there is no undo. That is a real loss, and it is the one
+   * accepted here -- an attacker holding the password already has read access
+   * to everything this account contains, which is the harm that cannot be
+   * undone either way.
+   *
+   * On AUTH_ATTEMPT_LIMIT because it verifies a password. It is not an
+   * unauthenticated guessing oracle (a valid access token is required to
+   * reach it at all), which is also why a failure here deliberately does not
+   * feed recordFailedLogin: someone who stole a token could otherwise run the
+   * real owner's login into the escalating delay from #170.
+   */
+  app.delete<{ Body: DeleteAccountRequest }>(
+    "/api/auth/me",
+    { preHandler: requireAuth, config: { rateLimit: AUTH_ATTEMPT_LIMIT } },
+    async (request, reply) => {
+      const user = await prisma.user.findUnique({ where: { id: request.userId! } });
+      if (!user) return reply.code(401).send({ error: "unauthorized", message: "Sign in required." });
+
+      const { password, confirmEmail } = request.body ?? {};
+      const refused = (message: string) => reply.code(403).send({ error: "confirmation_failed", message });
+
+      if (user.passwordHash) {
+        if (typeof password !== "string" || !verifyPassword(password, user.passwordHash)) {
+          return refused("That password is incorrect.");
+        }
+      } else {
+        // OAuth-only account (User.passwordHash is null): there is no
+        // password to check, so the confirmation is typing the account's own
+        // address. Weaker than a password -- the address is on screen the
+        // whole time -- but it is a deliberate act rather than a click, which
+        // is all a confirmation step can be here. Case- and whitespace-
+        // insensitive, because the goal is intent, not dictation.
+        if (typeof confirmEmail !== "string" || confirmEmail.trim().toLowerCase() !== user.email.toLowerCase()) {
+          return refused("Type your account's email address exactly to confirm.");
+        }
+      }
+
+      // Step 1: the storage keys, BEFORE any row is deleted. Every table
+      // cascades from User (verified against schema.prisma and the migration
+      // DDL: every FK referencing "User"("id") is ON DELETE CASCADE), which
+      // means these rows -- and the only record of which files belong to this
+      // account -- are gone the instant step 2 runs. Read them first or the
+      // bytes are unreachable forever.
+      //
+      // No `deletedAt: null` filter, unlike every read query in the app: a
+      // trashed article's upload is still a file on disk.
+      const articles = await prisma.article.findMany({
+        where: { userId: user.id },
+        select: { fileStorageKey: true, audio: { select: { storageKey: true } } },
+      });
+      const storageKeys = articles
+        .flatMap((article) => [article.fileStorageKey, article.audio?.storageKey])
+        .filter((key): key is string => typeof key === "string" && key.length > 0);
+
+      // Step 2: one delete, and the database takes the rest with it.
+      await prisma.user.delete({ where: { id: user.id } });
+
+      // Step 3: the files. Best-effort per key, matching how articles.ts
+      // already treats storage deletion -- nothing references these any more,
+      // so a failure here is an orphaned file to clean up later, not a reason
+      // to tell someone their deletion failed when the account is already
+      // gone.
+      await Promise.all(
+        storageKeys.map((key) =>
+          deleteStoredFile(key).catch((err) => app.log.warn({ err, key }, "orphaned file after account deletion")),
+        ),
+      );
+
+      // Step 4: the one aggregate that cannot cascade. PublicHighlightStat
+      // stores no user ids on purpose (that is what makes it
+      // non-deanonymizing), so deleting rows cannot possibly have updated it
+      // -- a full rebuild is the only thing that drops this account's
+      // contribution. Awaited, not fired and forgotten: "my highlights are
+      // still being counted after I deleted my account" is the failure this
+      // route exists to prevent, so it happens before the 204.
+      await recomputePublicHighlightStats().catch((err) =>
+        app.log.error({ err }, "public highlight aggregate still counts a deleted account"),
+      );
+
+      // The Session rows went with the cascade, so the refresh cookie in this
+      // browser now points at nothing; clearing it stops every page load
+      // starting with a failed refresh.
+      clearRefreshCookie(reply);
+      return reply.code(204).send();
     },
   );
 
