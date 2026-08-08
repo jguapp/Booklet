@@ -2,12 +2,152 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SessionInfo } from "@booklet/shared";
+import type { PodcastFeedStatus, SessionInfo } from "@booklet/shared";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { useToast } from "@/lib/toast/toast-provider";
 import { loadSessions, revokeOtherSessions, revokeSession } from "@/lib/data/sessions";
+import { createPodcastFeed, loadPodcastFeedStatus, revokePodcastFeed } from "@/lib/data/podcast";
 import { formatRelativeDate, summarizeUserAgent } from "@/lib/format";
+
+/**
+ * The only place a podcast feed URL is ever obtainable (#154).
+ *
+ * Two things this section has to get across, both of which are consequences
+ * of the URL being the entire credential -- a podcast client cannot send a
+ * header, a cookie or an OAuth token, so the secret has to live in the URL:
+ *
+ * - Anyone holding it can read and listen to the whole library. It gets the
+ *   same treatment as the generated-token box on the developer page, plus an
+ *   explicit warning, because a URL does not *look* like a password and gets
+ *   pasted into group chats in a way a "blk_..." string does not.
+ * - It is shown exactly once. The server keeps only a hash, so there is no
+ *   "show it again" -- losing it means regenerating, which invalidates the
+ *   old one and requires resubscribing.
+ */
+function PodcastFeedSection() {
+  const { toast } = useToast();
+  const [status, setStatus] = useState<PodcastFeedStatus | null>(null);
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(() => {
+    loadPodcastFeedStatus().then(setStatus).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  async function handleGenerate() {
+    setBusy(true);
+    try {
+      const feed = await createPodcastFeed();
+      setRevealed(feed.url);
+      setStatus(feed);
+    } catch {
+      toast("Couldn't create a feed URL.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRevoke() {
+    setBusy(true);
+    try {
+      await revokePodcastFeed();
+      setRevealed(null);
+      refresh();
+    } catch {
+      toast("Couldn't turn the feed off.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCopy(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Feed URL copied.");
+    } catch {
+      // Clipboard access is denied outright in some browsers/contexts, and
+      // the URL is visible on screen anyway -- selecting it by hand is a
+      // complete fallback, so this is not worth an error.
+      toast("Copy the URL from the box above.");
+    }
+  }
+
+  return (
+    <section className="mt-8 border-t border-border pt-8">
+      <h3 className="font-sans text-xs font-semibold uppercase tracking-wide text-ink-faint">Podcast feed</h3>
+      <p className="mt-2 font-sans text-sm text-ink-muted">
+        Subscribe to your unread queue in any podcast app and listen with lock-screen controls, CarPlay and offline
+        sync. Audio is generated in the background, so episodes appear over the first few refreshes rather than all
+        at once.
+      </p>
+      <p className="mt-2 font-sans text-xs text-ink-faint">
+        Podcast apps can&rsquo;t report playback position back, so listening here won&rsquo;t mark anything as read
+        in Booklet.
+      </p>
+
+      {revealed && (
+        <div className="mt-4 rounded-md border border-accent/30 bg-accent/10 px-4 py-3">
+          <p className="font-sans text-xs font-medium text-ink">
+            Treat this URL like a password &mdash; anyone who has it can read and listen to everything you&rsquo;ve
+            saved. Copy it now; it won&rsquo;t be shown again.
+          </p>
+          <code
+            data-testid="podcast-feed-url"
+            className="mt-2 block overflow-x-auto rounded-sm bg-surface px-3 py-2 font-mono text-xs text-ink"
+          >
+            {revealed}
+          </code>
+          <div className="mt-2 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => handleCopy(revealed)}
+              className="font-sans text-xs font-medium text-accent"
+            >
+              Copy
+            </button>
+            <button
+              type="button"
+              onClick={() => setRevealed(null)}
+              className="font-sans text-xs font-medium text-ink-muted"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <Button type="button" variant="secondary" onClick={handleGenerate} disabled={busy}>
+          {status?.enabled ? "Regenerate feed URL" : "Generate feed URL"}
+        </Button>
+        {status?.enabled && (
+          <button
+            type="button"
+            onClick={handleRevoke}
+            disabled={busy}
+            className="font-sans text-xs font-medium text-ink-muted hover:text-red-500 disabled:opacity-50"
+          >
+            Turn off
+          </button>
+        )}
+      </div>
+
+      {status?.enabled && (
+        <p className="mt-2 font-sans text-xs text-ink-faint">
+          Active since {formatRelativeDate(status.createdAt!)} ·{" "}
+          {status.lastFetchedAt ? `last fetched ${formatRelativeDate(status.lastFetchedAt)}` : "not fetched yet"}.
+          Regenerating invalidates the old URL, so you&rsquo;d need to resubscribe.
+        </p>
+      )}
+    </section>
+  );
+}
 
 export default function AccountSettingsPage() {
   const router = useRouter();
@@ -139,6 +279,8 @@ export default function AccountSettingsPage() {
           </>
         )}
       </section>
+
+      {status === "authenticated" && <PodcastFeedSection />}
 
       {status === "authenticated" && sessions && sessions.length > 0 && (
         <section className="mt-8 border-t border-border pt-8">
