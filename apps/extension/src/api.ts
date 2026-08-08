@@ -18,11 +18,11 @@ export async function getSession(): Promise<StoredSession | null> {
   return session;
 }
 
-export async function setSession(session: StoredSession): Promise<void> {
+async function setSession(session: StoredSession): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: session });
 }
 
-export async function clearSession(): Promise<void> {
+async function clearSession(): Promise<void> {
   await chrome.storage.local.remove(STORAGE_KEY);
 }
 
@@ -51,7 +51,7 @@ async function parseError(res: Response): Promise<ApiError> {
  * already returns null and the popup shows the login form again; there's
  * no long-lived background context here where a silent refresh matters.
  */
-export async function apiFetch<T>(path: string, options: RequestInit & { auth?: boolean } = {}): Promise<T> {
+async function apiFetch<T>(path: string, options: RequestInit & { auth?: boolean } = {}): Promise<T> {
   const { auth = true, headers, ...rest } = options;
   const finalHeaders = new Headers(headers);
   if (rest.body && typeof rest.body === "string" && !finalHeaders.has("Content-Type")) {

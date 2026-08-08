@@ -7,9 +7,9 @@
  * into one shape.
  */
 
-export type OAuthProviderId = "google" | "github";
+type OAuthProviderId = "google" | "github";
 
-export interface OAuthProfile {
+interface OAuthProfile {
   providerAccountId: string;
   email: string;
   /** Whether the provider itself has verified this address -- if so, safe to trust without our own verification email. */

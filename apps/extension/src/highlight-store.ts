@@ -18,7 +18,7 @@ const KEY_PREFIX = "booklet_page_highlights:";
  * computed server-side from the URL we send at import time, so nothing about
  * duplicate detection rests on this.
  */
-export function pageKey(url: string): string {
+function pageKey(url: string): string {
   try {
     const parsed = new URL(url);
     parsed.hash = "";
