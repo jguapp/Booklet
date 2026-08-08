@@ -13,6 +13,7 @@ import { selectFirstTextLayerSpan, waitForSaveModalToClose } from "./helpers";
  */
 
 const MULTI_PAGE_PDF = path.join(process.cwd(), "e2e", "fixtures", "multi-page.pdf");
+
 async function enableScrollMode(page: import("@playwright/test").Page) {
   await page.goto("/settings/reading");
   await page

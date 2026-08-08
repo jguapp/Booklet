@@ -13,6 +13,7 @@ import { selectFirstTextLayerSpan, waitForSaveModalToClose } from "./helpers";
  */
 
 const SAMPLE_PDF = path.join(process.cwd(), "e2e", "fixtures", "sample.pdf");
+
 test("upload a PDF, highlight real rendered text, and see it persist and delete", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();

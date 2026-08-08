@@ -1,6 +1,7 @@
 "use client";
 
 import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
+import { SemanticSearchSetting } from "@/components/settings/semantic-search-setting";
 import { Stepper } from "@/components/ui/stepper";
 import { cn } from "@/lib/cn";
 
@@ -157,6 +158,8 @@ export default function LibrarySettingsPage() {
             </button>
           </div>
         </section>
+
+        <SemanticSearchSetting />
       </div>
     </div>
   );

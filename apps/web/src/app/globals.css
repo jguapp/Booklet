@@ -236,6 +236,82 @@ body {
   transition: border-color 200ms ease;
 }
 
+/* ---- Landing page (components/landing/*) ----
+   The marketing page is the one surface that isn't reading UI, so it's the
+   one place a little atmosphere is worth having. Everything here still
+   resolves through the same --color-* custom properties as the rest of the
+   app, which means the landing page themes along with Paper/Lamp/Night/
+   Kindle for free -- including the Kindle theme's blanket grayscale(1),
+   which is exactly why these are gradients over theme tokens rather than
+   hardcoded hexes. */
+
+/* Accent wash behind the hero. Two offset radial gradients rather than one
+   linear sweep: the goal is "light falling on a page from the upper left",
+   which needs a soft off-center falloff, not an even ramp. Kept under 10%
+   mix so it never competes with the hero text sitting on top of it. */
+.landing-glow {
+  background-image:
+    radial-gradient(
+      70rem 40rem at 12% -10%,
+      color-mix(in srgb, var(--color-accent) 9%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      50rem 32rem at 92% 8%,
+      color-mix(in srgb, var(--color-highlight-yellow) 22%, transparent),
+      transparent 62%
+    );
+}
+
+/* Ruled-paper lines, for section backgrounds that should read as a page
+   rather than a panel. 2px of the line color at the very bottom of each
+   2rem band -- a hairline the border token's own color, so it lands at the
+   same weight as every real border in the app. */
+.landing-ruled {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(2rem - 1px),
+    color-mix(in srgb, var(--color-border) 55%, transparent) calc(2rem - 1px),
+    color-mix(in srgb, var(--color-border) 55%, transparent) 2rem
+  );
+}
+
+/* Hairline divider that fades out at both ends instead of stopping dead --
+   a full-bleed 1px border across a wide section reads as a hard UI seam;
+   this reads as a page fold. */
+.landing-rule {
+  height: 1px;
+  background-image: linear-gradient(
+    to right,
+    transparent,
+    var(--color-border) 15%,
+    var(--color-border) 85%,
+    transparent
+  );
+}
+
+/* Entrance for the hero only -- everything below the fold renders at rest,
+   since scroll-triggered reveals need an IntersectionObserver (and so a
+   client component) for something that mostly just delays content the
+   reader came to read. `both` fill matters: the keyframe's opacity: 0 must
+   apply before the delay elapses, and the final state must stick after.
+   The global prefers-reduced-motion rule above collapses the duration to
+   ~0, which lands on that same final state rather than hiding anything. */
+@keyframes landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.landing-rise {
+  animation: landing-rise 620ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
 /* Player-bar progress, native-voice case (tts-player-bar.tsx): the
    browser's own SpeechSynthesis reports no word/sentence boundaries, so
    there's no real fraction to render a filled-width bar from -- a sliding

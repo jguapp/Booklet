@@ -58,7 +58,17 @@ test("library defaults to the Unread tab, showing a fresh save immediately", asy
   // Marking it Reading moves it out of the default Unread view.
   await page.locator("a[href^='/reader/']").first().click();
   await page.waitForURL(/\/reader\//);
-  await page.getByRole("button", { name: "Reading", exact: true }).click(); // reader-view.tsx's own status tabs
+  const readingTab = page.getByRole("button", { name: "Reading", exact: true }); // reader-view.tsx's own status tabs
+  await readingTab.click();
+  // Wait for the change to be reflected before navigating away. `click()`
+  // resolves once the event is dispatched, not once the handler's write has
+  // reached IndexedDB -- and `goto` issued in that gap tears down the pending
+  // transaction, losing the status. The write itself takes about 1ms, so no
+  // real user can hit this window; only an automated `goto` fired immediately
+  // after the click can. Asserting the button's own active state is the
+  // honest fix: it is the state the rest of this test depends on, so waiting
+  // for it is not padding.
+  await expect(readingTab).toHaveClass(/bg-accent\b/);
 
   await page.goto("/library");
   await expect(page.locator("a[href^='/reader/']")).toHaveCount(0);

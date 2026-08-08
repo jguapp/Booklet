@@ -47,6 +47,19 @@ export interface Article {
   progressFraction: number; // 0.0-1.0, normalized regardless of sourceType
   activeReadingSeconds: number; // actual time spent, not an estimate -- see the reading-stats feature
 
+  /** Read-aloud position, 0.0-1.0 over the article's text -- the listening
+   * sibling of progressFraction. A fraction rather than a chunk index because
+   * chunk boundaries move whenever the TTS length caps are tuned; see
+   * schema.prisma. Null means never listened, which is deliberately distinct
+   * from 0 (listened, at the start) -- only the latter should be offered as a
+   * resume point. */
+  listeningFraction: number | null;
+  listeningUpdatedAt: string | null;
+  /** Opaque id of the browser that wrote the position, so a resume prompt can
+   * tell "you left off here on another device" from "this tab wrote this two
+   * seconds ago". Identifies a browser, not a person. */
+  listeningDeviceId: string | null;
+
   tags: string[]; // free-form, lighter-weight than Collection -- no separate entity, no color
 
   status: ArticleStatus;
@@ -109,6 +122,12 @@ export interface UpdateArticleRequest {
    * atomic increment server-side, not an overwrite, so concurrent
    * flushes (e.g. two tabs) can't clobber each other. */
   activeReadingSecondsDelta?: number;
+  /** Read-aloud position, 0-1. Last-write-wins, explicitly: two devices
+   * listening to one article at once is rare, and reconciling two positions
+   * into one correct answer isn't possible anyway -- whoever stopped last is
+   * as good a guess as exists. Sent with listeningDeviceId. */
+  listeningFraction?: number;
+  listeningDeviceId?: string;
 }
 
 export interface ArticleListResponse {
@@ -116,8 +135,22 @@ export interface ArticleListResponse {
   nextCursor: string | null;
 }
 
-/** GET /api/search */
+/** Wraps a matched term inside a snippet. Deliberately a pair of C0 control
+ * characters rather than `<mark>`: a snippet is cut from article text this
+ * app did not author, so returning HTML would mean rendering attacker-
+ * controlled markup (Postgres's ts_headline does not escape the document it
+ * quotes from). Control characters cannot occur in extracted article text,
+ * survive JSON transport, and let the UI split the string into plain React
+ * nodes -- so nothing ever needs dangerouslySetInnerHTML to show a snippet. */
+export const SNIPPET_MARK_START = "\u0002";
+export const SNIPPET_MARK_END = "\u0003";
+
 export interface SearchResponse {
+  /** Ordered by relevance, best first -- not by savedAt. */
   articles: ArticleSummary[];
   highlights: Highlight[];
+  /** articleId -> a short excerpt showing why it matched, with matched terms
+   * wrapped in SNIPPET_MARK_START/END. Absent for an article that matched on
+   * something with no body context to quote (a tag, or a title-only hit). */
+  snippets?: Record<string, string>;
 }

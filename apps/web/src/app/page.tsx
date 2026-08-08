@@ -1,27 +1,44 @@
-import { ButtonLink } from "@/components/ui/button";
+import type { Metadata } from "next";
+import { LandingNav } from "@/components/landing/landing-nav";
+import { LandingHero } from "@/components/landing/landing-hero";
+import { LandingLoop } from "@/components/landing/landing-loop";
+import { LandingShowcase } from "@/components/landing/landing-showcase";
+import { LandingLocalFirst } from "@/components/landing/landing-local-first";
+import { LandingFeatures } from "@/components/landing/landing-features";
+import { LandingDevelopers } from "@/components/landing/landing-developers";
+import { LandingCta } from "@/components/landing/landing-cta";
+
+/**
+ * The marketing page. Deliberately a server component all the way down
+ * except for the theme switcher in the nav -- there's no state on this page,
+ * so shipping JS for it would only slow down the one screen a first-time
+ * visitor judges the app by.
+ *
+ * Section order follows the argument rather than a feature inventory: what
+ * the product is (hero), the loop that makes it different (loop), the three
+ * things done properly that competitors don't (showcase), the objection
+ * everyone has about read-it-later apps -- "do I have to sign up"
+ * (local-first), then the long tail of features, then the API for the people
+ * who read this far.
+ */
+export const metadata: Metadata = {
+  description:
+    "Booklet saves articles, PDFs, and EPUBs, renders them properly, and brings your highlights back on a real spaced-repetition schedule. Works offline. No account required.",
+};
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-paper px-6 text-center">
-      <div className="flex flex-col items-center gap-4">
-        <h1 className="text-balance font-serif text-4xl font-semibold text-ink">Booklet</h1>
-        <p className="max-w-sm text-balance font-sans text-base text-ink-muted">
-          Save articles, read them clean, and keep what you highlight — instead of losing it in a
-          list you never reopen.
-        </p>
-      </div>
-      <div className="flex items-center gap-3">
-        <ButtonLink href="/signup" variant="primary">
-          Sign up
-        </ButtonLink>
-        <ButtonLink href="/login" variant="secondary">
-          Log in
-        </ButtonLink>
-      </div>
-
-      <ButtonLink href="/library" variant="ghost" className="-mt-2">
-        Continue without an account
-      </ButtonLink>
+    <div className="flex min-h-screen flex-col bg-paper">
+      <LandingNav />
+      <main className="flex-1">
+        <LandingHero />
+        <LandingLoop />
+        <LandingShowcase />
+        <LandingLocalFirst />
+        <LandingFeatures />
+        <LandingDevelopers />
+        <LandingCta />
+      </main>
     </div>
   );
 }

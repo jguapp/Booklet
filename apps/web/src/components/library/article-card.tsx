@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Article, Collection } from "@booklet/shared";
+import { SNIPPET_MARK_END, SNIPPET_MARK_START } from "@booklet/shared";
 import { formatReadingTime, formatRelativeDate } from "@/lib/format";
 import { SourceIcon } from "./source-icon";
 import { StatusBadge } from "./status-badge";
@@ -10,8 +11,40 @@ import { IconArchive, IconFolder, IconInbox, IconPencil, IconStar, IconTrash } f
 import { ARTICLE_DRAG_MIME } from "@/lib/dnd/trash-drop";
 import { cn } from "@/lib/cn";
 
+/**
+ * Renders a search snippet, marked terms and all, without ever handing article
+ * text to the DOM as markup.
+ *
+ * The snippet arrives with matches wrapped in control characters rather than
+ * `<mark>` (see SNIPPET_MARK_START) precisely so this can be a split into
+ * React nodes. React escapes each piece on the way in, so a snippet cut from
+ * an article containing `<script>` renders as visible text -- there is no
+ * dangerouslySetInnerHTML anywhere on this path, which is the whole reason
+ * the server does not send HTML in the first place.
+ */
+function SnippetText({ snippet }: { snippet: string }) {
+  const pieces: React.ReactNode[] = [];
+  for (const [i, chunk] of snippet.split(SNIPPET_MARK_START).entries()) {
+    if (i === 0) {
+      if (chunk) pieces.push(chunk);
+      continue;
+    }
+    const [marked, ...rest] = chunk.split(SNIPPET_MARK_END);
+    pieces.push(
+      <mark key={i} className="rounded-[2px] bg-highlight-yellow px-0.5 text-ink">
+        {marked}
+      </mark>,
+    );
+    const tail = rest.join(SNIPPET_MARK_END);
+    if (tail) pieces.push(tail);
+  }
+  return <p className="line-clamp-2 font-sans text-xs leading-relaxed text-ink-muted">{pieces}</p>;
+}
+
 interface ArticleCardProps {
   article: Article;
+  /** Set only in search results -- why this article matched. */
+  snippet?: string;
   onToggleArchived?: (article: Article) => void;
   onToggleFavorited?: (article: Article) => void;
   onRename?: (article: Article) => void;
@@ -29,6 +62,7 @@ interface ArticleCardProps {
 
 export function ArticleCard({
   article,
+  snippet,
   onToggleArchived,
   onToggleFavorited,
   onRename,
@@ -155,6 +189,8 @@ export function ArticleCard({
       </h3>
 
       <p className="font-sans text-xs text-ink-faint">{metaParts.join(" · ")}</p>
+
+      {snippet && <SnippetText snippet={snippet} />}
 
       {memberCollections && memberCollections.length > 0 && (
         <div className="flex flex-wrap gap-1">

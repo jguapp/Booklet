@@ -131,8 +131,12 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      # Build args, not `environment` -- Next inlines NEXT_PUBLIC_* into the
+      # client bundle at build time, so setting these at run time is too late
+      # to reach the browser (see DEPLOYMENT.md and the Dockerfile's ARGs).
       args:
         NEXT_PUBLIC_API_URL: http://localhost:4000
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
     ports:
       - "3000:3000"
     depends_on:

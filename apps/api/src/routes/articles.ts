@@ -21,6 +21,7 @@ import { isAllowedOrigin } from "../lib/cors.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
 import { sendEmail } from "../services/email-service.js";
 import { isKindleAddress } from "./auth.js";
+import { indexArticleEmbeddings } from "../services/article-embedding-service.js";
 
 export type ArticleRow = Awaited<ReturnType<typeof prisma.article.findFirstOrThrow>>;
 
@@ -85,6 +86,9 @@ export function toArticle(row: ArticleRow): Article {
     skippedImageCount: row.skippedImageCount,
     progressFraction: row.progressFraction,
     activeReadingSeconds: row.activeReadingSeconds,
+    listeningFraction: row.listeningFraction,
+    listeningUpdatedAt: row.listeningUpdatedAt?.toISOString() ?? null,
+    listeningDeviceId: row.listeningDeviceId,
     tags: row.tags,
     status: row.status,
     savedAt: row.savedAt.toISOString(),
@@ -193,6 +197,9 @@ export function toSummary(row: Omit<ArticleRow, "extractedHtml" | "extractedText
     skippedImageCount: row.skippedImageCount,
     progressFraction: row.progressFraction,
     activeReadingSeconds: row.activeReadingSeconds,
+    listeningFraction: row.listeningFraction,
+    listeningUpdatedAt: row.listeningUpdatedAt?.toISOString() ?? null,
+    listeningDeviceId: row.listeningDeviceId,
     tags: row.tags,
     status: row.status,
     savedAt: row.savedAt.toISOString(),
@@ -203,6 +210,23 @@ export function toSummary(row: Omit<ArticleRow, "extractedHtml" | "extractedText
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Indexes a freshly-saved article for semantic search (#156), without making
+ * the save wait for it.
+ *
+ * Deliberately not awaited: embedding a long article is seconds of CPU, and a
+ * reader who just pasted a URL should not watch a spinner for it. The article
+ * is fully usable without embeddings -- keyword search already covers it, and
+ * the search route degrades to keyword-only for anything unindexed -- so this
+ * is genuinely optional work. Failures are logged and dropped for the same
+ * reason; scripts/backfill-embeddings.ts re-attempts anything missed.
+ */
+function indexForSearchInBackground(articleId: string, userId: string, text: string | null): void {
+  void indexArticleEmbeddings(articleId, userId, text).catch((err: unknown) => {
+    console.error("[embeddings] failed to index article", articleId, err);
+  });
 }
 
 export async function registerArticleRoutes(app: FastifyInstance): Promise<void> {
@@ -266,6 +290,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
 
       const body = toArticle(article);
+      indexForSearchInBackground(article.id, request.userId!, article.extractedText);
       fireWebhookEvent(request.userId!, "article.created", { id: body.id, url: body.url, title: body.title }).catch(
         () => undefined,
       );
@@ -383,6 +408,7 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
 
       const body = toArticle(article);
+      indexForSearchInBackground(article.id, request.userId!, article.extractedText);
       fireWebhookEvent(request.userId!, "article.created", { id: body.id, url: body.url, title: body.title }).catch(
         () => undefined,
       );
@@ -608,7 +634,17 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       });
       if (!existing) return reply.code(404).send({ error: "not_found", message: "Article not found." });
 
-      const { status, progressFraction, tags, favorited, deletedAt, activeReadingSecondsDelta, title } = request.body ?? {};
+      const {
+        status,
+        progressFraction,
+        tags,
+        favorited,
+        deletedAt,
+        activeReadingSecondsDelta,
+        title,
+        listeningFraction,
+        listeningDeviceId,
+      } = request.body ?? {};
       if (status !== undefined && !STATUSES.includes(status)) {
         return reply.code(400).send({ error: "invalid_status", message: "Invalid status." });
       }
@@ -643,6 +679,26 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           .code(400)
           .send({ error: "invalid_reading_seconds", message: "activeReadingSecondsDelta must be 0-600." });
       }
+      if (
+        listeningFraction !== undefined &&
+        (typeof listeningFraction !== "number" || listeningFraction < 0 || listeningFraction > 1)
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_listening_position", message: "listeningFraction must be 0-1." });
+      }
+      // Bounded like every other client-supplied string here. It is an opaque
+      // id this server never interprets -- only ever compared for equality by
+      // the client -- so the only thing worth enforcing is that it cannot be
+      // used to write something unreasonable into the row.
+      if (
+        listeningDeviceId !== undefined &&
+        (typeof listeningDeviceId !== "string" || !listeningDeviceId.trim() || listeningDeviceId.length > 64)
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "invalid_device_id", message: "listeningDeviceId must be a string of 1-64 characters." });
+      }
 
       const now = new Date();
       const [article] = await prisma.$transaction([
@@ -655,6 +711,20 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
             ...(favorited !== undefined ? { favorited } : {}),
             ...(activeReadingSecondsDelta !== undefined
               ? { activeReadingSeconds: { increment: activeReadingSecondsDelta } }
+              : {}),
+            // Last-write-wins, stated deliberately: two devices playing one
+            // article at once is rare, and there is no correct reconciliation
+            // of two positions anyway -- whoever wrote last is as good an
+            // answer as exists. The timestamp is the server's, not the
+            // client's, for the same reason deletedAt is below: a client clock
+            // that is wrong or lying would otherwise decide what "most recent"
+            // means across devices.
+            ...(listeningFraction !== undefined
+              ? {
+                  listeningFraction,
+                  listeningUpdatedAt: now,
+                  ...(listeningDeviceId !== undefined ? { listeningDeviceId: listeningDeviceId.trim() } : {}),
+                }
               : {}),
             // The client signals trash/restore by presence, not by trusting a
             // client-supplied timestamp -- the server always stamps its own

@@ -101,6 +101,13 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     skippedImageCount: extracted?.skippedImageCount ?? 0,
     progressFraction: 0,
     activeReadingSeconds: 0,
+    // Null rather than 0 -- never listened is distinct from paused at the
+    // start (#152). Mobile doesn't have read-aloud yet, but it shares the
+    // Article type and syncs the same rows, so it must not write a position
+    // that would make the web reader offer to resume from the beginning.
+    listeningFraction: null,
+    listeningUpdatedAt: null,
+    listeningDeviceId: null,
     tags: [],
     status: "UNREAD",
     savedAt: now,
@@ -197,6 +204,13 @@ export async function saveArticleFromFile(file: PickedFile, authenticated: boole
     skippedImageCount: 0, // PDF/EPUB extraction doesn't inline images at all
     progressFraction: 0,
     activeReadingSeconds: 0,
+    // Null rather than 0 -- never listened is distinct from paused at the
+    // start (#152). Mobile doesn't have read-aloud yet, but it shares the
+    // Article type and syncs the same rows, so it must not write a position
+    // that would make the web reader offer to resume from the beginning.
+    listeningFraction: null,
+    listeningUpdatedAt: null,
+    listeningDeviceId: null,
     tags: [],
     status: "UNREAD",
     savedAt: now,

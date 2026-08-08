@@ -14,6 +14,7 @@ import { selectFirstTextLayerSpan, waitForSaveModalToClose } from "./helpers";
 
 const SAMPLE_PDF = path.join(process.cwd(), "e2e", "fixtures", "sample.pdf");
 const LONG_CHAPTER_EPUB = path.join(process.cwd(), "e2e", "fixtures", "long-chapter.epub");
+
 test("a PDF highlight's citation shows the real page number", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: /save article/i }).click();
