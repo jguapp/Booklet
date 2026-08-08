@@ -5,6 +5,7 @@ import type { Feed, FeedItem } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { IconTrash } from "@/components/ui/icons";
+import { LoadError } from "@/components/ui/load-error";
 import { loadFeeds, loadFeedItems, subscribeFeed, unsubscribeFeed, ApiError } from "@/lib/data/feeds";
 import { saveArticleFromUrl } from "@/lib/data/articles";
 import { useAuth } from "@/lib/auth/auth-provider";
@@ -21,6 +22,7 @@ export default function RssPage() {
   const { toast } = useToast();
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [url, setUrl] = useState("");
   const [subscribing, setSubscribing] = useState(false);
   const [subscribeError, setSubscribeError] = useState<string | null>(null);
@@ -29,10 +31,14 @@ export default function RssPage() {
 
   const refreshFeeds = useCallback(() => {
     if (status === "loading") return;
-    loadFeeds(isAuthenticated).then((loadedFeeds) => {
-      setFeeds(loadedFeeds);
-      setLoaded(true);
-    });
+    loadFeeds(isAuthenticated)
+      .then((loadedFeeds) => {
+        setFeeds(loadedFeeds);
+        setLoaded(true);
+      })
+      // Without this a rejected fetch left `loaded` false forever, and the
+      // page rendered nothing at all -- see components/ui/load-error.tsx.
+      .catch(() => setLoadFailed(true));
   }, [status, isAuthenticated]);
 
   useEffect(() => {
@@ -106,6 +112,15 @@ export default function RssPage() {
     }
   }
 
+  if (!loaded && loadFailed) {
+    return (
+      <div className="mx-auto max-w-2xl px-8 py-10">
+        <h1 className="mb-6 font-serif text-2xl font-semibold text-ink">RSS</h1>
+        <LoadError message="Couldn't load your feeds. Check your connection and try again." onRetry={refreshFeeds} />
+      </div>
+    );
+  }
+
   if (!loaded) return null;
 
   return (
@@ -118,6 +133,7 @@ export default function RssPage() {
         <div className="flex gap-2">
           <Input
             type="text"
+            aria-label="Feed URL"
             placeholder="https://example.com/feed.xml"
             value={url}
             onChange={(e) => setUrl(e.target.value)}

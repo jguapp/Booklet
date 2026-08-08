@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Article } from "@booklet/shared";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { LoadError } from "@/components/ui/load-error";
 import { SourceIcon } from "@/components/library/source-icon";
 import { formatDaysRemaining, formatRelativeDate } from "@/lib/format";
 import { emptyTrash, loadTrash, permanentlyDeleteArticle, restoreArticle } from "@/lib/data/articles";
@@ -15,15 +16,20 @@ export default function TrashPage() {
   const { status, isAuthenticated } = useAuth();
   const [articles, setArticles] = useState<Article[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmingEmpty, setConfirmingEmpty] = useState(false);
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
-    loadTrash(isAuthenticated).then((loadedArticles) => {
-      setArticles(loadedArticles);
-      setLoaded(true);
-    });
+    loadTrash(isAuthenticated)
+      .then((loadedArticles) => {
+        setArticles(loadedArticles);
+        setLoaded(true);
+      })
+      // Without this a rejected fetch left `loaded` false forever, and the
+      // page rendered nothing at all -- see components/ui/load-error.tsx.
+      .catch(() => setLoadFailed(true));
   }, [status, isAuthenticated]);
 
   useEffect(() => {
@@ -45,6 +51,15 @@ export default function TrashPage() {
     await emptyTrash(isAuthenticated);
     setArticles([]);
     setConfirmingEmpty(false);
+  }
+
+  if (!loaded && loadFailed) {
+    return (
+      <div className="mx-auto max-w-2xl px-8 py-10">
+        <h1 className="mb-6 font-serif text-2xl font-semibold text-ink">Trash</h1>
+        <LoadError message="Couldn't load your trash. Check your connection and try again." onRetry={refresh} />
+      </div>
+    );
   }
 
   if (!loaded) return null;

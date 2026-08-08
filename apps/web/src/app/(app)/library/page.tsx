@@ -10,6 +10,7 @@ import { IconSearch } from "@/components/ui/icons";
 import { ArticleCard } from "@/components/library/article-card";
 import { SaveArticleModal } from "@/components/library/save-article-modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { LoadError } from "@/components/ui/load-error";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { cn } from "@/lib/cn";
 import { loadArticles, renameArticle, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
@@ -50,6 +51,7 @@ function LibraryPageInner() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [membership, setMembership] = useState<ArticleCollectionMemberships>({});
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   // Defaults to "Unread" -- the actual queue of what's waiting to be read --
   // rather than "All" (the entire, potentially-overwhelming backlog; see the
   // "knowledge hoarding" toggle below for the same underlying concern). A
@@ -70,12 +72,18 @@ function LibraryPageInner() {
       collectionId ? loadArticlesInCollection(collectionId, isAuthenticated) : loadArticles(isAuthenticated),
       loadCollections(isAuthenticated),
       loadCollectionMemberships(isAuthenticated),
-    ]).then(([loadedArticles, loadedCollections, loadedMembership]) => {
-      setArticles(loadedArticles as Article[]);
-      setCollections(loadedCollections);
-      setMembership(loadedMembership);
-      setLoaded(true);
-    });
+    ])
+      .then(([loadedArticles, loadedCollections, loadedMembership]) => {
+        setArticles(loadedArticles as Article[]);
+        setCollections(loadedCollections);
+        setMembership(loadedMembership);
+        setLoaded(true);
+      })
+      // Only the *first* load turns into a visible error (see the render
+      // below): once something is on screen, a failed background refresh --
+      // useRefreshOnFocus fires one every time the tab is looked at, offline
+      // included -- must not replace a working library with an error block.
+      .catch(() => setLoadFailed(true));
   }, [status, isAuthenticated, collectionId]);
 
   useEffect(() => {
@@ -186,6 +194,15 @@ function LibraryPageInner() {
     });
   }
 
+  if (!loaded && loadFailed) {
+    return (
+      <div className="mx-auto max-w-4xl px-8 py-10">
+        <h1 className="mb-6 font-serif text-2xl font-semibold text-ink">Library</h1>
+        <LoadError message="Couldn't load your library. Check your connection and try again." onRetry={refresh} />
+      </div>
+    );
+  }
+
   if (!loaded) return null;
 
   return (
@@ -271,6 +288,7 @@ function LibraryPageInner() {
           <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <Input
             type="text"
+            aria-label="Search your library"
             placeholder="Search titles, text, notes…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

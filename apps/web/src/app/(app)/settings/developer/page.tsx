@@ -93,6 +93,7 @@ function TokenSection() {
       <form onSubmit={handleCreate} className="flex items-center gap-2">
         <Input
           type="text"
+          aria-label="Token name"
           placeholder="Token name, e.g. Zapier"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -218,6 +219,7 @@ function WebhookSection() {
       <form onSubmit={handleCreate} className="flex flex-col gap-2">
         <Input
           type="url"
+          aria-label="Webhook URL"
           placeholder="https://your-endpoint.example.com/webhook"
           value={url}
           onChange={(e) => setUrl(e.target.value)}

@@ -84,6 +84,52 @@ export async function loadArticles(authenticated: boolean): Promise<Article[]> {
   return articles;
 }
 
+/** How many full-article fetches loadArticlesWithText keeps in flight. Enough
+ * that a library of a few hundred doesn't crawl, low enough that pressing
+ * Export doesn't look like a burst of abuse to the API's rate limiter. */
+const FULL_TEXT_CONCURRENCY = 4;
+
+/**
+ * Every article *including* its body text -- which loadArticles above does
+ * not give you when signed in, however much its `Article[]` return type
+ * suggests otherwise: the list endpoint answers with summaries, and
+ * `extractedText` is absent (not empty) on every row.
+ *
+ * That difference had teeth. The Markdown export walks this list and writes
+ * `article.extractedText` into each file, so signed out it exported whole
+ * articles and signed in it exported frontmatter and highlights with the
+ * article itself missing -- the same one-branch-only shape as #164/#171/#172,
+ * and silent, because a .zip full of valid-looking Markdown files is exactly
+ * what you'd expect to see either way.
+ *
+ * Local mode needs none of this: IndexedDB stores whole Article rows, so the
+ * list is already complete and this returns it untouched.
+ *
+ * An article whose own fetch fails keeps its summary rather than sinking the
+ * export -- one unreachable article should cost that article's body, not the
+ * other four hundred.
+ */
+export async function loadArticlesWithText(authenticated: boolean): Promise<Article[]> {
+  const articles = await loadArticles(authenticated);
+  if (!authenticated) return articles;
+
+  const full = [...articles];
+  let next = 0;
+  async function worker() {
+    while (next < full.length) {
+      const index = next++;
+      try {
+        const detailed = await loadArticle(full[index].id, true);
+        if (detailed) full[index] = detailed;
+      } catch {
+        // Keeps the summary -- see the note above.
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(FULL_TEXT_CONCURRENCY, full.length) }, worker));
+  return full;
+}
+
 /** Trash, not the regular library -- excluded from loadArticles() above
  * regardless of status, same on both the local and server sides. */
 export async function loadTrash(authenticated: boolean): Promise<Article[]> {

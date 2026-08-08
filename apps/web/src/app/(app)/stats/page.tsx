@@ -9,6 +9,7 @@ import { loadReadingActivity } from "@/lib/data/reading-activity";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
 import { SourceIcon } from "@/components/library/source-icon";
+import { LoadError } from "@/components/ui/load-error";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
@@ -197,16 +198,33 @@ export default function StatsPage() {
   // both cases, so there's no separate loading state to track here.
   const [activity, setActivity] = useState<ReadingActivityDay[] | null>(null);
 
+  const [loadFailed, setLoadFailed] = useState(false);
+
   const refresh = useCallback(() => {
     if (status === "loading") return;
-    loadArticles(isAuthenticated).then(setArticles);
-    loadReadingActivity(isAuthenticated).then((res) => setActivity(res?.days ?? null));
+    // Without the catch, a rejected fetch left `articles` null forever and
+    // the page rendered nothing -- see components/ui/load-error.tsx.
+    loadArticles(isAuthenticated).then(setArticles).catch(() => setLoadFailed(true));
+    // The heatmap already treats null as "no server history" (anonymous mode
+    // does the same), so a failure here degrades rather than blocks.
+    loadReadingActivity(isAuthenticated)
+      .then((res) => setActivity(res?.days ?? null))
+      .catch(() => setActivity(null));
   }, [status, isAuthenticated]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
   useOnTrashed(refresh);
+
+  if (!articles && loadFailed) {
+    return (
+      <div className="mx-auto max-w-3xl px-8 py-10">
+        <h1 className="mb-6 font-serif text-2xl font-semibold text-ink">Reading stats</h1>
+        <LoadError message="Couldn't load your reading stats. Check your connection and try again." onRetry={refresh} />
+      </div>
+    );
+  }
 
   if (!articles) return null;
 

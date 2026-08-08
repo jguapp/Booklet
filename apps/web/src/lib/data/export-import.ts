@@ -9,10 +9,9 @@
  * column -- parsed leniently by header name rather than a fixed column
  * order, since the two services don't use the same layout.
  */
-import JSZip from "jszip";
 import type { Article, Highlight } from "@booklet/shared";
 import { KINDLE_HIGHLIGHT_COLOR, parseKindleClippings } from "@booklet/shared";
-import { getOrCreateBookArticle, loadArticles, saveArticleFromUrl } from "./articles";
+import { getOrCreateBookArticle, loadArticles, loadArticlesWithText, saveArticleFromUrl } from "./articles";
 import { createHighlight, loadHighlights } from "./highlights";
 import { ApiError } from "@/lib/api/client";
 
@@ -52,7 +51,20 @@ function safeFilename(title: string | null, id: string): string {
 }
 
 export async function exportAsMarkdownZip(authenticated: boolean): Promise<void> {
-  const [articles, highlights] = await Promise.all([loadArticles(authenticated), loadHighlights(authenticated)]);
+  // Imported here rather than at the top of the module: JSZip is the single
+  // heaviest thing this file pulls in, and nothing else in it -- the CSV,
+  // bookmarks and Kindle importers, the Anki export -- touches a zip at all.
+  // A static import put it in the Import/Export page's own bundle for
+  // everyone who opens that page, including the majority who came to import
+  // something. Now it is fetched by the click that actually needs it.
+  const { default: JSZip } = await import("jszip");
+  // loadArticlesWithText, not loadArticles: signed in, the latter answers
+  // with summaries that carry no extractedText, so every exported file came
+  // out as frontmatter and highlights with the article body missing.
+  const [articles, highlights] = await Promise.all([
+    loadArticlesWithText(authenticated),
+    loadHighlights(authenticated),
+  ]);
   const highlightsByArticle = new Map<string, Highlight[]>();
   for (const h of highlights) {
     const list = highlightsByArticle.get(h.articleId) ?? [];

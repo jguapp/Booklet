@@ -10,6 +10,7 @@ import {
 } from "@/lib/data/collections";
 import { notifyCollectionsChanged } from "@/lib/data/collections-events";
 import { IconCheck, IconFolder, IconPlus } from "@/components/ui/icons";
+import { useToast } from "@/lib/toast/toast-provider";
 import { cn } from "@/lib/cn";
 
 interface CollectionMenuProps {
@@ -38,6 +39,7 @@ export function CollectionMenu({
   // contents are computed from a filter, so they don't belong in an
   // "add this article to..." list.
   const allCollections = allCollectionsProp.filter((c) => !c.filter);
+  const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [memberIds, setMemberIds] = useState<Set<string> | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -48,10 +50,19 @@ export function CollectionMenu({
 
   useEffect(() => {
     if (!open) return;
-    loadCollectionsForArticle(articleId, authenticated).then((collections) => {
-      setMemberIds(new Set(collections.map((c) => c.id)));
-    });
-  }, [open, articleId, authenticated]);
+    loadCollectionsForArticle(articleId, authenticated)
+      .then((collections) => {
+        setMemberIds(new Set(collections.map((c) => c.id)));
+      })
+      // memberIds staying null disables every row in the menu, with no
+      // spinner and no message -- a menu that looks permanently busy. Better
+      // to say so and let the rows work: a toggle against a stale membership
+      // set is idempotent on both the server and the local store.
+      .catch(() => {
+        setMemberIds(new Set());
+        toast("Couldn't load this article's collections.");
+      });
+  }, [open, articleId, authenticated, toast]);
 
   function closeMenu() {
     setOpen(false);
@@ -93,6 +104,10 @@ export function CollectionMenu({
         return next;
       });
       onMembershipChange?.(collectionId, !isMember);
+    } catch {
+      // The checkmark not moving is the only other signal, and it reads as an
+      // unresponsive menu rather than a failed write.
+      toast(isMember ? "Couldn't remove that from the collection." : "Couldn't add that to the collection.");
     } finally {
       setPending(null);
     }
@@ -191,6 +206,7 @@ export function CollectionMenu({
                     handleCreate();
                   }
                 }}
+                aria-label="New collection name"
                 placeholder="Collection name"
                 onClick={(e) => e.stopPropagation()}
                 className={cn(

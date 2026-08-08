@@ -7,6 +7,7 @@ import { SeedCollections } from "@/components/highlights/seed-collections";
 import { SharePanel } from "@/components/highlights/share-panel";
 import { SourceIcon } from "@/components/library/source-icon";
 import { Input } from "@/components/ui/input";
+import { LoadError } from "@/components/ui/load-error";
 import { IconSearch } from "@/components/ui/icons";
 import { loadArticles } from "@/lib/data/articles";
 import { deleteHighlight, deleteNote, loadHighlights, saveHighlightPrompt, saveNote } from "@/lib/data/highlights";
@@ -22,16 +23,26 @@ export default function HighlightsPage() {
   const { status, isAuthenticated } = useAuth();
   const [articles, setArticles] = useState<Article[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [articleFilter, setArticleFilter] = useState<string>("ALL");
   const [viewMode, setViewMode] = useState<ViewMode>("grouped");
   const [search, setSearch] = useState("");
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
-    Promise.all([loadArticles(isAuthenticated), loadHighlights(isAuthenticated)]).then(([a, h]) => {
-      setArticles(a);
-      setHighlights(h);
-    });
+    Promise.all([loadArticles(isAuthenticated), loadHighlights(isAuthenticated)])
+      .then(([a, h]) => {
+        setArticles(a);
+        setHighlights(h);
+        setLoaded(true);
+      })
+      // This page has no "not loaded yet" gate -- it renders its empty state
+      // straight away -- so a rejected fetch told the reader "No highlights
+      // yet", which is a claim about their account rather than about the
+      // request. Only the first load turns into an error block; a failed
+      // refresh over something already on screen stays quiet.
+      .catch(() => setLoadFailed(true));
   }, [status, isAuthenticated]);
 
   useEffect(() => {
@@ -130,6 +141,15 @@ export default function HighlightsPage() {
 
   const selectedArticle = showingOneArticle ? articleById.get(articleFilter) : undefined;
 
+  if (!loaded && loadFailed) {
+    return (
+      <div className="mx-auto max-w-2xl px-8 py-10">
+        <h1 className="mb-6 font-serif text-2xl font-semibold text-ink">Highlights</h1>
+        <LoadError message="Couldn't load your highlights. Check your connection and try again." onRetry={refresh} />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-2xl px-8 py-10">
       <div className="mb-6">
@@ -168,6 +188,7 @@ export default function HighlightsPage() {
           <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <Input
             type="text"
+            aria-label="Search your highlights"
             placeholder="Search highlights, notes…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -176,6 +197,7 @@ export default function HighlightsPage() {
         </div>
 
         <select
+          aria-label="Filter by article"
           value={articleFilter}
           onChange={(e) => setArticleFilter(e.target.value)}
           className="rounded-sm border border-border bg-surface px-3 py-2 font-sans text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"

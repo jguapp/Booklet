@@ -10,7 +10,7 @@ import { initRum } from "./rum";
  * together only because this is the one place that runs once per page load. */
 export function ErrorMonitoringInit() {
   useEffect(() => {
-    initErrorMonitoring();
+    void initErrorMonitoring();
     void initRum();
   }, []);
   return null;

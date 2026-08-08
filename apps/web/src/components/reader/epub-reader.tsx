@@ -142,6 +142,12 @@ export function EpubReader({
     if (!viewerRef.current) return;
     let cancelled = false;
     setLoadError(null);
+    // Held so the cleanup can tear both down without going through state:
+    // destroying from inside a setRendition updater (what this used to do)
+    // puts a side effect in a function React is allowed to call more than
+    // once per commit, and a double destroy() on epub.js throws.
+    let openedBook: ReturnType<typeof ePub> | null = null;
+    let openedRendition: Rendition | null = null;
 
     // Whether book.locations.generate() (below) has finished -- percentage
     // is meaningless before that, but it's *also* exactly 0 for a real,
@@ -161,6 +167,7 @@ export function EpubReader({
       try {
         const data = await fileBlob.arrayBuffer();
         const book = ePub(data);
+        openedBook = book;
         // spread: "none" -- without it, epub.js's default "auto" spread
         // pairs two spine items side by side above its own width threshold
         // (a physical-book-style two-page spread), which on a typical
@@ -175,11 +182,12 @@ export function EpubReader({
         // actually wanted here -- always-single-page removes both the
         // duplicate-cover bug and any other spine item pairing surprise.
         const r = book.renderTo(viewerRef.current!, { width: "100%", height: "100%", flow: "paginated", spread: "none" });
+        openedRendition = r;
+        // No destroy() on these cancelled paths: openedRendition is already
+        // set above, so the effect cleanup that set `cancelled` has already
+        // torn it down -- destroying again here throws inside epub.js.
         await r.display();
-        if (cancelled) {
-          r.destroy();
-          return;
-        }
+        if (cancelled) return;
 
         // Only on a genuinely fresh open -- a saved reading position deeper
         // in the book always wins via the resumeAt logic further down,
@@ -189,10 +197,7 @@ export function EpubReader({
           const firstDoc = initialContents?.[0]?.document;
           if (firstDoc && looksLikeCoverPage(firstDoc)) {
             await r.next();
-            if (cancelled) {
-              r.destroy();
-              return;
-            }
+            if (cancelled) return;
           }
         }
 
@@ -260,10 +265,14 @@ export function EpubReader({
     open();
     return () => {
       cancelled = true;
-      setRendition((prev) => {
-        prev?.destroy();
-        return null;
-      });
+      openedRendition?.destroy();
+      // The Book, not just the Rendition. A Book holds the unzipped archive
+      // (every chapter's XHTML, every image) plus the generated locations
+      // index -- for a large EPUB that is tens of megabytes, and destroying
+      // only the rendition left all of it alive for the life of the tab,
+      // once per book opened.
+      openedBook?.destroy();
+      setRendition(null);
     };
   }, [fileBlob]);
 

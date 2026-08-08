@@ -57,6 +57,72 @@ function isPdfHighlight(h: Highlight): h is Highlight & { position: PdfPosition 
   return h.position.type === "pdf";
 }
 
+/**
+ * The clickable colour blocks drawn over a rendered page. One component
+ * rather than the identical block written out once for paginate mode and
+ * again for each scroll-mode slot -- they had already drifted to the point
+ * where fixing anything here meant remembering to fix it twice.
+ *
+ * A highlight spanning several lines has one rect per line, but only the
+ * first is a real control: the others are the same target, and making each
+ * one its own tab stop means a page of highlights is a wall of identically-
+ * named stops to tab through. They stay clickable, they just aren't
+ * separately reachable.
+ *
+ * The name matters as much as the operability. These were `role="button"`
+ * with `tabIndex={0}` and no text and no key handler -- focusable, announced
+ * as an unnamed button, and doing nothing when activated from the keyboard,
+ * which is worse than not being focusable at all.
+ */
+function PdfHighlightOverlay({
+  viewport,
+  highlights,
+  onSelect,
+}: {
+  viewport: PageViewport;
+  highlights: (Highlight & { position: PdfPosition })[];
+  onSelect: (highlight: Highlight & { position: PdfPosition }, rect: DOMRect) => void;
+}) {
+  return (
+    <div className={styles.highlightOverlay}>
+      {highlights.map((h) =>
+        h.position.rects.map((rect, i) => {
+          const [vx1, vy1] = viewport.convertToViewportPoint(rect.x, rect.y);
+          const [vx2, vy2] = viewport.convertToViewportPoint(rect.x + rect.width, rect.y + rect.height);
+          const isPrimary = i === 0;
+          const open = (e: React.SyntheticEvent) =>
+            onSelect(h, (e.currentTarget as HTMLElement).getBoundingClientRect());
+          return (
+            <div
+              key={`${h.id}-${i}`}
+              role={isPrimary ? "button" : "presentation"}
+              tabIndex={isPrimary ? 0 : undefined}
+              aria-label={isPrimary ? `Highlight: ${h.position.text}` : undefined}
+              aria-hidden={isPrimary ? undefined : true}
+              onClick={open}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                open(e);
+              }}
+              style={{
+                position: "absolute",
+                left: Math.min(vx1, vx2),
+                top: Math.min(vy1, vy2),
+                width: Math.abs(vx2 - vx1),
+                height: Math.abs(vy2 - vy1),
+                backgroundColor: highlightColorRgba(h.color, HIGHLIGHT_FILL_ALPHA),
+                cursor: "pointer",
+                pointerEvents: "auto",
+              }}
+            />
+          );
+        }),
+      )}
+    </div>
+  );
+}
+
 // Surrounding-context slice for re-search, same shape as
 // packages/shared/highlight-anchor.ts's computeTextPosition -- rects are
 // the real anchor for a PDF highlight (an uploaded file never drifts the
@@ -110,18 +176,27 @@ export function PdfReader({
     onPageTextChangeRef.current = onPageTextChange;
   }, [initialProgressFraction, onProgressChange, onPageTextChange]);
 
+  // True from the moment this component destroys a document until the next
+  // one is open. Page work already in flight against the destroyed document
+  // rejects, and that rejection is teardown rather than a page that can't be
+  // drawn -- see the render effect's catch.
+  const docDestroyedRef = useRef(false);
+
   // Load the document once per file. A local (IndexedDB) file and an
   // authenticated (server) file both arrive as a Blob either way -- see
   // lib/data/articles.ts's loadArticleFile -- so this doesn't care which.
   useEffect(() => {
     let cancelled = false;
+    let task: ReturnType<typeof getDocument> | null = null;
 
     async function loadPdf() {
       setDoc(null);
       setLoadError(null);
+      docDestroyedRef.current = false;
       try {
         const data = await fileBlob.arrayBuffer();
-        const loaded = await getDocument({ data }).promise;
+        task = getDocument({ data });
+        const loaded = await task.promise;
         if (cancelled) return;
         setDoc(loaded);
         setNumPages(loaded.numPages);
@@ -137,6 +212,18 @@ export function PdfReader({
     loadPdf();
     return () => {
       cancelled = true;
+      // pdf.js holds the parsed document and every rasterized page in its
+      // worker, and nothing released that when the React tree went away --
+      // closing a reader (or opening a different book, which reuses this
+      // same component instance) left the whole previous document resident
+      // for the life of the tab. Destroying the *loading task* is pdf.js's
+      // own teardown entry point: it aborts a still-downloading document as
+      // well as freeing a finished one, so a reader closed mid-open stops
+      // costing anything immediately.
+      if (task) {
+        docDestroyedRef.current = true;
+        void task.destroy();
+      }
     };
   }, [fileBlob]);
 
@@ -187,7 +274,14 @@ export function PdfReader({
       }
     }
 
-    renderPage();
+    renderPage().catch((err) => {
+      // getPage/getTextContent reject when the document is torn down under
+      // them, which is ordinary teardown; anything else means this page
+      // genuinely can't be drawn, and leaving a blank canvas with no
+      // explanation is what this did before.
+      if (cancelled || docDestroyedRef.current) return;
+      setLoadError(err instanceof Error ? err.message : "Couldn't render this page.");
+    });
     return () => {
       cancelled = true;
       renderTaskRef.current?.cancel();
@@ -549,35 +643,13 @@ export function PdfReader({
           <canvas ref={canvasRef} />
         </div>
         <div ref={textLayerRef} className={styles.textLayer} />
-        <div className={styles.highlightOverlay}>
-          {viewport &&
-            pageHighlights.map((h) =>
-              h.position.rects.map((rect, i) => {
-                const [vx1, vy1] = viewport.convertToViewportPoint(rect.x, rect.y);
-                const [vx2, vy2] = viewport.convertToViewportPoint(rect.x + rect.width, rect.y + rect.height);
-                const left = Math.min(vx1, vx2);
-                const top = Math.min(vy1, vy2);
-                return (
-                  <div
-                    key={`${h.id}-${i}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => setManaging({ highlight: h, rect: (e.target as HTMLElement).getBoundingClientRect() })}
-                    style={{
-                      position: "absolute",
-                      left,
-                      top,
-                      width: Math.abs(vx2 - vx1),
-                      height: Math.abs(vy2 - vy1),
-                      backgroundColor: highlightColorRgba(h.color, HIGHLIGHT_FILL_ALPHA),
-                      cursor: "pointer",
-                      pointerEvents: "auto",
-                    }}
-                  />
-                );
-              }),
-            )}
-        </div>
+        {viewport && (
+          <PdfHighlightOverlay
+            viewport={viewport}
+            highlights={pageHighlights}
+            onSelect={(highlight, rect) => setManaging({ highlight, rect })}
+          />
+        )}
       </div>
 
       {pending && (
@@ -653,6 +725,22 @@ function PdfScrollPageSlot({
     onTextChangeRef.current = onTextChange;
   }, [onTextChange]);
 
+  // Memoized, because React detaches and re-attaches a ref whose *function
+  // identity* changed -- and an inline arrow here changes on every render.
+  // The parent scrolls, that sets currentScrollPage, every slot re-renders,
+  // and each one used to unobserve and re-observe itself with the shared
+  // IntersectionObserver: for a 300-page PDF that is 600 observer calls per
+  // scroll update, each re-firing an initial callback for its element. The
+  // parent already went to the trouble of a useCallback for registerEl; this
+  // is what was throwing that away.
+  const setSlotEl = useCallback(
+    (el: HTMLDivElement | null) => {
+      pageContainerRef.current = el;
+      registerEl(pageNumber, el);
+    },
+    [registerEl, pageNumber],
+  );
+
   useEffect(() => {
     if (!shouldRender || rendered) return;
     let cancelled = false;
@@ -694,7 +782,12 @@ function PdfScrollPageSlot({
       if (!cancelled) setRendered(true);
     }
 
-    renderPage();
+    // Swallowed rather than surfaced: the realistic rejection here is the
+    // parent tearing the document down while this slot's page work is in
+    // flight, and this slot has no error surface of its own -- a page that
+    // doesn't render keeps its numbered placeholder. Left unhandled it was
+    // an unhandled rejection on every reader close mid-scroll.
+    renderPage().catch(() => undefined);
     return () => {
       cancelled = true;
       renderTaskRef.current?.cancel();
@@ -730,10 +823,7 @@ function PdfScrollPageSlot({
 
   return (
     <div
-      ref={(el) => {
-        pageContainerRef.current = el;
-        registerEl(pageNumber, el);
-      }}
+      ref={setSlotEl}
       data-pdf-scroll-page={pageNumber}
       data-pdf-rendered={viewport ? "true" : "false"}
       data-pdf-reader
@@ -760,35 +850,13 @@ function PdfScrollPageSlot({
         <canvas ref={canvasRef} />
       </div>
       <div ref={textLayerRef} className={styles.textLayer} />
-      <div className={styles.highlightOverlay}>
-        {viewport &&
-          highlights.map((h) =>
-            h.position.rects.map((rect, i) => {
-              const [vx1, vy1] = viewport.convertToViewportPoint(rect.x, rect.y);
-              const [vx2, vy2] = viewport.convertToViewportPoint(rect.x + rect.width, rect.y + rect.height);
-              const left = Math.min(vx1, vx2);
-              const top = Math.min(vy1, vy2);
-              return (
-                <div
-                  key={`${h.id}-${i}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => onManaging({ highlight: h, rect: (e.target as HTMLElement).getBoundingClientRect() })}
-                  style={{
-                    position: "absolute",
-                    left,
-                    top,
-                    width: Math.abs(vx2 - vx1),
-                    height: Math.abs(vy2 - vy1),
-                    backgroundColor: highlightColorRgba(h.color, HIGHLIGHT_FILL_ALPHA),
-                    cursor: "pointer",
-                    pointerEvents: "auto",
-                  }}
-                />
-              );
-            }),
-          )}
-      </div>
+      {viewport && (
+        <PdfHighlightOverlay
+          viewport={viewport}
+          highlights={highlights}
+          onSelect={(highlight, rect) => onManaging({ highlight, rect })}
+        />
+      )}
       {!viewport && (
         <div className="absolute inset-0 flex items-center justify-center font-sans text-xs text-ink-faint">
           Page {pageNumber}

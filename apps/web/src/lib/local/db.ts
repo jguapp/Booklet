@@ -5,6 +5,7 @@
  * stays the source of truth for anyone who never creates an account.
  */
 import type { Article, Collection, Feed, Highlight } from "@booklet/shared";
+import { DEFAULT_SM2_STATE } from "@booklet/shared";
 
 const DB_NAME = "booklet";
 // Bumped 4 -> 5: some browsers ended up with a v4 database that never got
@@ -167,8 +168,39 @@ export const localArticles = {
   clear: () => clear(ARTICLES_STORE),
 };
 
+/**
+ * Same reasoning as normalizeArticle above, and the same reason it exists:
+ * IndexedDB migrates object stores, never the rows inside them, so a
+ * highlight saved before recall prompts and SM-2 scheduling existed is
+ * missing every field they added.
+ *
+ * Articles and collections were normalized on read; highlights were not, and
+ * they are the ones where a missing field is more than cosmetic. An
+ * undefined easinessFactor goes straight into applySm2Review as an operand
+ * (see the resurface page) and every interval it computes from there is NaN
+ * -- which becomes an Invalid Date nextDueAt, written back, and a highlight
+ * whose review schedule can never recover. Filling the documented defaults
+ * in on read costs nothing and cannot produce that.
+ */
+function normalizeHighlight(highlight: Highlight): Highlight {
+  return {
+    ...highlight,
+    prompt: highlight.prompt ?? null,
+    lastSurfacedAt: highlight.lastSurfacedAt ?? null,
+    surfaceCount: highlight.surfaceCount ?? 0,
+    lastFeedback: highlight.lastFeedback ?? null,
+    lastFeedbackAt: highlight.lastFeedbackAt ?? null,
+    resurfaceArchivedAt: highlight.resurfaceArchivedAt ?? null,
+    easinessFactor: highlight.easinessFactor ?? DEFAULT_SM2_STATE.easinessFactor,
+    intervalDays: highlight.intervalDays ?? DEFAULT_SM2_STATE.intervalDays,
+    repetitions: highlight.repetitions ?? DEFAULT_SM2_STATE.repetitions,
+    nextDueAt: highlight.nextDueAt ?? null,
+    annotation: highlight.annotation ?? null,
+  };
+}
+
 export const localHighlights = {
-  getAll: () => getAll<Highlight>(HIGHLIGHTS_STORE),
+  getAll: () => getAll<Highlight>(HIGHLIGHTS_STORE).then((rows) => rows.map(normalizeHighlight)),
   put: (highlight: Highlight) => put(HIGHLIGHTS_STORE, highlight),
   delete: (id: string) => remove(HIGHLIGHTS_STORE, id),
   clear: () => clear(HIGHLIGHTS_STORE),
