@@ -4,7 +4,15 @@
 
 <div align="center">
 
-[![CI](https://img.shields.io/github/actions/workflow/status/jguapp/Booklet/ci.yml?branch=main&style=for-the-badge&label=CI&logo=githubactions&logoColor=white)](https://github.com/jguapp/Booklet/actions/workflows/ci.yml)
+**A read-later app that assumes you actually want to remember what you read.**
+
+Save anything. Read it beautifully. Highlight what matters — then get asked
+about it later, before you're shown the answer.
+
+</div>
+
+<div align="center">
+
 ![License](https://img.shields.io/badge/license-proprietary-red?style=for-the-badge)
 ![Node](https://img.shields.io/badge/node-22.13%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)
 ![pnpm](https://img.shields.io/badge/pnpm-11-F69220?style=for-the-badge&logo=pnpm&logoColor=white)
@@ -22,555 +30,331 @@
 
 </div>
 
-## Why this exists
+---
 
-Read-it-later apps have a well-known failure mode: articles pile up in a
-queue nobody ever clears, and highlights — the actual reason most of them
-got saved in the first place — vanish into a list that's never reopened
-again. Booklet is built around fixing that second half specifically. A
-highlight isn't a stored string; it's a flashcard whether you meant it to
-be one or not, and it resurfaces later on a real spaced-repetition
-schedule (SM-2, the same algorithm behind Anki) instead of sitting inert.
+<div align="center">
+  <img src=".github/assets/library.png" alt="The Booklet library: saved articles as clean cards, filtered by unread, reading and archived" width="100%" />
+</div>
 
-Everything else follows from a handful of opinions taken further than most
-projects in this space bother to:
+---
 
-- **Offline is the default, not a fallback.** Saving, reading,
-  highlighting, resurfacing, PDF/EPUB rendering, search, OCR, and
-  text-to-speech all work with zero account, backed by IndexedDB in the
-  browser. An account exists for exactly one reason — syncing a library
-  across devices — and nothing product-facing is gated behind creating one.
-- **A saved PDF or EPUB is rendered, not flattened.** Pages render via
-  `pdfjs-dist` (real canvas output plus a precisely positioned, selectable
-  text layer); EPUB chapters render via `epub.js` (real pagination, real
-  iframe rendering). Highlights anchor to page coordinates or an EPUB CFI
-  range — not a character offset into a lossy text extraction that drifts
-  the moment formatting changes.
-- **Read-aloud is engineered to feel instant, not just work.** Kokoro (an
-  open-weight, 82M-parameter TTS model) runs through a small pool of real
-  worker processes on the server, over ONNX Runtime's native execution
-  path — measured concurrent generation fast enough that the gap between
-  one sentence ending and the next starting is 1-2 milliseconds, not the
-  multi-second pause most from-scratch TTS integrations settle for. See
-  [Architecture](#architecture) for why that took a process pool instead
-  of the more obvious approach.
-- **The integration surface is a first-class product, not an
-  afterthought.** A versioned `/api/v1`, personal access tokens, and
-  HMAC-signed webhooks ship alongside the app itself — kept deliberately
-  decoupled from the internal routes so a frontend refactor can't quietly
-  break someone's script.
+## The problem
 
-No account is required to use any of this — saves and highlights live in
-the browser (IndexedDB) by default, and signing in for the first time
-migrates whatever's already saved locally onto the account rather than
-leaving it behind.
+Every read-later app has the same failure mode. Articles pile into a queue
+nobody clears, and highlights — the actual reason most things get saved —
+disappear into a list that never gets reopened.
 
-**This is proprietary software.** Booklet is not open source. No license is
-granted for use, modification, or redistribution of any part of this
-repository — see [License](#license). The engineering practices below
-(real CI, a documented architecture, a public API) are the same ones an
-open-source project of this size would carry; the source just isn't
-licensed for reuse.
+The usual answer is a "resurfacing" feature that shows you an old highlight
+and asks whether you remembered it. **That ordering is backwards.** You're
+being asked to grade a recall attempt you were never given the chance to
+make, and recognition feels like recall without being it.
+
+Booklet fixes the second half of the problem specifically.
+
+## What makes it different
+
+### Reading that gets out of the way
+
+Article extraction that keeps the text and throws away the furniture, in a
+typographic frame designed for long-form. Four reading themes, adjustable
+measure and size, and progress that survives a reload.
+
+<div align="center">
+  <img src=".github/assets/reader.png" alt="The reader: a clean article page with a yellow highlight over the opening sentence" width="100%" />
+</div>
+
+**PDF and EPUB are first-class**, not an afterthought — real page rendering
+and real CFI-anchored highlights, not a text dump. Scanned PDFs go through
+OCR automatically when there's no text layer to read.
+
+### Highlights that anchor, and survive
+
+Highlights are stored as **W3C-style text-quote and text-position
+selectors**, so they re-anchor even when the underlying article changes
+slightly. Each one knows where it came from — "p. 42" for a PDF, "Section 4"
+for an EPUB, "Paragraph 7" for an article.
+
+<div align="center">
+  <img src=".github/assets/highlights.png" alt="The highlights dashboard, grouped by source article with citations" width="100%" />
+</div>
+
+### Review that's actually retrieval practice
+
+Real **SM-2 spaced repetition** — the SuperMemo algorithm, not an
+approximation of it. Every highlight carries its own easiness factor,
+interval, and next-due date.
+
+And the part that matters: a highlight can carry a **recall prompt**. When it
+does, Daily Review asks the question and withholds *both the passage and the
+grade buttons* until you've actually tried to answer.
+
+<table>
+<tr>
+<td width="50%"><img src=".github/assets/daily-review-prompt.png" alt="Daily Review asking a question with the answer hidden behind a Show the highlight button" /></td>
+<td width="50%"><img src=".github/assets/daily-review.png" alt="Daily Review showing a highlight with remembered, forgot and archive buttons" /></td>
+</tr>
+<tr>
+<td align="center"><b>With a prompt</b> — question first, answer on demand</td>
+<td align="center"><b>Without one</b> — unchanged, so nothing breaks</td>
+</tr>
+</table>
+
+### Listen to anything, with no API bill
+
+Local neural text-to-speech via **Kokoro-82M**, running on your own CPU. 54
+voices, word-level read-along highlighting, and a two-tier cache so a
+re-listen is instant.
+
+It also publishes your queue as a **private podcast feed**, so your reading
+list shows up in whatever player already has your lock-screen controls,
+CarPlay, and sleep timer.
+
+### Works signed out, forever
+
+The whole app runs against IndexedDB with no account at all. Accounts exist
+**only** for sync — and when you make one, your local library migrates up
+in batches, resumable, with every field carried across.
+
+<div align="center">
+  <img src=".github/assets/settings.png" alt="Settings, showing reading preferences and sync options" width="100%" />
+</div>
+
+### And the rest
+
+**Share** a collection's highlights on a public, unlisted page that reveals
+nothing else about your account · **Search** across titles, text and notes ·
+**Collections**, nested and smart · **RSS** subscriptions · **Import** from
+Pocket, Instapaper, browser bookmarks and Kindle `My Clippings.txt` ·
+**Export** to Markdown for Obsidian · a **browser extension** for Chrome and
+Firefox · a **public API** with personal access tokens and webhooks · and a
+**React Native** app.
+
+---
 
 ## Architecture
 
-A pnpm monorepo: one Fastify API backing three real clients (a Next.js web
-app, a Manifest V3 browser extension, and an Expo/React Native mobile
-app), plus a fourth "client" that never touches the network at
-all — signed-out mode reads and writes IndexedDB directly in the browser
-and only starts talking to the API once an account exists.
+Four clients, one API, one shared vocabulary package.
+
+```mermaid
+graph TB
+    subgraph Clients
+        WEB["🌐 Next.js web app<br/><i>reader, highlights, review</i>"]
+        EXT["🧩 Browser extension<br/><i>Chrome + Firefox</i>"]
+        MOB["📱 React Native<br/><i>Expo</i>"]
+        POD["🎧 Any podcast client<br/><i>RSS + enclosures</i>"]
+    end
+
+    subgraph API["Fastify API"]
+        ROUTES["16 route modules<br/><i>REST + versioned /api/v1</i>"]
+        SVC["Services<br/><i>extraction · TTS · OCR · aggregation</i>"]
+    end
+
+    subgraph Data
+        PG[("PostgreSQL<br/><i>19 models via Prisma</i>")]
+        REDIS[("Redis<br/><i>optional L2 audio cache</i>")]
+        DISK[("Disk<br/><i>uploads + episodes</i>")]
+    end
+
+    subgraph Local["On-device"]
+        IDB[("IndexedDB<br/><i>full app, no account</i>")]
+    end
+
+    WEB <--> IDB
+    WEB --> ROUTES
+    EXT --> ROUTES
+    MOB --> ROUTES
+    POD --> ROUTES
+    ROUTES --> SVC
+    SVC --> PG
+    SVC --> REDIS
+    SVC --> DISK
+
+    style WEB fill:#1d5570,color:#fff
+    style API fill:#2d6a4f,color:#fff
+    style Local fill:#8e5c0c,color:#fff
+```
+
+### The offline-first seam
+
+This is the design decision everything else follows from. Every domain has
+one module in `apps/web/src/lib/data/` that branches on whether you're
+signed in — and that branch is the *only* place the difference exists.
 
 ```mermaid
 flowchart LR
-    subgraph Clients["Clients"]
-        Web["Web app<br/>Next.js (App Router)"]
-        Ext["Browser extension<br/>Manifest V3"]
-        Mobile["Mobile<br/>Expo / React Native"]
-    end
+    UI["Reader / Library / Review<br/><i>never knows which mode</i>"]
+    SWAP{{"lib/data/*.ts<br/><b>the swap point</b>"}}
+    LOCAL[("IndexedDB<br/>local mode")]
+    API["apiFetch → Fastify<br/>synced mode"]
 
-    IDB[("IndexedDB<br/>(signed out)")]
+    UI --> SWAP
+    SWAP -->|"authenticated: false"| LOCAL
+    SWAP -->|"authenticated: true"| API
 
-    subgraph API["apps/api — Fastify"]
-        Auth["Auth<br/>JWT + OAuth"]
-        Core["Articles · Highlights<br/>Collections · Digests"]
-        TTS["Kokoro TTS<br/>process pool"]
-        OCR["OCR<br/>Tesseract.js"]
-        V1["/api/v1<br/>tokens + webhooks"]
-    end
-
-    DB[("PostgreSQL<br/>via Prisma")]
-    Files[("Local file storage<br/>uploaded PDF/EPUB")]
-    Resend["Resend<br/>(email)"]
-
-    Web -- "no account" --> IDB
-    Web -- "signed in" --> API
-    Ext --> API
-    Mobile --> API
-
-    Core --> DB
-    Core --> Files
-    Core --> TTS
-    Core --> OCR
-    Core --> Resend
-    Auth --> DB
-    V1 --> DB
+    style SWAP fill:#8e5c0c,color:#fff
+    style UI fill:#1d5570,color:#fff
 ```
 
-A few decisions in that diagram are worth explaining rather than just
-drawing:
+Signing up runs a **batched, resumable migration**: local data goes up ~4 MB
+at a time, each batch is cleared only after the server accepts it, and
+uploaded files follow in a second phase keyed by the ids the server just
+minted. A dropped connection resumes rather than restarting — and rather
+than silently emptying your library, which is what an earlier version did.
 
-- **The Kokoro TTS pool is real child processes, not worker threads.**
-  `onnxruntime-node`'s native binding was confirmed by hand to crash the
-  whole Node process the instant `generate()` runs inside a
-  `worker_thread` — loading the model there works fine, generating audio
-  doesn't. A pool of independent OS processes sidesteps that entirely
-  (each is just another `node` invocation, exactly like the main server
-  itself) while still turning "generate one sentence at a time" into
-  genuine wall-clock parallelism: three concurrent generations measured
-  at roughly the same time as one, not three times as long.
-- **The API is stateless enough that the file store is the only thing
-  that isn't.** Uploaded PDFs/EPUBs live on local disk today
-  (`storage-service.ts`, streamed rather than fully buffered into memory
-  on read), behind a narrow enough interface that swapping it for S3 is a
-  three-function change, not a rewrite.
-- **Signed-out mode isn't a demo mode.** `apps/web/src/lib/local/db.ts`
-  and `apps/web/src/lib/data/*.ts` implement the exact same
-  save/highlight/resurface contract IndexedDB-side that `apps/api`
-  implements Postgres-side — the UI layer calls one repository interface
-  and doesn't know or care which backend is answering.
+### Saving an article
 
-## A few things worth pointing at
+```mermaid
+sequenceDiagram
+    participant U as You
+    participant W as Web app
+    participant A as API
+    participant S as Site
 
-Some other choices that aren't just "yet another CRUD app":
+    U->>W: Paste a URL
+    W->>A: POST /api/extract
+    A->>A: Reject private/reserved addresses (SSRF guard)
+    A->>S: Fetch
+    S-->>A: HTML
+    A->>A: Readability → article text
+    A->>A: Inline images as data: URIs
+    A->>A: Sanitize (allowlist — Readability is not a sanitizer)
+    A-->>W: Clean article
+    W->>W: Store (IndexedDB or POST /api/articles)
+    W-->>U: Ready to read, offline, forever
+```
 
-- **OCR that runs itself.** A scanned PDF with no usable text layer gets
-  fed through [Tesseract.js](https://github.com/naptha/tesseract.js)
-  automatically on upload — no toggle, no "try OCR" button, no API key.
-- **A real open-source TTS model — and a real playback experience around
-  it.** [Kokoro](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX)
-  (82M params, Apache-2.0) generates through a small server-side worker
-  pool (see [Architecture](#architecture)) fast enough to keep up with
-  playback in real time, driving a persistent, Spotify-style "now
-  playing" bar that survives navigating away from the article, live
-  word-level read-along highlighting, and a Readwise-style section
-  indicator tracking which paragraph is currently being read — no API
-  key either way, since inference is self-hosted, just server-side now
-  instead of in-browser WASM.
-- **A public, versioned API.** `/api/v1`, personal access tokens, and
-  HMAC-signed webhooks — the same integration surface a much bigger
-  product would ship, kept deliberately decoupled from the internal
-  routes so a frontend refactor can't silently break someone's script.
-- **Everything works signed out.** The entire save → read → highlight →
-  resurface loop, PDF/EPUB rendering, search, TTS, and OCR all work with
-  zero account, backed by IndexedDB. An account exists for exactly one
-  reason — syncing across devices — and nothing is gated behind creating
-  one.
-- **CI that actually runs the hard parts.** Typecheck/lint, unit,
-  integration, two real e2e suites (including a genuine Kokoro model
-  download and a headed-Chromium extension load under `xvfb`), and a Docker
-  build-and-smoke-test — the whole pipeline, not just the paths someone
-  remembered to check. Written twice, for GitHub Actions and GitLab; see
-  [Testing](#testing) for which is live.
+Images are inlined at save time, so a saved article still renders years
+later when the publisher's CDN is gone. Which is the point — [the web is not
+an archive](#the-problem).
+
+### Read-aloud, and why it's fast
+
+The engineering story worth telling. Kokoro runs at roughly 1–2× realtime on
+CPU, so generating a whole article before playback would mean waiting
+minutes. Instead:
+
+```mermaid
+flowchart LR
+    T["Article text"] --> C["Chunker<br/><i>first chunk ≤ 80 chars</i>"]
+    C --> Q{{"Cache?"}}
+    Q -->|"L1 hit"| P["▶ Play"]
+    Q -->|"L2 hit (Redis)"| P
+    Q -->|"miss"| POOL["Worker pool<br/><i>forked processes</i>"]
+    POOL --> P
+    P -.->|"while playing"| AHEAD["Generate ahead"]
+    AHEAD --> POOL
+
+    style P fill:#2d6a4f,color:#fff
+    style POOL fill:#1d5570,color:#fff
+```
+
+A deliberately tiny first chunk means audio starts in about a second; the
+rest is generated during playback and cached, so the second listen is
+instant. Workers are **forked processes rather than worker threads** —
+onnxruntime's native binding crashes in threads — with their ONNX thread
+budget divided by pool size so three workers don't each try to use every
+core.
+
+---
 
 ## Status
 
-The full save → read → highlight → resurface loop works end to end, backed
-by a real API and database, with account creation genuinely optional
-throughout. Grouped by area rather than one flat list:
+**Feature-complete and not yet deployed.** Everything above works and is
+tested. What remains is a front-end visual redesign and the deployment
+itself.
 
-<details open>
-<summary><strong>Core loop</strong> — data model, auth, saving</summary>
+| | |
+|---|---|
+| **Source files** | 349 TypeScript across 4 apps + 1 shared package |
+| **Data model** | 19 Prisma models, 20 migrations |
+| **Tests** | Unit (Vitest) in `packages/shared`, `apps/web` and `apps/api`; 48 Playwright e2e specs |
+| **One command** | `pnpm verify` runs 10 checks and tells you what it *didn't* |
 
-- [x] Core data model — Prisma schema for User, Article, Highlight,
-      Annotation, Collection (with smart/filter-based and nested
-      collections), ApiToken, Webhook, Session, Feed, Digest, and
-      password-reset/email-verification tokens, migrated to a live database
-- [x] Auth — sign up / log in / log out, password reset, email verification,
-      per-device session management (list + revoke, "log out other
-      devices"), and **OAuth (Google + GitHub)** alongside email/password.
-      Short-lived JWT access tokens, rotated opaque refresh tokens stored
-      hashed server-side. Every provider — email/password included — is
-      **entirely optional**: every route works signed out, and OAuth only
-      appears in the UI once a provider's credentials are configured
-- [x] Save article by URL — server-side fetch + Readability extraction, with
-      SSRF hardening (blocks private/loopback/link-local targets on every
-      redirect hop) and canonical-URL duplicate detection (catches a
-      tracking-param or AMP-link variant of something already saved).
-      Remote images are fetched server-side and inlined as base64 `data:`
-      URIs, so a saved article's images survive even after the source page
-      disappears
-- [x] Save PDF/EPUB — server-side extraction via the same stateless endpoint
-      either way, signed in or not. Real rendering, not extracted text: PDF
-      pages render via pdfjs-dist (canvas + a precisely-positioned text
-      layer for selection), EPUB chapters render via epub.js (paginated,
-      real iframe rendering). Highlights anchor by page+rects (PDF) or CFI
-      range (EPUB)
-- [x] OCR fallback — a scanned PDF with an empty/near-empty native text
-      layer automatically falls back to Tesseract.js recognition (capped at
-      20 pages, since it runs synchronously in the upload request), with a
-      visible "may contain recognition errors" notice in the reader
-- [x] Local ↔ account sync — creating an account migrates existing local
-      articles, highlights, and collections onto it instead of stranding them
+This repo documents its own mistakes on purpose. `docs/TECHNICAL_DOCUMENTATION.html`
+is a long-form technical guide covering not just how things work but what was
+tried, rejected, and got reversed — including the bugs that shipped and how
+they were found.
 
-</details>
+**Known and written down:** the Docker volume behaviour needs one real
+`docker compose` run to verify, the podcast feed has never been subscribed to
+in a real client, and the read-along drift measurement needs a machine with
+network access. Each is tracked with the exact command that closes it.
 
-<details open>
-<summary><strong>Reading & annotation</strong></summary>
-
-- [x] Reader view — light/dark/sepia/Kindle theming, adjustable type size,
-      select-to-highlight with optional notes, drift-tolerant highlight
-      re-anchoring
-- [x] Highlight notes — shown as a small click-to-open icon next to the
-      highlight (Apple Books style), never the note text itself sitting in
-      the reading flow
-- [x] Dictionary lookup — select any word in an article, PDF, or EPUB and
-      look it up inline (Apple Books-style popover), no separate tab
-- [x] Text-to-speech, two engines — the browser's native Web Speech API
-      (zero setup, the default), or **Kokoro**, an open-source 82M-param
-      model generated through a server-side worker-process pool (real
-      `onnxruntime-node` native execution, not a WASM sandbox — measured
-      2.5-3.8x faster) so playback keeps up with generation in real time.
-      Drives a persistent, Spotify-style player bar that survives
-      navigating away from the article, live word-level read-along
-      highlighting (estimated from playback position, since the model
-      emits no per-word timestamps), and a Readwise-style left-border
-      indicator for the current paragraph. No API key either way — the
-      model is self-hosted, just server-side now instead of in-browser WASM
-- [x] Reading progress — a visual progress bar for every reader (article,
-      PDF, EPUB), plus periodic + visibility-triggered persistence (not just
-      on navigate-away — a hard reload or tab close can interrupt an
-      in-flight async write before that would fire) so the last-visited
-      scroll position (HTML), page (PDF), or chapter (EPUB, via epub.js's
-      own location index) is restored on next open
-- [x] Resurfacing — real SM-2 spaced repetition (interval growth on recall,
-      reset on a miss), not a heuristic. Digest generation persists and
-      reuses a batch per the user's DAILY/WEEKLY frequency instead of
-      re-rolling one on every visit; feedback ("remembered" / "forgot" /
-      archive) updates the schedule. Digest emailing sends for real via
-      Resend when configured, logs to the console otherwise
-- [x] Recall prompts — a highlight can carry a question whose answer is the
-      highlight. Daily Review asks it first and keeps the passage, the note,
-      *and* the grade buttons hidden until you ask for them, because
-      recognition feels like recall but isn't — showing the answer first meant
-      SM-2 was grading re-reads rather than the retrieval attempts it was
-      designed for. Additive: a highlight without a prompt renders and grades
-      exactly as before, on web and on mobile
-
-</details>
-
-<details open>
-<summary><strong>Library, organization & search</strong></summary>
-
-- [x] Reading list / library view — IndexedDB-backed when signed out, synced
-      via the API when signed in, same UI either way. Defaults to the
-      Unread tab (what's actually waiting to be read). Delete, archive,
-      favorite, organize into collections, and tag (free-form,
-      lighter-weight than collections) in both modes
-- [x] Nested and smart collections — fold a collection under another, or
-      define one by a filter (status/tags/text query) so membership is
-      computed live rather than a fixed list
-- [x] Command palette — Cmd/Ctrl+K to jump to any page, collection, or
-      article, or fall through to a live search
-- [x] Full-text search — title/excerpt/author/site/body-text/tags for
-      articles, selected text/notes for highlights. Plain case-insensitive
-      matching rather than Postgres tsvector, on purpose: local/anonymous
-      mode has no full-text index at all, so both modes behave the same way
-      instead of signed-in users getting relevance-ranked results local mode
-      structurally can't match
-- [x] "More from your library" — related-article suggestions once you're
-      most of the way through something, scored by tag/title-keyword/site/
-      author overlap (no embeddings infrastructure exists yet — see
-      [Roadmap](#roadmap))
-- [x] Stats & Recap — an activity heatmap, streaks, completion rate, and
-      time spent, plus a weekly/monthly "wrapped"-style summary
-
-</details>
-
-<details open>
-<summary><strong>Cross-app sync & automation</strong></summary>
-
-- [x] Import — Pocket/Instapaper CSV, browser bookmarks, and a real Kindle
-      "My Clippings.txt" export (one article per book, every highlight and
-      note attached)
-- [x] Export — Markdown (for Obsidian/Notion/Logseq) and Anki flashcards
-- [x] Send to Kindle — emails a generated HTML file to your own
-      `@kindle.com` address, the same mechanism Amazon's own "send to
-      Kindle" feature uses
-- [x] A public, versioned API (`/api/v1`) — articles, highlights, and
-      collections, kept deliberately separate from the internal routes
-- [x] Personal access tokens — read or read+write scoped, shown once at
-      creation
-- [x] Webhooks — HMAC-SHA256-signed deliveries on `article.created` /
-      `highlight.created`, with a visible delivery-history log
-- [x] RSS — subscribe to a feed, see its items, save any of them into the
-      library
-- [x] Podcast feed — your reading queue (unread + in-progress, not the whole
-      back catalogue) as a real RSS feed, one audio file per article, so
-      read-aloud reaches the lock screen, CarPlay, playback speed and offline
-      sync that podcast clients already solved. The feed token is
-      `bkpod_`-prefixed and cannot become a session anywhere in the app, and
-      `POST /api/tokens` refuses to mint the scope, so the boundary is the
-      token's *format* rather than a per-route check somebody has to remember.
-      Playback position deliberately does not sync back — no podcast client
-      has a field for reporting it
-- [x] Public sharing — an unlisted page for one article's highlights or one
-      collection's. Excerpts only (the reader's own selected text, never the
-      publisher's), revocation deletes the row rather than flipping a boolean
-      so a leaked URL cannot be un-revoked, and smart collections are refused
-      because their membership is a live query — sharing one would publish
-      articles saved after the link went out
-- [x] Onboarding seeds — a new, empty account has something to read on day
-      one: passages highlighted by at least three accounts that separately
-      opted in, plus 19 hand-transcribed public-domain passages for when the
-      aggregate is empty. Opt-in and separate from sharing itself, and the
-      three-account threshold is enforced at write time, since a read-side
-      filter leaves one-person rows in the table
-
-</details>
-
-<details open>
-<summary><strong>Platform, testing & ops</strong></summary>
-
-- [x] Browser extension (`apps/extension`) — log in, save the current page
-      from the toolbar or a right-click menu. Real icon set, Firefox
-      support (one manifest, both browsers) — see `apps/extension/README.md`
-- [x] Mobile app (`apps/mobile`) — Expo/React Native, and actually running
-      (web target, verified via Playwright against the real dev API — no
-      simulator/device in this environment, see that app's README for
-      exactly what is and isn't covered). Local-first like the web app
-      (AsyncStorage instead of IndexedDB, same repository-pattern swap
-      point), with highlighting (a toggled select-then-highlight flow --
-      React Native has no single component that both reports a text
-      selection and renders per-range styling, unlike a browser),
-      collections, PDF/EPUB upload (as extracted text — no real page/CFI
-      rendering, which needs DOM canvas/iframe APIs React Native doesn't
-      have), and Daily Review/resurfacing with the same SM-2 feedback loop
-- [x] API rate limiting — a global per-IP ceiling plus tighter per-route
-      budgets for TTS generation, the credential-guessing auth routes, and the
-      public share pages, and a per-*account* failed-login backoff that
-      escalates a wait instead of locking anyone out. Error monitoring
-      (Sentry, no-op without a DSN) — see `DEPLOYMENT.md` for every knob
-- [x] Automated tests — unit (SM-2, highlight anchoring, URL canonicalization,
-      collection filters, recap math, Kindle-clippings parsing, TTS chunking,
-      read-along timing, recall prompts, plus a Vitest + jsdom runner for the
-      web app's own DOM logic and React components), integration
-      (the full API surface via Fastify's `.inject()`), and e2e (Playwright:
-      the local/anonymous IndexedDB path, real PDF/EPUB rendering and
-      highlighting, dictionary lookup, both TTS engines — including a real
-      Kokoro model download and generation, not mocked — OAuth, and the
-      browser extension loaded for real in Chromium). `pnpm verify` runs
-      everything this machine can check and names what it skipped — see
-      [Testing](#testing)
-- [x] CI — the full suite (typecheck/lint, unit, integration, both e2e
-      suites, a TTFA benchmark, and a Docker build-and-smoke-test) as seven
-      jobs, written twice: for GitHub Actions and for GitLab. Read
-      [Testing](#testing) before relying on either — the Actions allowance is
-      exhausted and the GitLab port has not run yet
-- [x] Deployment configs — Dockerfiles for both apps and `docker-compose.yml`,
-      build-verified by CI's `docker-build` job (a real image build plus an
-      API smoke test against a real Postgres) — see `DEPLOYMENT.md` and
-      [Roadmap](#roadmap) for what's still needed to put them on a real host
-
-</details>
-
-## Testing
-
-```bash
-pnpm verify                             # everything checkable without a running service, and it names what it skipped
-pnpm verify --e2e                       # also the browser suite (needs dev servers up; it prints the setup)
-```
-
-`pnpm verify` exists because "the tests pass" was quietly ambiguous: `pnpm
-test` runs the three unit suites and nothing else — not lint, not typecheck,
-not the production esbuild bundle, which has broken while every other signal
-stayed green. It closes with what it *cannot* cover anywhere (`docker-build`
-above all), because a verification tool that silently skips things teaches you
-to read a green summary as "safe to deploy". The individual suites:
-
-```bash
-pnpm --filter @booklet/shared test      # 115 unit tests: SM-2, highlight anchoring, URL canonicalization,
-                                        #   collection filters, recap, Kindle clippings, TTS chunking,
-                                        #   read-along timing, recall prompts, reading stats, related articles
-pnpm --filter @booklet/web test         # 40 unit tests (Vitest + jsdom): DOM-range bridging, React components
-pnpm --filter @booklet/api test         # 250 integration tests: full API via Fastify .inject(), real dev DB
-pnpm --filter @booklet/web test:e2e     # e2e: 122 Playwright tests across 48 spec files — local/anonymous
-                                        #   flow, real PDF + EPUB rendering, dictionary, TTS, recall prompts
-pnpm --filter @booklet/extension test:e2e   # e2e: loads the real built extension in Chromium (headed -- see its README)
-```
-
-The web unit runner (#165) is newer than the rest: until it existed, ~19,000
-lines of the app's own logic had no runner at all, and three real bugs shipped
-that a sub-second test here would have caught — both chunk-0 sizing bugs in
-the TTS chunker, the read-along section anchor resolving to the wrong element
-at a text-node boundary, and the highlight popover dismissing itself on a
-scroll event that arrived after it opened. Every one surfaced as a slow,
-intermittent e2e failure that read like flakiness. Rendering React there needs
-a 40-line local helper rather than `@testing-library/react`; see
-`apps/web/vitest.config.ts` for why (three React copies, and a resolution
-order Vite never gets to influence).
-
-`apps/web/e2e` covers the local/anonymous save→read→highlight loop, the
-real PDF (`pdf-reader.spec.ts`) and EPUB (`epub-reader.spec.ts`) readers
-end to end (actual canvas rendering and iframe-based pagination in a real
-browser, not mocked), dictionary lookup, native text-to-speech (skipped
-automatically in environments with no system TTS voice, such as headless
-CI), **Kokoro text-to-speech (`tts-player.spec.ts`) — real server-side
-generation and playback, not mocked, covering the persistent player bar,
-read-along highlighting, and a regression guard against a chunking bug
-that once turned one Wikipedia article into 2,283 separate TTS
-requests**, Kindle import/export
-(`kindle-sync.spec.ts`), recall prompts (`recall-prompts.spec.ts`), the
-command palette, smart/nested collections, duplicate detection, related
-articles, and tags/search/reading-progress persistence
-(`tags-search-progress.spec.ts`). `apps/mobile` has no automated test suite
-(`tsc --noEmit` only); its web target was verified manually the same way, see
-`apps/mobile/README.md`.
-
-### CI
-
-Two equivalent pipelines exist, and **it is not safe to assume either is
-running on your pushes right now**:
-
-- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — seven jobs:
-  typecheck/lint for every package, the shared/web unit suites, the API suite
-  and both e2e suites against a real Postgres service container, the
-  extension's under `xvfb`, a Kokoro TTFA benchmark, and a `docker-build` job
-  that builds both production images and smoke-tests the API image. Its runs
-  have gone green on real hardware — but this repository's Actions allowance
-  is exhausted, so it is dormant.
-- [`.gitlab-ci.yml`](.gitlab-ci.yml) — the same seven jobs, ported rather than
-  copied (service hostnames, service readiness, and Docker-in-Docker
-  networking all genuinely differ). It has never executed, because the
-  repository is on GitHub. See [`docs/CI_GITLAB.md`](docs/CI_GITLAB.md) for
-  what changed, the project settings the file cannot set itself, and the
-  runner-minutes analysis worth reading before switching — GitLab.com's free
-  tier is *smaller* than Actions'.
-
-Until one of them is genuinely live, `pnpm verify` above is the stand-in.
-`DEPLOYMENT.md`'s "Which CI config is live" has the full picture, including
-why neither file should be deleted.
-
-## Roadmap
-
-What's left is almost entirely things this environment genuinely cannot do
-(no Apple/Google/Mozilla developer account, no cloud hosting account, no
-device/simulator) rather than unstarted work. See the
-[open issues](https://github.com/jguapp/Booklet/issues) for the current
-breakdown, one issue per item below:
-
-- **Mobile app on a real device/simulator** — the web target runs and is
-  verified; `ios`/`android` are type-checked only, since this environment
-  has no Xcode/iOS Simulator or Android Studio/emulator. Eventually a real
-  App Store / Play Store release, which needs developer accounts that
-  don't exist here either
-- **Browser extension store publishing** — Chrome Web Store and
-  addons.mozilla.org both need developer accounts this environment doesn't
-  have. Safari support needs Xcode's `safari-web-extension-converter`
-  (macOS-only)
-- **Real production hosting** — the Dockerfiles and `docker-compose.yml`
-  are build-verified in CI (image build + API smoke test against Postgres),
-  but nothing is deployed to an actual host yet. Needs a hosting decision
-  (Fly.io / Railway / a VPS / etc.), a managed Postgres instance, and real
-  `RESEND_API_KEY` / `SENTRY_DSN` / OAuth production credentials
-- **Production OAuth app registration** — Google/GitHub OAuth work today
-  against locally-registered dev credentials; production needs its own
-  registered redirect URIs once a real domain exists
-- **Translation** and **a higher-tier self-hosted TTS model (Chatterbox)**
-  are scoped in their own closed-but-documented issues — both need a real
-  external resource this environment doesn't have (a paid translation API
-  key; a hosting/cost decision for a self-hosted ML inference service,
-  respectively) rather than more engineering time
-- Smaller, not-yet-started polish: React Navigation for mobile once it has
-  more than a handful of screens; real page/CFI rendering for mobile
-  PDF/EPUB (needs a WebView bridge to reuse the web app's pdfjs-dist/
-  epub.js code, or a native renderer — a real project of its own, not a
-  scaffold-stage add-on); prompt authoring on mobile, which honors a recall
-  prompt written on the web but cannot yet write one
-
-See each app's own README (`apps/mobile`, `apps/extension`) for exactly
-what's verified and what isn't within these constraints.
+---
 
 ## Tech stack
 
-| Layer | Choice |
-| --- | --- |
-| Monorepo | pnpm workspaces |
-| API | Node.js, TypeScript, Fastify |
-| Database | PostgreSQL via Prisma ORM (v7, driver adapters) |
-| Web app | Next.js (App Router), TypeScript, Tailwind CSS v4 |
-| Browser extension | Manifest V3, esbuild, no framework |
-| Mobile | Expo / React Native |
-| Article extraction | Mozilla Readability + jsdom (HTML), pdfjs-dist (PDF), jszip + jsdom (EPUB) |
-| PDF/EPUB rendering | pdfjs-dist (canvas + text layer) and epub.js (paginated, CFI-anchored) in the browser -- real page/chapter rendering, not extracted text |
-| OCR | Tesseract.js -- in-process WASM, no external API, triggered only when a PDF's native text layer is empty/sparse |
-| Text-to-speech | Browser SpeechSynthesis (default) or Kokoro via kokoro-js -- an 82M-param open-weight model, generated server-side through a pool of worker processes over ONNX Runtime's native execution path (`onnxruntime-node`), not in-browser WASM |
-| Auth | Email/password + OAuth (Google, GitHub), JWT access + refresh tokens; every method is optional — only needed for sync |
-| Local storage | IndexedDB (no-account mode is the default, not a fallback) |
-| Email | Resend, with a console-log fallback when unconfigured |
-| Error monitoring | Sentry (`@sentry/node` / `@sentry/browser`), no-op without a DSN |
-| Testing | Vitest (unit + integration), Playwright (e2e) |
-| Fonts | Literata (serif, reading) + Work Sans (sans, UI chrome) |
+| Layer | Choice | Why |
+|---|---|---|
+| Language | TypeScript, strict, everywhere | One vocabulary across API, web, mobile, extension |
+| API | Fastify 5 | Fast, schema-first, good plugin story |
+| Database | PostgreSQL + Prisma 7 | Typed queries, real migrations |
+| Web | Next.js 16 (App Router) + React 19 | Server components where they help |
+| Styling | Tailwind v4 | Utility-first, no CSS-in-JS runtime |
+| Local storage | IndexedDB | Transactional, structured, actually offline |
+| TTS | Kokoro-82M via `kokoro-js` + onnxruntime | 82M params, runs on CPU, no API bill |
+| Extraction | `@mozilla/readability` + jsdom | The same engine Firefox Reader View uses |
+| PDF / EPUB | pdf.js · epub.js · Tesseract.js | Real rendering, real OCR fallback |
+| Testing | Vitest + Playwright | Fast unit, real browser e2e |
+| Monorepo | pnpm workspaces + Turborepo | Caching, filtered runs |
 
 ## Project structure
 
 ```
 apps/
-  api/            Fastify API + Prisma schema
-  web/            Next.js web app
-  extension/      Browser extension (Manifest V3)
-  mobile/         Expo/React Native app
+  api/         Fastify · Prisma · extraction · TTS pool · OCR
+  web/         Next.js app — reader, highlights, review, sharing
+  mobile/      React Native (Expo)
+  extension/   Chrome + Firefox, MV3
 packages/
-  shared/         Types and logic shared across apps
-                  (request/response DTOs, highlight anchoring, SM-2 resurfacing)
-docker-compose.yml, apps/*/Dockerfile, DEPLOYMENT.md
-                  Deployment configs (see DEPLOYMENT.md for verification status)
-.github/workflows/ci.yml, .gitlab-ci.yml
-                  CI: typecheck/lint, unit + integration + e2e tests, Docker build.
-                  Two equivalent pipelines -- see DEPLOYMENT.md for which is live
-scripts/verify.mjs
-                  `pnpm verify`: everything this machine can check, and what it can't
+  shared/      Types, SM-2, chunking, anchoring — the shared vocabulary
+docs/
+  TECHNICAL_DOCUMENTATION.html   The long-form guide
+  ROADMAP.md                     Post-deployment plan
 ```
 
 ## Getting started
 
-Requires Node 22.13+ (pnpm 11's own minimum) and pnpm. You also need a
-PostgreSQL database -- either a real one, or the bundled dev database (no
-install required, see below).
+Requires Node 22.13+ and pnpm 11.
 
 ```bash
 pnpm install
 
-cp apps/api/.env.example apps/api/.env        # fill in DATABASE_URL, JWT_ACCESS_SECRET, etc.
+cp apps/api/.env.example apps/api/.env        # DATABASE_URL, JWT_ACCESS_SECRET, …
 cp apps/web/.env.example apps/web/.env.local
 
-pnpm dev:db    # local Postgres-compatible dev database (skip if using real Postgres)
-pnpm dev:api   # Fastify API on :4000
-pnpm dev:web   # Next.js app on :3000 (or the next free port)
+pnpm dev:db    # bundled Postgres-compatible dev database (skip if you have real Postgres)
+pnpm dev:api   # Fastify on :4000
+pnpm dev:web   # Next.js on :3000
 ```
 
-The Prisma client regenerates automatically on install.
+No Postgres install needed for local dev: `pnpm dev:db` starts a
+[PGlite](https://pglite.dev)-backed server speaking the Postgres wire
+protocol, persisting to `apps/api/.pglite-data/`. Apply schema changes with
+`pnpm --filter @booklet/api migrate:pglite` when using it — Prisma's own
+migration engine doesn't talk to PGlite reliably.
 
-**Using a real Postgres:** point `DATABASE_URL` at it and run
-`pnpm --filter @booklet/api exec prisma migrate deploy` (or `migrate dev`
-while iterating on the schema).
+With a real Postgres, point `DATABASE_URL` at it and run
+`pnpm --filter @booklet/api exec prisma migrate deploy`.
 
-**Using the bundled dev database:** `pnpm dev:db` starts a small
-[PGlite](https://pglite.dev)-backed server that speaks the Postgres wire
-protocol on `localhost:5432` and persists to `apps/api/.pglite-data/` --
-useful for local development without installing Postgres or Docker. Prisma's
-own migration engine doesn't talk to it reliably, so apply schema changes
-with `pnpm --filter @booklet/api migrate:pglite` instead of `migrate dev`/
-`migrate deploy` when using this database.
+**Verify everything:**
+
+```bash
+pnpm verify          # 10 checks: builds, 4 typechecks, lint, prod bundle, 3 unit suites
+pnpm verify --e2e    # …plus the browser suite (prints the env it needs)
+```
+
+`pnpm verify` deliberately reports what it **skipped** and what it cannot
+cover anywhere, because a green summary that quietly skipped half the checks
+is worse than a red one.
 
 **Browser extension:** `pnpm --filter @booklet/extension build`, then load
-`apps/extension/dist` as an unpacked extension in Chrome or Firefox. See
-`apps/extension/README.md`.
+`apps/extension/dist` unpacked. See `apps/extension/README.md`.
 
-**Mobile app:** `pnpm --filter @booklet/mobile web` (or `ios` / `android`
-with the respective toolchain installed). The web target is verified end
-to end; see `apps/mobile/README.md` for exactly what is and isn't.
+**Mobile:** `pnpm --filter @booklet/mobile web` (or `ios` / `android`). See
+`apps/mobile/README.md` for what is and isn't verified.
 
-**Deploying:** see `DEPLOYMENT.md`.
+**Deploying:** `DEPLOYMENT.md`.
 
 ## License
 
