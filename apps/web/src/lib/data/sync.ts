@@ -121,6 +121,13 @@ export async function migrateLocalDataToAccount(): Promise<ImportResponse> {
         resurfaceArchivedAt: h.resurfaceArchivedAt,
         createdAt: h.createdAt,
         noteText: h.annotation?.noteText ?? null,
+        // The review schedule built up while reading anonymously (#171).
+        // Without these, signing up silently resets every highlight to
+        // "never reviewed, due now".
+        easinessFactor: h.easinessFactor,
+        intervalDays: h.intervalDays,
+        repetitions: h.repetitions,
+        nextDueAt: h.nextDueAt,
       },
     });
     highlightsByArticle.set(h.articleId, list);

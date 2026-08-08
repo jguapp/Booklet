@@ -22,6 +22,33 @@ import { requireAuth } from "../lib/auth/context.js";
  */
 const IMPORT_BODY_LIMIT = 32 * 1024 * 1024;
 
+/**
+ * SM-2 state arriving from a client is untrusted input like anything else,
+ * and this route must not become a way around the checks
+ * PATCH /api/highlights/:id already enforces on the same four columns.
+ * Anything out of range falls back to the schema default rather than
+ * rejecting the whole batch: a single bad number should not cost someone
+ * their library on the one request that migrates it.
+ */
+function sm2FromImport(h: {
+  easinessFactor?: number;
+  intervalDays?: number;
+  repetitions?: number;
+  nextDueAt?: string | null;
+}) {
+  const ef = typeof h.easinessFactor === "number" && h.easinessFactor >= 1.3 ? h.easinessFactor : 2.5;
+  const days = Number.isInteger(h.intervalDays) && h.intervalDays! >= 0 ? h.intervalDays! : 0;
+  const reps = Number.isInteger(h.repetitions) && h.repetitions! >= 0 ? h.repetitions! : 0;
+  const due = h.nextDueAt ? new Date(h.nextDueAt) : null;
+  return {
+    easinessFactor: ef,
+    intervalDays: days,
+    repetitions: reps,
+    // An unparseable date reads as NaN and would throw at the driver.
+    nextDueAt: due && !Number.isNaN(due.getTime()) ? due : null,
+  };
+}
+
 /** Stand-in for the unique constraint Highlight doesn't have, used to make a
  * re-sent batch idempotent. Object keys are sorted so the same position
  * serializes identically whether it came off the wire or back out of
@@ -183,6 +210,7 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
             lastFeedbackAt: h.lastFeedbackAt ? new Date(h.lastFeedbackAt) : null,
             resurfaceArchivedAt: h.resurfaceArchivedAt ? new Date(h.resurfaceArchivedAt) : null,
             createdAt: h.createdAt ? new Date(h.createdAt) : new Date(),
+            ...sm2FromImport(h),
           })),
         });
 
