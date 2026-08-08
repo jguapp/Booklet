@@ -13,6 +13,10 @@ const EMPTY_RESULT: ImportResponse = {
   importedHighlights: 0,
   importedCollections: 0,
   skippedCollections: 0,
+  // Present for the type, unused here: the second phase the web client runs
+  // with this map (#172) uploads PDF/EPUB bytes out of IndexedDB, and this
+  // app has no local file store to migrate from -- uploads are web-only.
+  localIdToServerId: {},
 };
 
 export async function migrateLocalDataToAccount(): Promise<ImportResponse> {

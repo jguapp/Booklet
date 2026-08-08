@@ -13,6 +13,7 @@ import type {
 import { canonicalizeUrl } from "@booklet/shared";
 import { apiFetch, apiFetchBlob, ApiError } from "@/lib/api/client";
 import { localArticles, localFiles } from "@/lib/local/db";
+import { pendingFileUploadFor } from "@/lib/data/sync";
 
 export { ApiError };
 
@@ -37,7 +38,20 @@ export async function loadArticleFile(articleId: string, authenticated: boolean)
     fileCache.set(articleId, blob);
     return blob;
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
+    if (err instanceof ApiError && err.status === 404) {
+      // A 404 here is "this article has no file on the server" -- which is
+      // also true of a PDF or EPUB whose row has migrated but whose bytes
+      // are still being uploaded (#172). Migration is not instant and a
+      // shelf of EPUBs takes a while, so without this the book someone
+      // opens during that window is an empty reader, indistinguishable from
+      // the bug this fallback exists because of. The copy is still on disk;
+      // the registry is what remembers which local id it is under, since the
+      // local article row is already gone. Not cached -- the server's copy
+      // takes over the moment the upload lands.
+      const pending = pendingFileUploadFor(articleId);
+      if (pending) return (await localFiles.get(pending.localArticleId))?.blob ?? null;
+      return null;
+    }
     throw err;
   }
 }

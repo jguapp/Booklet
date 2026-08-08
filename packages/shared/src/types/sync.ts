@@ -94,4 +94,17 @@ export interface ImportResponse {
   importedHighlights: number;
   importedCollections: number;
   skippedCollections: number; // already existed server-side (same name)
+
+  /**
+   * localId -> server Article id, for every article this request resolved
+   * (created *and* skipped-as-duplicate alike).
+   *
+   * The route has always built this map internally to attach highlights; it
+   * just never sent it. Without it the client cannot finish migrating an
+   * uploaded PDF or EPUB (#172): the bytes live in IndexedDB keyed by the
+   * *local* id, the server mints a fresh id on import, and nothing connects
+   * the two -- so the article arrived with fileStorageKey: null and the
+   * reader opened it empty, forever, while the file sat on the user's disk.
+   */
+  localIdToServerId: Record<string, string>;
 }

@@ -882,6 +882,213 @@ describe("API integration", () => {
         expect(h.nextDueAt).toBeNull();
       }
     });
+
+    /** Hand-rolled because there is no form-data dependency here and the
+     * body is one small field -- @fastify/multipart parses whatever arrives
+     * on the wire, which is what inject() delivers. */
+    function multipart(filename: string, contentType: string, content: Buffer) {
+      const boundary = `----vitest${Math.random().toString(16).slice(2)}`;
+      return {
+        headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+        payload: Buffer.concat([
+          Buffer.from(
+            `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+              `Content-Type: ${contentType}\r\n\r\n`,
+          ),
+          content,
+          Buffer.from(`\r\n--${boundary}--\r\n`),
+        ]),
+      };
+    }
+
+    async function importOne(localId: string, article: Record<string, unknown>): Promise<string> {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { articles: [{ localId, ...article }], highlights: [] },
+      });
+      expect(res.statusCode).toBe(200);
+      return res.json().localIdToServerId[localId];
+    }
+
+    /**
+     * #172. The server mints a fresh id for every imported article, while
+     * the browser keys an uploaded PDF's bytes in IndexedDB by the *local*
+     * id. The route has always built this map to attach highlights and
+     * simply never sent it, so nothing on the client could say which server
+     * article a local file belonged to -- and the file was therefore never
+     * migrated at all.
+     */
+    it("returns the localId -> server id map, including for skipped duplicates", async () => {
+      const url = "https://example.com/vitest-idmap";
+      const first = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { articles: [{ localId: "map-1", url, title: "Mapped" }], highlights: [] },
+      });
+      const serverId = first.json().localIdToServerId["map-1"];
+      expect(serverId).toBeTypeOf("string");
+
+      const fetched = await app.inject({
+        method: "GET",
+        url: `/api/articles/${serverId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(fetched.statusCode).toBe(200);
+      expect(fetched.json().title).toBe("Mapped");
+
+      // A re-sent batch (the response to the first one was lost) has to map
+      // to the row that already exists, or the retry has no id to attach the
+      // file to and the book stays empty for good.
+      const replay = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { articles: [{ localId: "map-1", url, title: "Mapped" }], highlights: [] },
+      });
+      expect(replay.json()).toMatchObject({ skippedArticles: 1 });
+      expect(replay.json().localIdToServerId["map-1"]).toBe(serverId);
+    });
+
+    /**
+     * The acceptance criterion of #172: a PDF uploaded anonymously opens
+     * normally after signing up. Before this, the migrated row arrived with
+     * fileStorageKey: null and GET /file answered 404 forever, while the
+     * bytes sat unreachable in the browser -- and an upload is one of the
+     * few things a user cannot re-acquire by re-saving a URL.
+     */
+    it("attaches an uploaded PDF's bytes to the article the migration created", async () => {
+      const pdf = Buffer.from("%PDF-1.4\nvitest migrated bytes\n%%EOF");
+      const articleId = await importOne("pdf-1", { title: "My uploaded book", sourceType: "PDF", url: null });
+
+      // The gap the reader falls back to IndexedDB across -- the row is
+      // there, the file is not yet.
+      const beforeUpload = await app.inject({
+        method: "GET",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(beforeUpload.statusCode).toBe(404);
+
+      const form = multipart("book.pdf", "application/pdf", pdf);
+      const upload = await app.inject({
+        method: "POST",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}`, ...form.headers },
+        payload: form.payload,
+      });
+      expect(upload.statusCode).toBe(200);
+      expect(upload.json().fileStorageKey).toBeTruthy();
+      // Nothing else on the row is touched: the title came from the client's
+      // own extraction and must not be re-derived from the file.
+      expect(upload.json().title).toBe("My uploaded book");
+
+      const served = await app.inject({
+        method: "GET",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(served.statusCode).toBe(200);
+      expect(served.headers["content-type"]).toBe("application/pdf");
+      expect(served.rawPayload.equals(pdf)).toBe(true);
+
+      // Also removes the file this test wrote to disk.
+      await app.inject({
+        method: "DELETE",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    });
+
+    it("does the same for an EPUB, and serves it back with the EPUB content type", async () => {
+      const epub = Buffer.from("PKvitest-epub");
+      const articleId = await importOne("epub-1", { title: "Migrated EPUB", sourceType: "EPUB", url: null });
+
+      const form = multipart("book.epub", "application/epub+zip", epub);
+      const upload = await app.inject({
+        method: "POST",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}`, ...form.headers },
+        payload: form.payload,
+      });
+      expect(upload.statusCode).toBe(200);
+
+      const served = await app.inject({
+        method: "GET",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(served.statusCode).toBe(200);
+      expect(served.headers["content-type"]).toBe("application/epub+zip");
+      expect(served.rawPayload.equals(epub)).toBe(true);
+
+      await app.inject({
+        method: "DELETE",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    });
+
+    /**
+     * The client deletes a file from IndexedDB only once this route has
+     * accepted it, so an accepted upload whose response was lost is sent
+     * again -- the batch-then-clear rule #164 established, applied to files.
+     * Writing a second copy would leave the first orphaned on disk with
+     * nothing pointing at it.
+     */
+    it("treats a replayed file upload as a no-op instead of storing a second copy", async () => {
+      const pdf = Buffer.from("%PDF-1.4\nreplayed\n%%EOF");
+      const articleId = await importOne("pdf-replay", { title: "Replayed book", sourceType: "PDF", url: null });
+
+      const send = () => {
+        const form = multipart("book.pdf", "application/pdf", pdf);
+        return app.inject({
+          method: "POST",
+          url: `/api/articles/${articleId}/file`,
+          headers: { authorization: `Bearer ${accessToken}`, ...form.headers },
+          payload: form.payload,
+        });
+      };
+
+      const first = await send();
+      const replay = await send();
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json().fileStorageKey).toBe(first.json().fileStorageKey);
+
+      await app.inject({
+        method: "DELETE",
+        url: `/api/articles/${articleId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    });
+
+    // GET /file picks its Content-Type from sourceType alone, so EPUB bytes
+    // on a row that says PDF would be served as application/pdf and fail to
+    // open in a reader that trusts the header.
+    it("refuses file bytes that don't match the article's declared type, and an unknown article", async () => {
+      const articleId = await importOne("pdf-mismatch", { title: "Mismatch", sourceType: "PDF", url: null });
+
+      const form = multipart("book.epub", "application/epub+zip", Buffer.from("PK"));
+      const mismatch = await app.inject({
+        method: "POST",
+        url: `/api/articles/${articleId}/file`,
+        headers: { authorization: `Bearer ${accessToken}`, ...form.headers },
+        payload: form.payload,
+      });
+      expect(mismatch.statusCode).toBe(400);
+      expect(mismatch.json().error).toBe("type_mismatch");
+
+      const stray = multipart("book.pdf", "application/pdf", Buffer.from("%PDF-1.4"));
+      const unknown = await app.inject({
+        method: "POST",
+        url: "/api/articles/00000000-0000-0000-0000-000000000000/file",
+        headers: { authorization: `Bearer ${accessToken}`, ...stray.headers },
+        payload: stray.payload,
+      });
+      expect(unknown.statusCode).toBe(404);
+    });
   });
 
   describe("logout", () => {
