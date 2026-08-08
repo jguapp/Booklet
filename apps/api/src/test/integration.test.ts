@@ -746,6 +746,106 @@ describe("API integration", () => {
       });
       expect(article?.highlights).toHaveLength(1);
     });
+
+    /**
+     * #171. The review schedule a user built up reading anonymously used to
+     * be destroyed by the one action that promises to preserve their data.
+     * surfaceCount and lastFeedback crossed the seam and the four SM-2
+     * columns did not, so the library went on showing "Remembered, 4
+     * reviews" while the scheduler believed the highlight had never been
+     * seen -- and the next Daily Review served everything at once, weeks
+     * after the signup that caused it.
+     *
+     * Asserts on the values rather than a 200, because a 200 is exactly
+     * what the broken version returned.
+     */
+    it("carries a highlight's SM-2 schedule across the migration", async () => {
+      const nextDueAt = new Date(Date.now() + 16 * 24 * 60 * 60 * 1000);
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [{ localId: "sm2-1", url: "https://example.com/vitest-sm2", title: "SM2" }],
+          highlights: [
+            {
+              localArticleId: "sm2-1",
+              selectedText: "reviewed four times already",
+              position: { type: "text", exact: "reviewed", prefix: "", suffix: "", start: 0, end: 8 },
+              color: "YELLOW",
+              surfaceCount: 4,
+              lastFeedback: "REMEMBERED",
+              easinessFactor: 2.6,
+              intervalDays: 16,
+              repetitions: 4,
+              nextDueAt: nextDueAt.toISOString(),
+            },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const article = await prisma.article.findFirst({
+        where: { url: "https://example.com/vitest-sm2" },
+        include: { highlights: true },
+      });
+      const h = article!.highlights[0]!;
+      expect(h.easinessFactor).toBe(2.6);
+      expect(h.intervalDays).toBe(16);
+      expect(h.repetitions).toBe(4);
+      expect(h.nextDueAt?.toISOString()).toBe(nextDueAt.toISOString());
+      // The two that always survived, asserted alongside so the pair can't
+      // drift apart again without a test noticing.
+      expect(h.surfaceCount).toBe(4);
+      expect(h.lastFeedback).toBe("REMEMBERED");
+    });
+
+    // An older client, or a highlight genuinely never reviewed, sends none
+    // of this -- it has to import cleanly and land on the schema defaults.
+    it("falls back to the schema defaults when SM-2 state is absent or out of range", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [{ localId: "sm2-2", url: "https://example.com/vitest-sm2-defaults", title: "SM2 defaults" }],
+          highlights: [
+            {
+              localArticleId: "sm2-2",
+              selectedText: "never reviewed",
+              position: { type: "text", exact: "never", prefix: "", suffix: "", start: 0, end: 5 },
+              color: "YELLOW",
+            },
+            {
+              localArticleId: "sm2-2",
+              selectedText: "nonsense schedule",
+              position: { type: "text", exact: "nonsense", prefix: "", suffix: "", start: 6, end: 14 },
+              color: "GREEN",
+              // Below SM-2's 1.3 floor, negative, fractional, unparseable --
+              // the import route must not be a way around the validation
+              // PATCH /api/highlights/:id enforces on these same columns.
+              easinessFactor: 0.1,
+              intervalDays: -5,
+              repetitions: 1.5,
+              nextDueAt: "not a date",
+            },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const article = await prisma.article.findFirst({
+        where: { url: "https://example.com/vitest-sm2-defaults" },
+        include: { highlights: true },
+      });
+      expect(article?.highlights).toHaveLength(2);
+      for (const h of article!.highlights) {
+        expect(h.easinessFactor).toBe(2.5);
+        expect(h.intervalDays).toBe(0);
+        expect(h.repetitions).toBe(0);
+        expect(h.nextDueAt).toBeNull();
+      }
+    });
   });
 
   describe("logout", () => {
