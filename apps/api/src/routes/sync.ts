@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { ImportRequest, ImportResponse } from "@booklet/shared";
-import { normalizeRecallPrompt } from "@booklet/shared";
+import { canonicalizeUrl, normalizeRecallPrompt } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 
@@ -135,6 +135,15 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
             id,
             userId,
             url: a.url ?? null,
+            // Derived here rather than trusted from the payload, matching
+            // POST /api/articles. Without it every migrated article carried
+            // canonicalUrl: null, and duplicate detection matches on
+            // `url OR canonicalUrl` -- so re-saving a migrated article from
+            // a link with a tracking parameter missed both arms and created
+            // a second copy. Silent, permanent (nothing backfills it), and
+            // it degraded exactly the articles a user cared enough about to
+            // have saved before signing up.
+            canonicalUrl: a.url ? canonicalizeUrl(a.url) : null,
             title: a.title ?? null,
             author: a.author ?? null,
             siteName: a.siteName ?? null,

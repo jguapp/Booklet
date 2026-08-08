@@ -748,6 +748,42 @@ describe("API integration", () => {
     });
 
     /**
+     * The migrated article used to arrive with canonicalUrl: null, because
+     * the import route simply never set it. Duplicate detection matches on
+     * `url OR canonicalUrl`, so re-saving the same article from a link
+     * carrying a tracking parameter missed both arms and created a second
+     * copy -- silently, permanently (nothing backfills the column), and
+     * only for the articles a user cared enough about to have saved before
+     * signing up.
+     */
+    it("derives canonicalUrl on import, so duplicate detection still works afterwards", async () => {
+      const url = "https://example.com/vitest-canonical-import";
+      await app.inject({
+        method: "POST",
+        url: "/api/sync/import",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articles: [{ localId: "canon-1", url, title: "Migrated" }],
+          highlights: [],
+        },
+      });
+
+      const migrated = await prisma.article.findFirst({ where: { url } });
+      expect(migrated?.canonicalUrl).toBeTruthy();
+
+      // The same article, shared with a tracking parameter -- what a real
+      // re-save looks like. Must be recognised as already saved.
+      const again = await app.inject({
+        method: "POST",
+        url: "/api/articles",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { url: `${url}?utm_source=newsletter` },
+      });
+      expect(again.statusCode).toBe(409);
+      expect(again.json().error).toBe("already_saved");
+    });
+
+    /**
      * #171. The review schedule a user built up reading anonymously used to
      * be destroyed by the one action that promises to preserve their data.
      * surfaceCount and lastFeedback crossed the seam and the four SM-2
