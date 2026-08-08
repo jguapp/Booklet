@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { Article, Highlight } from "@booklet/shared";
-import { highlightColorHex } from "@booklet/shared";
+import { MAX_RECALL_PROMPT_LENGTH, highlightColorHex } from "@booklet/shared";
 import { formatRelativeDate } from "@/lib/format";
 import { highlightCitation } from "@/lib/highlights/citation";
 import { IconPencil, IconTrash } from "@/components/ui/icons";
@@ -27,9 +27,19 @@ interface HighlightListItemProps {
   extraMeta?: string;
   /** Extra action row, e.g. Daily Review's remembered/forgot/archive buttons. */
   actions?: React.ReactNode;
+  /** Retrieval mode (#157): show the highlight's prompt and keep the passage
+   * itself -- and its note, which usually gives the answer away too --
+   * hidden until `onReveal` fires. Ignored for a highlight with no prompt,
+   * since there is nothing to ask; those render normally. */
+  concealed?: boolean;
+  onReveal?: () => void;
   onDelete?: (highlightId: string) => void;
   onSaveNote?: (highlightId: string, noteText: string) => void;
   onDeleteNote?: (highlightId: string) => void;
+  /** Pass both to offer adding/editing/removing a recall prompt. Saving an
+   * empty prompt removes it, matching how notes behave above. */
+  onSavePrompt?: (highlightId: string, prompt: string) => void;
+  onDeletePrompt?: (highlightId: string) => void;
 }
 
 export function HighlightListItem({
@@ -38,14 +48,25 @@ export function HighlightListItem({
   articleExtractedText,
   extraMeta,
   actions,
+  concealed,
+  onReveal,
   onDelete,
   onSaveNote,
   onDeleteNote,
+  onSavePrompt,
+  onDeletePrompt,
 }: HighlightListItemProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(highlight.annotation?.noteText ?? "");
+  const [editingPrompt, setEditingPrompt] = useState(false);
+  const [promptDraft, setPromptDraft] = useState(highlight.prompt ?? "");
   const [confirming, setConfirming] = useState<"highlight" | "note" | null>(null);
   const citation = highlightCitation(highlight, article?.extractedText ?? articleExtractedText);
+
+  // A prompt is what makes concealment meaningful; without one there is no
+  // question to show in the passage's place, so an unprompted highlight
+  // renders exactly as it always has even in a concealed list.
+  const concealing = !!concealed && !!highlight.prompt;
 
   function startEditing() {
     setDraft(highlight.annotation?.noteText ?? "");
@@ -60,6 +81,18 @@ export function HighlightListItem({
       onSaveNote?.(highlight.id, trimmed);
     }
     setEditing(false);
+  }
+
+  function startEditingPrompt() {
+    setPromptDraft(highlight.prompt ?? "");
+    setEditingPrompt(true);
+  }
+
+  function handleSavePrompt() {
+    const trimmed = promptDraft.trim();
+    if (!trimmed) onDeletePrompt?.(highlight.id);
+    else onSavePrompt?.(highlight.id, trimmed);
+    setEditingPrompt(false);
   }
 
   return (
@@ -77,9 +110,80 @@ export function HighlightListItem({
           style={{ backgroundColor: highlightColorHex(highlight.color) }}
         />
         <div className="min-w-0 flex-1">
-          <p className="font-serif text-base leading-snug text-ink">&ldquo;{highlight.selectedText}&rdquo;</p>
+          {concealing ? (
+            // The whole point of #157: the question occupies the slot the
+            // passage normally would, and the passage stays out of sight
+            // until the reader has actually tried to answer. Grading before
+            // this button is pressed is what turns SM-2 into a re-read
+            // scheduler, so Daily Review withholds the grade buttons too.
+            <>
+              <p className="font-serif text-base leading-snug text-ink">{highlight.prompt}</p>
+              <button
+                type="button"
+                onClick={onReveal}
+                className="mt-3 rounded-sm border border-border px-3 py-1.5 font-sans text-xs font-semibold text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                Show the highlight
+              </button>
+            </>
+          ) : (
+            <>
+              {highlight.prompt && !editingPrompt && (
+                <div className="mb-1.5 flex items-start justify-between gap-2">
+                  <p className="font-sans text-sm font-medium text-ink-muted">{highlight.prompt}</p>
+                  {(onSavePrompt || onDeletePrompt) && (
+                    <div className="flex shrink-0 gap-1">
+                      {onSavePrompt && (
+                        <button
+                          type="button"
+                          title="Edit prompt"
+                          onClick={startEditingPrompt}
+                          className="flex h-6 w-6 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
+                        >
+                          <IconPencil className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {onDeletePrompt && (
+                        <button
+                          type="button"
+                          title="Remove prompt"
+                          onClick={() => onDeletePrompt(highlight.id)}
+                          className="flex h-6 w-6 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink"
+                        >
+                          <IconTrash className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              <p className="font-serif text-base leading-snug text-ink">&ldquo;{highlight.selectedText}&rdquo;</p>
+            </>
+          )}
 
-          {editing ? (
+          {!concealing && editingPrompt && (
+            <div className="mt-2.5 flex flex-col gap-2">
+              <textarea
+                autoFocus
+                rows={2}
+                maxLength={MAX_RECALL_PROMPT_LENGTH}
+                value={promptDraft}
+                onChange={(e) => setPromptDraft(e.target.value)}
+                placeholder="Ask a question this highlight answers…"
+                className="w-full resize-none rounded-sm border border-border bg-paper px-2.5 py-2 font-sans text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setEditingPrompt(false)} className="px-3 py-1 text-xs">
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={handleSavePrompt} className="px-3 py-1 text-xs">
+                  Save
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {concealing ? null : editing ? (
             <div className="mt-2.5 flex flex-col gap-2">
               <textarea
                 autoFocus
@@ -136,6 +240,19 @@ export function HighlightListItem({
                 + Add a note
               </button>
             )
+          )}
+
+          {!concealing && !highlight.prompt && !editingPrompt && onSavePrompt && (
+            <button
+              type="button"
+              onClick={startEditingPrompt}
+              // Titled by what it buys you, not by what it is -- "recall
+              // prompt" means nothing until you've seen one work.
+              title="Ask yourself this before seeing the highlight in Daily Review"
+              className="mt-2 block font-sans text-xs font-medium text-accent hover:underline"
+            >
+              + Add a recall prompt
+            </button>
           )}
 
           <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-xs text-ink-faint">

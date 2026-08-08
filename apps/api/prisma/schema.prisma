@@ -360,6 +360,13 @@ model Highlight {
   /// highlight colors could be genuinely user-customizable.
   color String @default("YELLOW")
 
+  /// Optional question whose answer is this highlight (#157). When set, the
+  /// Daily Review card shows the prompt and keeps selectedText hidden until
+  /// the reader asks to see it, so the REMEMBERED/FORGOT grade that feeds
+  /// SM-2 below is grading a real retrieval attempt rather than a re-read.
+  /// null on every highlight predating this, which keeps their old behavior.
+  prompt String? @db.Text
+
   lastSurfacedAt DateTime?
   surfaceCount   Int       @default(0)
 

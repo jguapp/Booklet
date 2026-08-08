@@ -37,6 +37,11 @@ export interface ImportHighlight {
   selectedText: string;
   position: HighlightPosition;
   color: HighlightColor;
+  /** Hand-written and unrecoverable if dropped -- unlike the SM-2 columns
+   * deliberately left out of this payload, a prompt cannot be re-derived
+   * from anything, so it has to survive the anonymous -> signed-up crossing
+   * (that class of silent loss is what #164 was). */
+  prompt: string | null;
   lastSurfacedAt: string | null;
   surfaceCount: number;
   lastFeedback: ResurfaceFeedback | null;

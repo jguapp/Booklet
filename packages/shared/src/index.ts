@@ -12,6 +12,7 @@ export * from "./types/reading-activity";
 export * from "./types/developer";
 export * from "./highlight-anchor";
 export * from "./resurface";
+export * from "./recall-prompt";
 export * from "./digest-email";
 export * from "./reading-stats";
 export * from "./related-articles";

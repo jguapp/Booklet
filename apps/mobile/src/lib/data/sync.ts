@@ -55,6 +55,7 @@ export async function migrateLocalDataToAccount(): Promise<ImportResponse> {
       selectedText: h.selectedText,
       position: h.position,
       color: h.color,
+      prompt: h.prompt,
       lastSurfacedAt: h.lastSurfacedAt,
       surfaceCount: h.surfaceCount,
       lastFeedback: h.lastFeedback,

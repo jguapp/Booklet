@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { CreateArticleRequest, CreateHighlightRequest, HighlightPosition } from "@booklet/shared";
-import { canonicalizeUrl, isValidHighlightColor } from "@booklet/shared";
+import { canonicalizeUrl, isValidHighlightColor, isValidRecallPrompt, normalizeRecallPrompt } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireWriteScope } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
@@ -114,7 +114,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
   });
 
   app.post<{ Body: CreateHighlightRequest }>("/api/v1/highlights", writeOpts, async (request, reply) => {
-    const { articleId, selectedText, position, color, noteText } = request.body ?? {};
+    const { articleId, selectedText, position, color, noteText, prompt } = request.body ?? {};
     if (typeof articleId !== "string" || !articleId) {
       return reply.code(400).send({ error: "invalid_article", message: "articleId is required." });
     }
@@ -126,6 +126,9 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     }
     if (typeof color !== "string" || !isValidHighlightColor(color)) {
       return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
+    }
+    if (!isValidRecallPrompt(prompt)) {
+      return reply.code(400).send({ error: "invalid_prompt", message: "Invalid recall prompt." });
     }
 
     const article = await prisma.article.findFirst({ where: { id: articleId, userId: request.userId! } });
@@ -139,6 +142,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
         selectedText,
         position: position as object,
         color,
+        prompt: normalizeRecallPrompt(prompt),
         ...(trimmedNote ? { annotation: { create: { userId: request.userId!, noteText: trimmedNote } } } : {}),
       },
       include: { annotation: true },
