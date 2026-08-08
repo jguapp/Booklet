@@ -10,6 +10,7 @@ import {
   textOffsetsForRange,
   wrapRangeInElements,
 } from "@/lib/reader/dom-range";
+import { sanitizeArticleHtml } from "@/lib/reader/sanitize";
 import { HighlightPopover } from "./highlight-popover";
 import { HighlightManagePopover } from "./highlight-manage-popover";
 import type { ReaderSize } from "./reader-toolbar";
@@ -509,7 +510,15 @@ export function ArticleContent({
   // *object reference* it's given is stable across renders -- a fresh
   // `{ __html: html }` literal every render makes React re-apply innerHTML
   // (and wipe the marks/pills injected above) on every unrelated re-render.
-  const dangerousHtml = useMemo(() => ({ __html: html }), [html]);
+  //
+  // Sanitized here rather than trusted from storage. The API sanitizes on
+  // save too, but this is the only point that is true for *every* article:
+  // ones saved before that existed, and local/anonymous ones that never went
+  // through the API at all. Readability strips <script> and looks like it
+  // has handled this -- it passes <img onerror>, <svg onload> and
+  // <details ontoggle> straight through, which with the access token in
+  // localStorage is account takeover from opening a saved link.
+  const dangerousHtml = useMemo(() => ({ __html: sanitizeArticleHtml(html) }), [html]);
 
   return (
     <div ref={wrapperRef} className="relative">

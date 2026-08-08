@@ -26,3 +26,4 @@ export * from "./highlight-colors";
 export * from "./tts-voices";
 export * from "./tts-chunking";
 export * from "./readalong-timing";
+export * from "./sanitize-html";

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { CreateArticleRequest, CreateHighlightRequest } from "@booklet/shared";
 import { canonicalizeUrl, isValidHighlightColor, isValidRecallPrompt, normalizeRecallPrompt } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
+import { sanitizeArticleHtml } from "../lib/sanitize.js";
 import { requireAuth, requireWriteScope } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
@@ -81,7 +82,8 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
         sourceType: "HTML",
         extractionStatus: extracted ? "SUCCESS" : "FAILED",
         extractionError,
-        extractedHtml: extracted?.html ?? null,
+        // Sanitized before storage -- see routes/articles.ts.
+        extractedHtml: sanitizeArticleHtml(extracted?.html),
         extractedText: extracted?.text ?? null,
         readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
         skippedImageCount: extracted?.skippedImageCount ?? 0,
