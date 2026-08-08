@@ -12,7 +12,7 @@ import type {
   HighlightPosition,
   UpdateHighlightRequest,
 } from "@booklet/shared";
-import { DEFAULT_SM2_STATE } from "@booklet/shared";
+import { DEFAULT_SM2_STATE, normalizeRecallPrompt } from "@booklet/shared";
 import { apiFetch } from "@/lib/api/client";
 import { localHighlights } from "@/lib/local/db";
 
@@ -33,6 +33,7 @@ interface CreateHighlightInput {
   position: HighlightPosition;
   color: HighlightColor;
   noteText?: string;
+  prompt?: string | null;
 }
 
 export async function createHighlight(input: CreateHighlightInput, authenticated: boolean): Promise<Highlight> {
@@ -51,6 +52,7 @@ export async function createHighlight(input: CreateHighlightInput, authenticated
     selectedText: input.selectedText,
     position: input.position,
     color: input.color,
+    prompt: normalizeRecallPrompt(input.prompt),
     lastSurfacedAt: null,
     surfaceCount: 0,
     lastFeedback: null,
@@ -117,6 +119,32 @@ export async function deleteNote(highlight: Highlight, authenticated: boolean): 
   return updated;
 }
 
+/**
+ * Set or clear a highlight's recall prompt (#157). Its own function rather
+ * than a call into updateHighlightFeedback below, which is named for what it
+ * does -- writing a prompt is an edit, not a review judgment, and routing it
+ * through "feedback" would read like one at every call site.
+ *
+ * Passing null (or an emptied textarea) removes the prompt, which is what
+ * puts the highlight back on the plain show-then-grade path.
+ */
+export async function saveHighlightPrompt(
+  highlight: Highlight,
+  prompt: string | null,
+  authenticated: boolean,
+): Promise<Highlight> {
+  const normalized = normalizeRecallPrompt(prompt);
+  if (authenticated) {
+    return apiFetch<Highlight>(`/api/highlights/${highlight.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ prompt: normalized } satisfies UpdateHighlightRequest),
+    });
+  }
+  const updated: Highlight = { ...highlight, prompt: normalized, updatedAt: new Date().toISOString() };
+  await localHighlights.put(updated);
+  return updated;
+}
+
 export async function updateHighlightFeedback(
   highlight: Highlight,
   patch: UpdateHighlightRequest,
@@ -131,6 +159,7 @@ export async function updateHighlightFeedback(
   const updated: Highlight = {
     ...highlight,
     ...(patch.color !== undefined ? { color: patch.color } : {}),
+    ...(patch.prompt !== undefined ? { prompt: normalizeRecallPrompt(patch.prompt) } : {}),
     ...(patch.resurfaceArchivedAt !== undefined ? { resurfaceArchivedAt: patch.resurfaceArchivedAt } : {}),
     ...(patch.lastSurfacedAt !== undefined ? { lastSurfacedAt: patch.lastSurfacedAt } : {}),
     ...(patch.surfaceCount !== undefined ? { surfaceCount: patch.surfaceCount } : {}),

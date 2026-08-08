@@ -21,6 +21,11 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
+  // Prompted highlights (#157) keep their passage hidden until asked for,
+  // so the grade below is a retrieval judgment rather than a re-read. Keyed
+  // by id, not one flag: a single flag would reveal the next card's answer
+  // before its question had been asked.
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     const loadedArticles = await loadArticles(authenticated);
@@ -126,23 +131,47 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
       )}
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        {batch.map((h) => (
-          <View key={h.id} style={styles.card}>
-            <Text style={styles.quote}>&ldquo;{h.selectedText}&rdquo;</Text>
-            <Text style={styles.articleTitle}>{articleById.get(h.articleId)?.title ?? "Untitled"}</Text>
-            <View style={styles.actionsRow}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, "FORGOT", false)}>
-                <Text style={styles.secondaryButtonText}>Forgot</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, null, true)}>
-                <Text style={styles.secondaryButtonText}>Archive</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.primaryButton} onPress={() => applyFeedback(h.id, "REMEMBERED", false)}>
-                <Text style={styles.primaryButtonText}>Remembered</Text>
-              </TouchableOpacity>
+        {batch.map((h) => {
+          const concealed = !!h.prompt && !revealedIds.has(h.id);
+          return (
+            <View key={h.id} style={styles.card}>
+              {h.prompt ? <Text style={concealed ? styles.quote : styles.prompt}>{h.prompt}</Text> : null}
+              {concealed ? null : <Text style={styles.quote}>&ldquo;{h.selectedText}&rdquo;</Text>}
+              <Text style={styles.articleTitle}>{articleById.get(h.articleId)?.title ?? "Untitled"}</Text>
+              {concealed ? (
+                // Grading is withheld until the answer has been asked for,
+                // matching the web app. Archive stays available: deciding
+                // you're done with a highlight isn't a recall judgment.
+                <View style={styles.actionsRow}>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, null, true)}>
+                    <Text style={styles.secondaryButtonText}>Archive</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    onPress={() => setRevealedIds((prev) => new Set(prev).add(h.id))}
+                  >
+                    <Text style={styles.primaryButtonText}>Show the highlight</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.actionsRow}>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, "FORGOT", false)}>
+                    <Text style={styles.secondaryButtonText}>Forgot</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={() => applyFeedback(h.id, null, true)}>
+                    <Text style={styles.secondaryButtonText}>Archive</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    onPress={() => applyFeedback(h.id, "REMEMBERED", false)}
+                  >
+                    <Text style={styles.primaryButtonText}>Remembered</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
-          </View>
-        ))}
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -158,6 +187,9 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 14, color: "#6b6558", textAlign: "center" },
   card: { backgroundColor: "#fff", borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#ece6d8" },
   quote: { fontSize: 16, color: "#1c1a16", lineHeight: 22, marginBottom: 8 },
+  // Once revealed, the prompt stays on the card above the passage, smaller
+  // and quieter -- it's the context for the answer, not the answer.
+  prompt: { fontSize: 14, fontWeight: "600", color: "#6b6558", lineHeight: 20, marginBottom: 6 },
   articleTitle: { fontSize: 12, color: "#6b6558", marginBottom: 12 },
   actionsRow: { flexDirection: "row", gap: 8 },
   secondaryButton: { flex: 1, borderWidth: 1, borderColor: "#ddd6c7", borderRadius: 6, paddingVertical: 8, alignItems: "center" },

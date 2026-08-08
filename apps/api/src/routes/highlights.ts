@@ -7,7 +7,7 @@ import type {
   UpdateHighlightRequest,
   UpsertAnnotationRequest,
 } from "@booklet/shared";
-import { isValidHighlightColor } from "@booklet/shared";
+import { isValidHighlightColor, isValidRecallPrompt, normalizeRecallPrompt } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
@@ -27,6 +27,7 @@ export function toHighlight(row: HighlightRow): Highlight {
     selectedText: row.selectedText,
     position: row.position as unknown as HighlightPosition,
     color: row.color,
+    prompt: row.prompt,
     lastSurfacedAt: row.lastSurfacedAt?.toISOString() ?? null,
     surfaceCount: row.surfaceCount,
     lastFeedback: row.lastFeedback,
@@ -62,7 +63,7 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
     "/api/highlights",
     { preHandler: requireAuth },
     async (request, reply) => {
-      const { articleId, selectedText, position, color, noteText } = request.body ?? {};
+      const { articleId, selectedText, position, color, noteText, prompt } = request.body ?? {};
 
       if (typeof articleId !== "string" || !articleId) {
         return reply.code(400).send({ error: "invalid_article", message: "articleId is required." });
@@ -75,6 +76,9 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
       }
       if (typeof color !== "string" || !isValidHighlightColor(color)) {
         return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
+      }
+      if (!isValidRecallPrompt(prompt)) {
+        return reply.code(400).send({ error: "invalid_prompt", message: "Invalid recall prompt." });
       }
 
       const article = await prisma.article.findFirst({
@@ -90,6 +94,7 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
           selectedText,
           position: position as object,
           color,
+          prompt: normalizeRecallPrompt(prompt),
           ...(trimmedNote
             ? { annotation: { create: { userId: request.userId!, noteText: trimmedNote } } }
             : {}),
@@ -130,6 +135,7 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
 
       const {
         color,
+        prompt,
         resurfaceArchivedAt,
         lastSurfacedAt,
         surfaceCount,
@@ -143,6 +149,9 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
 
       if (color !== undefined && (typeof color !== "string" || !isValidHighlightColor(color))) {
         return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
+      }
+      if (prompt !== undefined && !isValidRecallPrompt(prompt)) {
+        return reply.code(400).send({ error: "invalid_prompt", message: "Invalid recall prompt." });
       }
       if (lastFeedback !== undefined && !FEEDBACKS.includes(lastFeedback)) {
         return reply.code(400).send({ error: "invalid_feedback", message: "Invalid feedback value." });
@@ -164,6 +173,9 @@ export async function registerHighlightRoutes(app: FastifyInstance): Promise<voi
         where: { id: existing.id },
         data: {
           ...(color !== undefined ? { color } : {}),
+          // A prompt of "" or "   " normalizes to null, so clearing one from
+          // the UI works whether it sends null or an emptied textarea.
+          ...(prompt !== undefined ? { prompt: normalizeRecallPrompt(prompt) } : {}),
           ...(resurfaceArchivedAt !== undefined
             ? { resurfaceArchivedAt: resurfaceArchivedAt ? new Date(resurfaceArchivedAt) : null }
             : {}),

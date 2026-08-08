@@ -7,7 +7,7 @@ import { SourceIcon } from "@/components/library/source-icon";
 import { Input } from "@/components/ui/input";
 import { IconSearch } from "@/components/ui/icons";
 import { loadArticles } from "@/lib/data/articles";
-import { deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
+import { deleteHighlight, deleteNote, loadHighlights, saveHighlightPrompt, saveNote } from "@/lib/data/highlights";
 import { comparePositionInArticle } from "@/lib/highlights/position-sort";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
@@ -106,6 +106,23 @@ export default function HighlightsPage() {
     const target = highlights.find((h) => h.id === highlightId);
     if (!target) return;
     const updated = await deleteNote(target, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+  }
+
+  // Writing prompts is a browsing-time activity -- you go through a book's
+  // highlights and turn the ones worth remembering into questions -- which
+  // makes this page, not the reader, where it belongs.
+  async function handleSavePrompt(highlightId: string, prompt: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await saveHighlightPrompt(target, prompt, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+  }
+
+  async function handleDeletePrompt(highlightId: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await saveHighlightPrompt(target, null, isAuthenticated);
     setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
   }
 
@@ -228,6 +245,8 @@ export default function HighlightsPage() {
               onDelete={handleDelete}
               onSaveNote={handleSaveNote}
               onDeleteNote={handleDeleteNote}
+              onSavePrompt={handleSavePrompt}
+              onDeletePrompt={handleDeletePrompt}
             />
           ))}
         </div>

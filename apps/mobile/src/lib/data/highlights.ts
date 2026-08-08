@@ -37,6 +37,9 @@ export async function createHighlight(input: CreateHighlightInput, authenticated
     selectedText: input.selectedText,
     position: input.position,
     color: input.color,
+    // No prompt-authoring UI on mobile yet -- prompts written on the web sync
+    // down and are honored by DailyReviewScreen's reveal step all the same.
+    prompt: null,
     lastSurfacedAt: null,
     surfaceCount: 0,
     lastFeedback: null,

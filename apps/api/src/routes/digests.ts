@@ -1,44 +1,18 @@
 import type { FastifyInstance } from "fastify";
-import type { Digest, Highlight, HighlightPosition } from "@booklet/shared";
+import type { Digest } from "@booklet/shared";
 import { compileDigestEmail } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { getHighlightsToResurface } from "../services/resurface-service.js";
 import { sendEmail } from "../services/email-service.js";
+// The same serializer the /api/highlights routes use, not a second copy.
+// This file used to carry its own identical one, which is exactly the kind
+// of duplicate that goes stale silently: adding Highlight.prompt (#157) to
+// one of them would have left digests -- the one place the field actually
+// changes what the reader sees -- serving highlights without it.
+import { toHighlight } from "./highlights.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-function toHighlight(row: Awaited<ReturnType<typeof getHighlightsToResurface>>[number]): Highlight {
-  return {
-    id: row.id,
-    articleId: row.articleId,
-    userId: row.userId,
-    selectedText: row.selectedText,
-    position: row.position as unknown as HighlightPosition,
-    color: row.color,
-    lastSurfacedAt: row.lastSurfacedAt?.toISOString() ?? null,
-    surfaceCount: row.surfaceCount,
-    lastFeedback: row.lastFeedback,
-    lastFeedbackAt: row.lastFeedbackAt?.toISOString() ?? null,
-    resurfaceArchivedAt: row.resurfaceArchivedAt?.toISOString() ?? null,
-    easinessFactor: row.easinessFactor,
-    intervalDays: row.intervalDays,
-    repetitions: row.repetitions,
-    nextDueAt: row.nextDueAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-    annotation: row.annotation
-      ? {
-          id: row.annotation.id,
-          highlightId: row.annotation.highlightId,
-          userId: row.annotation.userId,
-          noteText: row.annotation.noteText,
-          createdAt: row.annotation.createdAt.toISOString(),
-          updatedAt: row.annotation.updatedAt.toISOString(),
-        }
-      : null,
-  };
-}
 
 /** DAILY -> still the same calendar day; WEEKLY -> generated within the last 7 days. */
 function isStillCurrent(generatedAt: Date, frequency: "DAILY" | "WEEKLY", now: Date): boolean {

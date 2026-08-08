@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { MAX_RECALL_PROMPT_LENGTH } from "@booklet/shared";
 import { buildApp } from "../app.js";
 import { prisma } from "../lib/prisma.js";
 
@@ -374,7 +375,94 @@ describe("API integration", () => {
       expect(body.annotation?.noteText).toBe("a thought");
       expect(body.easinessFactor).toBe(2.5);
       expect(body.nextDueAt).toBeNull();
+      // No prompt asked for, no prompt stored -- the highlight keeps the
+      // original show-then-grade review behavior (#157).
+      expect(body.prompt).toBeNull();
       highlightId = body.id;
+    });
+
+    it("stores a recall prompt given at creation time, trimmed", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/highlights",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articleId,
+          selectedText: "another passage",
+          position: { type: "text", exact: "another passage", prefix: "", suffix: "", start: 10, end: 25 },
+          color: "GREEN",
+          prompt: "  What does this passage claim?  ",
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().prompt).toBe("What does this passage claim?");
+    });
+
+    // A whitespace-only prompt would read as "prompted" to every check in the
+    // app while asking the reader nothing -- the review card would conceal
+    // the answer behind a blank question.
+    it("treats a whitespace-only prompt as no prompt at all", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/highlights",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articleId,
+          selectedText: "a third passage",
+          position: { type: "text", exact: "a third passage", prefix: "", suffix: "", start: 26, end: 41 },
+          color: "BLUE",
+          prompt: "   \n  ",
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().prompt).toBeNull();
+    });
+
+    it("rejects a prompt past the length cap", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/highlights",
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: {
+          articleId,
+          selectedText: "a fourth passage",
+          position: { type: "text", exact: "a fourth passage", prefix: "", suffix: "", start: 42, end: 58 },
+          color: "PINK",
+          prompt: "q".repeat(MAX_RECALL_PROMPT_LENGTH + 1),
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("invalid_prompt");
+    });
+
+    it("adds a prompt to an existing highlight, then clears it with null", async () => {
+      const added = await app.inject({
+        method: "PATCH",
+        url: `/api/highlights/${highlightId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { prompt: "Why does this matter?" },
+      });
+      expect(added.statusCode).toBe(200);
+      expect(added.json().prompt).toBe("Why does this matter?");
+
+      // An unrelated PATCH must not disturb it -- prompt is only written when
+      // the key is actually present in the body.
+      const untouched = await app.inject({
+        method: "PATCH",
+        url: `/api/highlights/${highlightId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { color: "ORANGE" },
+      });
+      expect(untouched.json().prompt).toBe("Why does this matter?");
+
+      const cleared = await app.inject({
+        method: "PATCH",
+        url: `/api/highlights/${highlightId}`,
+        headers: { authorization: `Bearer ${accessToken}` },
+        payload: { prompt: null },
+      });
+      expect(cleared.statusCode).toBe(200);
+      expect(cleared.json().prompt).toBeNull();
     });
 
     it("updates SM-2 fields via PATCH", async () => {

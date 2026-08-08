@@ -17,6 +17,12 @@ export interface Highlight {
 
   color: HighlightColor;
 
+  /** Optional question whose answer is this highlight, turning resurfacing
+   * into a retrieval attempt instead of a re-read -- see recall-prompt.ts.
+   * null (the default, and what every highlight saved before #157 has) keeps
+   * the original show-then-grade behavior. */
+  prompt: string | null;
+
   lastSurfacedAt: string | null;
   surfaceCount: number;
 
@@ -43,10 +49,15 @@ export interface CreateHighlightRequest {
   color: HighlightColor;
   /** Optional -- creates the highlight and its note in one round trip. */
   noteText?: string;
+  /** Optional recall prompt, same round trip. Whitespace-only is stored as
+   * null (see normalizeRecallPrompt). */
+  prompt?: string | null;
 }
 
 export interface UpdateHighlightRequest {
   color?: HighlightColor;
+  /** null clears the prompt; omitted leaves it untouched. */
+  prompt?: string | null;
   resurfaceArchivedAt?: string | null;
   lastSurfacedAt?: string;
   surfaceCount?: number;
