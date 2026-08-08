@@ -99,13 +99,28 @@ async function issueSession(
 // Credential guessing and signup spam are the concerns here, not general
 // traffic -- much tighter than the API-wide default.
 //
+// 100 per 15 minutes, raised from 10 (#170). Ten was sized for one person,
+// but this keys on IP: behind one office NAT, one university, or a mobile
+// carrier's CGNAT, hundreds of unrelated people present as the same address.
+// Six of them mistyping a password once each plus one who retries four times
+// spent the whole budget, and everyone at that address -- including people
+// who had not tried to sign in at all -- got 429s for fifteen minutes. The
+// attacker it was aimed at, meanwhile, has more addresses than the legitimate
+// users do. 100 covers a shared address with real people behind it (a few
+// dozen sign-ins, mistypes, signups and password resets in a quarter hour)
+// and still cuts off a single host spraying one guess each across a list of
+// accounts, which is the job actually left to the per-IP layer now that
+// FAILED_LOGIN_LIMIT bounds guessing per account below. Signup and the
+// password-reset routes have no account to key on, so this plus the API-wide
+// 300/min is all the bound they get.
+//
 // Overridable only so the e2e suite can raise it: that suite signs up dozens
 // of times from one address in a few minutes, which is exactly the shape this
 // limit exists to stop, and there is no way to tell the two apart from
 // inside the API. Same escape hatch GLOBAL_RATE_LIMIT_MAX and
-// TTS_RATE_LIMIT_MAX already have, and the default is unchanged.
+// TTS_RATE_LIMIT_MAX already have.
 const AUTH_ATTEMPT_LIMIT = {
-  max: Number(process.env.AUTH_ATTEMPT_RATE_LIMIT_MAX) || 10,
+  max: Number(process.env.AUTH_ATTEMPT_RATE_LIMIT_MAX) || 100,
   timeWindow: "15 minutes",
 };
 
@@ -133,7 +148,139 @@ const REFRESH_LIMIT = {
   timeWindow: "15 minutes",
 };
 
+/**
+ * Failed logins are bounded per *account*, not only per IP (#170).
+ *
+ * A per-IP ceiling cannot bound credential guessing on its own. Addresses are
+ * cheap to rent, so "N guesses per address" is a budget an attacker just buys
+ * more of, while the people sharing one NAT pay its entire cost. Keyed on the
+ * account, guesses against a given email are bounded no matter how many hosts
+ * they arrive from -- which is the threat -- and one user burning their own
+ * budget costs their neighbours nothing.
+ *
+ * This escalates a wait instead of locking the account. A hard lock hands
+ * anyone who knows an email address a way to keep its owner signed out for as
+ * long as they care to keep failing, so the lock becomes the attack. After
+ * FAILED_LOGIN_LIMIT misses the next attempt waits 5s, then 10s, 20s, ...
+ * capped at 15 minutes: sustained guessing drops to a few hundred tries a day
+ * (useless against any password worth the name) while the account is never
+ * more than fifteen minutes out of its owner's reach, and the strikes decay
+ * entirely after an hour of quiet.
+ *
+ * The counter lives on the User row rather than in Redis or in process
+ * memory. In-process would be no bound at all behind a load balancer -- it
+ * would read "LIMIT failures per instance" -- and would reset on every
+ * deploy. Redis is the conventional home and @fastify/rate-limit speaks it
+ * directly, but REDIS_URL is optional here, so a Redis-backed counter would
+ * simply not exist in the default deployment. Postgres is already required,
+ * already shared across instances, and survives restarts. The cost is a write
+ * per failed login, which is the one request we are happy to make expensive.
+ */
+const FAILED_LOGIN_LIMIT = Number(process.env.AUTH_FAILED_LOGIN_LIMIT) || 5;
+const FAILED_LOGIN_BASE_DELAY_MS = 5_000;
+const FAILED_LOGIN_MAX_DELAY_MS = 15 * 60 * 1000;
+// Someone who mistyped their password five times last Tuesday should start
+// today from zero; without a decay the counter is a slow-motion lockout.
+const FAILED_LOGIN_DECAY_MS = 60 * 60 * 1000;
+
+/**
+ * The same wait, for emails that have no account -- otherwise it becomes an
+ * account-enumeration oracle.
+ *
+ * Delaying only real accounts would make the 429 a far better membership
+ * check than the login response itself: six wrong guesses, and whether you
+ * get 401 or 429 tells you if that address is registered. The route below
+ * deliberately returns one identical `invalid_credentials` for "no such user"
+ * and "wrong password"; keying the delay on existence would have handed the
+ * answer back through the side door.
+ *
+ * These keys are attacker-chosen and unbounded, so they must not become rows
+ * in Postgres -- that trades an enumeration oracle for a way to fill the
+ * database. They live in a capped, oldest-evicted map instead. It defends
+ * nothing by itself (there is no account behind it); it only has to be
+ * indistinguishable from the real path, and it is -- same thresholds, same
+ * response, same header. Known gap: across multiple instances the real
+ * counter is shared and this one is not, so an attacker who spreads guesses
+ * across instances can still tell the two apart. Closing that needs the
+ * shared store this deployment does not require yet.
+ */
+const UNKNOWN_EMAIL_FAILURE_CAP = 10_000;
+const unknownEmailFailures = new Map<string, FailureState>();
+
+type FailureState = { count: number; lastFailedAt: Date | null };
+
+/** Strikes older than the decay window are gone, whoever is asking. */
+function activeFailureCount(state: FailureState): number {
+  if (!state.lastFailedAt) return 0;
+  if (Date.now() - state.lastFailedAt.getTime() > FAILED_LOGIN_DECAY_MS) return 0;
+  return state.count;
+}
+
+function readFailures(email: string, user: UserRow | null): FailureState {
+  if (user) return { count: user.failedLoginCount, lastFailedAt: user.lastFailedLoginAt };
+  return unknownEmailFailures.get(email.toLowerCase()) ?? { count: 0, lastFailedAt: null };
+}
+
+/** Seconds left on the wait, or 0 if this attempt may proceed. */
+function loginRetryAfterSeconds(state: FailureState): number {
+  const count = activeFailureCount(state);
+  if (count < FAILED_LOGIN_LIMIT || !state.lastFailedAt) return 0;
+  const wait = Math.min(FAILED_LOGIN_BASE_DELAY_MS * 2 ** (count - FAILED_LOGIN_LIMIT), FAILED_LOGIN_MAX_DELAY_MS);
+  return Math.max(0, Math.ceil((state.lastFailedAt.getTime() + wait - Date.now()) / 1000));
+}
+
+async function recordFailedLogin(email: string, user: UserRow | null): Promise<void> {
+  const next = activeFailureCount(readFailures(email, user)) + 1;
+  const now = new Date();
+
+  if (user) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { failedLoginCount: next, lastFailedLoginAt: now },
+    });
+    return;
+  }
+
+  // Re-inserting moves the key to the back of Map's insertion order, so the
+  // eviction below drops whichever email has been quiet longest rather than
+  // the one currently under attack.
+  const key = email.toLowerCase();
+  unknownEmailFailures.delete(key);
+  unknownEmailFailures.set(key, { count: next, lastFailedAt: now });
+  while (unknownEmailFailures.size > UNKNOWN_EMAIL_FAILURE_CAP) {
+    const oldest = unknownEmailFailures.keys().next().value;
+    if (oldest === undefined) break;
+    unknownEmailFailures.delete(oldest);
+  }
+}
+
+// Two mistypes followed by the right password should leave no trace --
+// otherwise the strikes accumulate across weeks of ordinary use and the wait
+// eventually arrives for someone who has never actually been attacked.
+async function clearFailedLogins(user: UserRow): Promise<void> {
+  if (user.failedLoginCount === 0 && user.lastFailedLoginAt === null) return;
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { failedLoginCount: 0, lastFailedLoginAt: null },
+  });
+}
+
+// Verified against when the email has no account, so the response time does
+// not answer the question the identical error body refuses to. scrypt is the
+// dominant cost of a login; skipping it for unknown emails makes "no such
+// user" measurably faster than "wrong password" from any client with a
+// stopwatch.
+let dummyPasswordHash: string | null = null;
+function absentAccountHash(): string {
+  dummyPasswordHash ??= hashPassword(generateOpaqueToken());
+  return dummyPasswordHash;
+}
+
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
+  // Signup stays purely per-IP: there is no account yet to key a counter on,
+  // and keying on the submitted email would only let an attacker exhaust a
+  // budget for an address nobody has registered. The looser AUTH_ATTEMPT_LIMIT
+  // and the API-wide 300/min are the real bound here (#170).
   app.post<{ Body: SignupRequest }>(
     "/api/auth/signup",
     { config: { rateLimit: AUTH_ATTEMPT_LIMIT } },
@@ -193,9 +340,27 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     if (typeof email !== "string" || typeof password !== "string") return invalid();
 
     const user = await prisma.user.findUnique({ where: { email } });
+
+    // Gate before checking the password, not after: the point is to make each
+    // guess cost wall-clock time, and a wait an attacker can skip by guessing
+    // right is not a bound on guessing.
+    const retryAfter = loginRetryAfterSeconds(readFailures(email, user));
+    if (retryAfter > 0) {
+      return reply.code(429).header("Retry-After", String(retryAfter)).send({
+        error: "too_many_attempts",
+        message: `Too many failed sign-in attempts. Try again in ${retryAfter} seconds.`,
+      });
+    }
+
     // A null passwordHash means this account was created via OAuth and has
     // never set one -- password login just isn't an option for it yet.
-    if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) return invalid();
+    const passwordMatches = verifyPassword(password, user?.passwordHash ?? absentAccountHash());
+    if (!user || !user.passwordHash || !passwordMatches) {
+      await recordFailedLogin(email, user);
+      return invalid();
+    }
+
+    await clearFailedLogins(user);
 
     const { accessToken, accessTokenExpiresAt } = await issueSession(app, reply, user.id, {
       userAgent: request.headers["user-agent"],

@@ -31,11 +31,20 @@ import { buildApp } from "../app.js";
  *
  * The limiter is in-memory and scoped to this app instance (no REDIS_URL in
  * tests), so draining it here cannot leak into another test file.
+ *
+ * The per-IP ceiling these check is now a backstop rather than the main
+ * bound -- login-account-delay.test.ts covers the per-account half (#170).
  */
 describe("auth rate limits", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
+    // Draining a 100-request-per-15-minutes budget takes more requests than
+    // the API-wide 300-per-minute limiter allows across the three tests
+    // below, and that one would fire first -- a 429 from the wrong limiter,
+    // which would pass the assertions while testing nothing. buildApp reads
+    // this at call time, so raising it here stays scoped to this file.
+    process.env.GLOBAL_RATE_LIMIT_MAX = "1000";
     app = await buildApp();
     await app.ready();
   });
@@ -54,14 +63,18 @@ describe("auth rate limits", () => {
     return codes;
   }
 
-  it("cuts signup off inside a handful of attempts -- that budget is for credential guessing", async () => {
+  it("leaves room on one address for a roomful of unrelated people, and still cuts a sprayer off", async () => {
     // Deliberately invalid: a missing password can't create a user, and the
     // limiter has already counted the request by the time the handler
     // rejects it.
-    const codes = await fire(12, "POST", "/api/auth/signup", { email: "rate-limit-probe@test.local" });
+    //
+    // The first dozen standing for a dozen different people behind one NAT is
+    // the case #170 is about -- at the old max of 10 the eleventh person was
+    // locked out by their neighbours. There is still a ceiling, because per-IP
+    // is what catches one host spraying guesses across many accounts.
+    const codes = await fire(102, "POST", "/api/auth/signup", { email: "rate-limit-probe@test.local" });
+    expect(codes.slice(0, 12)).not.toContain(429);
     expect(codes).toContain(429);
-    // And it cuts off early -- the point of the tight budget.
-    expect(codes.indexOf(429)).toBeLessThanOrEqual(10);
   });
 
   it("lets refresh run well past that, because it is traffic and not a credential attempt", async () => {
@@ -73,8 +86,8 @@ describe("auth rate limits", () => {
     expect(new Set(codes)).toEqual(new Set([401]));
   });
 
-  it("keeps the password-reset routes on the tight budget", async () => {
-    const codes = await fire(12, "POST", "/api/auth/forgot-password", {});
+  it("keeps the password-reset routes on the per-IP budget", async () => {
+    const codes = await fire(102, "POST", "/api/auth/forgot-password", {});
     expect(codes).toContain(429);
   });
 });
