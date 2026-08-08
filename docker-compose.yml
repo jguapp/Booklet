@@ -93,6 +93,28 @@ services:
     # once the server has the file, the server's copy is the only one left.
     volumes:
       - storage-data:/var/lib/booklet/storage
+    # /api/ready, not /api/health: health is liveness (the process is running)
+    # and answers ok on an instance whose every real request 500s because
+    # Postgres is unreachable. Ready runs SELECT 1, so an instance that cannot
+    # serve anything is marked unhealthy instead of being treated as a working
+    # one -- which is what makes a rolling deploy stop rather than drain the
+    # last good instance. Fetched with node because the runtime image has no
+    # curl or wget; node is by definition present.
+    #
+    # start_period covers `prisma migrate deploy`, which runs before the
+    # server starts (see command below) and takes as long as the pending
+    # migrations take on a real dataset -- failures inside it do not count
+    # against retries.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/api/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy

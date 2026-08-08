@@ -186,12 +186,67 @@ question there was previously no way to ask about real users at all.
 - `NEXT_PUBLIC_DD_SITE` (web, default `datadoghq.com`) -- set to your
   Datadog region's site (e.g. `datadoghq.eu`) if it isn't US1.
 
+**Request logs are redacted, and must stay that way.** Two routes carry their
+credential in the URL path -- `/podcast/:token/…` (a bearer token for the full
+audio of a user's library, which survives a password change) and
+`/api/public/shares/:slug` (the entire access control for a share page). Pino's
+default `req` serializer logs `req.url` at info level, so every podcast poll
+would write a working credential into the log stream, i.e. into whichever
+aggregator has a much broader access list than the database does. The
+serializer in `apps/api/src/app.ts` replaces just that segment
+(`/podcast/[redacted]/feed.xml`) and leaves the rest of the path intact. If you
+add a route with a secret in its path, add it there too; if you replace the
+logger, keep the serializer.
+
 `/api/tts` also returns a `Server-Timing` header (`cache`, `queue`, `gen`)
 on every successful response, readable in the browser regardless of whether
 any of the above is configured. It carries `Timing-Allow-Origin` for the
 requesting origin, without which a browser hides `Server-Timing` on a
 cross-origin response -- and the API is always a different origin from the
 web app here.
+
+## Health checks and shutdown
+
+Two endpoints, answering two different questions. Pointing the wrong probe at
+the wrong one is how a deploy takes the whole service down.
+
+- **`GET /api/health` -- liveness.** Process-local: it returns `ok` plus TTS
+  pool state and touches nothing outside this process. Point a *restart*
+  probe here. It is deliberately not a database check, because failing this
+  means "kill this container", and a Postgres blip would then roll every
+  instance at once, turning a recoverable dependency outage into a full one.
+  Note the corollary: **this endpoint returns `ok` on an instance where every
+  real request is 500ing**, which is precisely why the next one exists.
+- **`GET /api/ready` -- readiness.** Runs `SELECT 1` against Postgres with a
+  2s ceiling and returns `200 {"status":"ready"}` or `503
+  {"status":"unavailable","error":"database_unreachable"}`. Point the *load
+  balancer* and the *rolling-deploy gate* here. Rotated credentials, an
+  exhausted connection pool, or a network partition all show up here and
+  nowhere else — without it, a deploy reads a green liveness check and drains
+  the last instance that still worked. The 503 body deliberately carries no
+  detail (the endpoint is unauthenticated by necessity, and Postgres errors
+  name hosts and usernames); the actual error is logged as
+  `readiness probe failed`.
+- `docker-compose.yml`'s `api` service has a matching `healthcheck` block
+  using `/api/ready`, with a 60s `start_period` because `prisma migrate
+  deploy` runs before the server starts. Copy that shape onto whatever you
+  actually deploy with.
+
+**Shutdown drains.** `SIGTERM`/`SIGINT` closes the server first — in-flight
+requests run to completion — then flushes telemetry, then exits, with a 12s
+ceiling so one connection that never goes idle cannot hold a deploy open
+forever (`closeWithTimeout` in `apps/api/src/app.ts`). Two things follow for
+whatever runs this:
+
+- **Give the platform's own kill timer more than 12s** (Kubernetes'
+  `terminationGracePeriodSeconds`, Fly's `kill_timeout`, `docker stop -t`).
+  Set it lower and the platform `SIGKILL`s mid-drain, which is the behaviour
+  the drain replaced.
+- **Still not drained: work that is not an HTTP request.** A podcast episode
+  being generated when the signal arrives is lost — the TTS pool kills its
+  workers on `SIGTERM` (`services/tts-pool.ts`) and the feed regenerates the
+  episode on the next fetch. Fine, but it means a redeploy loop faster than
+  generation can leave a popular feed never catching up.
 
 ## Database
 
@@ -281,10 +336,20 @@ JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toStr
 
 ## Environment-specific config to double-check before a real deploy
 
-- **CORS**: `apps/api/src/app.ts` allows any `localhost:*` origin in dev
-  and `chrome-extension://*` always (for the browser extension) -- in
-  production it only allows the exact `WEB_ORIGIN` you set. Set it to
-  your real deployed web app's origin.
+- **CORS / `WEB_ORIGIN`**: `apps/api/src/app.ts` allows any `localhost:*`
+  origin in dev and `chrome-extension://*` always (for the browser
+  extension) -- in production it only allows the exact `WEB_ORIGIN` you set.
+  Set it to your real deployed web app's origin. **The API now refuses to
+  start under `NODE_ENV=production` if it is unset or malformed**
+  (`apps/api/src/lib/cors.ts`), same treatment `JWT_ACCESS_SECRET` gets, and
+  for the same reason: the old behaviour was a server that started fine,
+  logged nothing, answered `curl` correctly (curl sends no `Origin`) and left
+  the web app completely broken with only browser-console errors. It must be
+  exactly `scheme://host[:port]`: **a trailing slash fails the check**,
+  because a browser's `Origin` header never has one, and so does anything
+  with a path or query. The one thing the guard cannot see is an `http` vs
+  `https` mismatch against what the browser actually sends — if CORS still
+  fails on a value that booted, check the scheme first.
 - **`TRUST_PROXY`**: set this to `true` if — and only if — the API sits
   behind a reverse proxy or load balancer you control (Fly, Railway, Render,
   nginx, Cloudflare; essentially every real deployment). Rate limiting keys
@@ -297,6 +362,17 @@ JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toStr
   trusted sits in front: `X-Forwarded-For` is client-controlled, so trusting
   it without a proxy to overwrite it lets anyone bypass rate limiting by
   spoofing a fresh IP per request.
+
+  There is no guard for this one, because nothing inside the process can know
+  what sits in front of it -- so it is instrumented instead. The API logs the
+  resolved value once at startup (`startup: trust proxy resolved`) and, on the
+  first request it serves, whether that request carried `X-Forwarded-For`
+  alongside the `request.ip` every rate limit keys on (`startup: first request
+  proxy shape`). **Read those two lines after any deploy.** `xForwardedFor:
+  true` with `trustProxy: false` means every user is in one bucket; the
+  reverse means `X-Forwarded-For` is unfiltered client input and rate limiting
+  is bypassable. `ip` matching your proxy's address on every request is the
+  same first failure seen from the other side.
 - **Rate limiting**: in-memory (`@fastify/rate-limit`'s default store) --
   fine for one instance, silently stops being a real limit if you run more
   than one API instance behind a load balancer without switching to a

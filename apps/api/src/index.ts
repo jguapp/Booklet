@@ -1,4 +1,4 @@
-import { buildApp } from "./app.js";
+import { buildApp, closeWithTimeout } from "./app.js";
 import { initTelemetry, shutdownTelemetry } from "./lib/telemetry.js";
 import { warmTtsPool } from "./services/tts-pool.js";
 
@@ -52,8 +52,34 @@ warmTtsPool();
 // first the last few seconds are dropped, which are usually the interesting
 // ones given something just caused the process to exit. The flush is async;
 // exiting is what happens after it, however it goes.
+//
+// The drain comes first, and it is the reason a deploy is not visible to
+// anyone using the app: SIGTERM used to exit while responses were still being
+// written, so every release cut whatever was in flight -- an upload, a
+// migration batch, or a podcast WAV mid-write, which leaves a truncated file
+// that an ArticleAudio row already points at and that clients happily play as
+// a silently short episode. closeWithTimeout bounds it so one connection that
+// never goes idle cannot hold a deploy open indefinitely.
+let shuttingDown = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    void shutdownTelemetry().finally(() => process.exit(0));
+    // A second Ctrl-C (or a platform that re-sends SIGTERM before its kill
+    // timer) must not restart the sequence and reset the clock.
+    if (shuttingDown) return;
+    shuttingDown = true;
+    void (async () => {
+      const outcome = await closeWithTimeout(app);
+      if (outcome !== "closed") {
+        app.log.warn({ signal, outcome }, "shutdown: gave up draining, exiting anyway");
+      }
+      // finally, not a plain await: a telemetry exporter that rejects (or
+      // hangs long enough for the platform's kill timer) must not be what
+      // stops the process from exiting.
+      try {
+        await shutdownTelemetry();
+      } finally {
+        process.exit(0);
+      }
+    })();
   });
 }
