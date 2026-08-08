@@ -10,9 +10,11 @@
 # What is verified: apps/api/Dockerfile's actual build+run path (see that
 # file's own header comment) directly, by running the equivalent commands
 # without Docker in between; and both Dockerfiles building, plus the api
-# image actually booting against a real Postgres and answering a request,
-# in .github/workflows/ci.yml's docker-build job, which runs on a real
-# GitHub Actions runner.
+# image actually booting against a real Postgres and answering a request, in
+# CI's docker-build job. That job exists in both .github/workflows/ci.yml and
+# .gitlab-ci.yml, but only the Actions one has run on a real runner -- and it
+# is dormant now that the Actions allowance is exhausted. See DEPLOYMENT.md's
+# "Which CI config is live"; nothing is re-verifying this automatically today.
 #
 #   cp apps/api/.env.example apps/api/.env.docker   # fill in JWT_ACCESS_SECRET etc.
 #   docker compose up --build

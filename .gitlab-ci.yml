@@ -16,6 +16,12 @@
 # record real bugs (a corrupted TTS model from three workers racing the same
 # download, a rate limit tripping mid-suite, an esbuild failure that typecheck
 # could never catch). Losing them in the move would mean relearning them.
+#
+# Both files are kept, so **a change here has to be mirrored there** (and vice
+# versa). #169's auth rate limits went into this file and not into the Actions
+# one, which left that pipeline's test-web-e2e job unrunnable until it was
+# fixed. Which of the two is actually live -- and why neither may be right
+# now -- is in DEPLOYMENT.md's "Which CI config is live".
 
 stages: [check, test, build]
 

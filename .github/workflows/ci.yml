@@ -1,3 +1,18 @@
+# CI for Booklet.
+#
+# Read this before editing: `.gitlab-ci.yml` is a second, equivalent pipeline
+# covering the same seven jobs, and **a change here has to be mirrored there**
+# (and vice versa). That is not hypothetical -- #169's auth rate limits were
+# added to the GitLab file and not to this one, and this workflow's
+# test-web-e2e job would have failed on them until it was fixed.
+#
+# Which of the two is actually live, and why neither may be right now, is in
+# DEPLOYMENT.md's "Which CI config is live". The short version: this workflow
+# is dormant because the repository's Actions allowance is exhausted, and the
+# GitLab pipeline does not run either until the repository reaches GitLab.
+# The file is kept, not deleted -- it is the only pipeline here with a
+# proven-green history on real hardware.
+
 name: CI
 
 on:
@@ -154,6 +169,18 @@ jobs:
       # nothing wrong with it.
       GLOBAL_RATE_LIMIT_MAX: "100000"
       TTS_RATE_LIMIT_MAX: "100000"
+      # The auth routes need the same treatment, for the same reason. The
+      # suite signs up dozens of times and reloads pages hundreds of times,
+      # all from one address -- against the real per-IP budgets it runs out
+      # partway through and fails whichever spec happens to be next, which
+      # reads as flakiness rather than as a limit doing its job. Raising them
+      # here changes nothing about the shipped defaults.
+      #
+      # These were added to .gitlab-ci.yml when the limits landed (#169) and
+      # never mirrored back here, because this workflow had already gone
+      # dormant -- exactly the drift the header warns about.
+      AUTH_ATTEMPT_RATE_LIMIT_MAX: "100000"
+      AUTH_REFRESH_RATE_LIMIT_MAX: "100000"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -164,12 +191,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @booklet/api exec prisma migrate deploy
       - run: pnpm --filter @booklet/web exec playwright install --with-deps chromium
-      # Same reason as the bench job: the API's three TTS workers all
-      # cold-miss the model cache at once and race writing it, which
+      # Same reason as the bench job: the API's TTS workers would otherwise
+      # all cold-miss the model cache at once and race writing it, which
       # produced a corrupt model and left read-aloud non-functional for the
       # whole run (tts-player.spec.ts timing out at 60s waiting for
-      # playback). Fetch it once, single-process, first. See #161 for the
-      # durable fix.
+      # playback). Fetch it once, single-process, first. The pool now also
+      # stages its own cold start (#161); this stays because it additionally
+      # warms the cache before the pool exists at all.
       - run: node apps/api/scripts/prefetch-tts-model.mjs
       - run: pnpm --filter @booklet/api dev &
       - run: pnpm --filter @booklet/web dev &
@@ -197,7 +225,9 @@ jobs:
       # still fetches a genuine public URL so real-world extraction stays
       # covered -- if outbound network is ever restricted for this runner,
       # exclude it with `--grep-invert @live` rather than dropping the whole
-      # job and losing everything else with it.
+      # job and losing everything else with it. That exclusion is a genuine
+      # offline switch: every spec that reaches the public internet carries
+      # the tag (#167), which is also what `pnpm verify --e2e` relies on.
       - run: pnpm --filter @booklet/web test:e2e
 
   bench-tts-ttfa:
