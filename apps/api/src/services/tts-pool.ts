@@ -90,6 +90,17 @@ interface PoolWorker {
    * shutdown would otherwise see the *previous* pool's exits land after the
    * flag had been cleared, and helpfully respawn workers nobody asked for. */
   stopped: boolean;
+  /** Set by retireWorker, so the three separate events that all mean "this
+   * worker is gone" ("disconnect", "exit", "error") do the cleanup once
+   * between them rather than once each -- three respawns for one death. */
+  retired: boolean;
+  /** Settles this worker's `ready` promise. Held on the worker so retireWorker
+   * can settle it from outside spawnWorker's closure. */
+  settleReady: (result: { ok: boolean; error?: string }) => void;
+  /** When this worker was forked, so a death can be classified as "crashed on
+   * startup" (needs backoff) or "ran for a while and then died" (respawn
+   * immediately). See scheduleRespawn. */
+  spawnedAt: number;
 }
 
 interface QueuedTask {
@@ -141,6 +152,24 @@ const inFlight = new Map<number, { resolve: (buffer: Buffer) => void; reject: (e
 function pump(): void {
   for (const worker of workers) {
     if (worker.busy) continue;
+    // A worker whose IPC channel has already closed is not somewhere to put
+    // work, and finding that out by sending is fatal: send() on a closed
+    // channel does not throw where the caller can catch it, it schedules
+    // `this.emit("error", ERR_IPC_CHANNEL_CLOSED)` on nextTick, and an
+    // unhandled "error" on a ChildProcess is a process-wide throw. That is
+    // exactly #163's shape -- a nextTick throw taking the whole API down --
+    // and it was reachable here, confirmed by running the real pool against a
+    // worker whose channel had gone: "Unhandled 'error' event ... at pump".
+    //
+    // The window is not theoretical either. Node delivers "disconnect" before
+    // "exit" (confirmed by hand), and only "exit" used to remove a worker from
+    // this array, so every crashed worker spent a real interval sitting here
+    // advertising itself as idle with a dead channel. Any request arriving in
+    // that interval killed the server.
+    if (!worker.proc.connected) {
+      retireWorker(worker, "worker IPC channel closed");
+      continue;
+    }
     const task = queue.shift() ?? lowPriorityQueue.shift();
     if (!task) return;
     worker.busy = true;
@@ -150,6 +179,118 @@ function pump(): void {
     task.onStart();
     worker.proc.send({ id, text: task.text, voice: task.voice, speed: task.speed });
   }
+}
+
+/**
+ * How long a worker has to survive before its death counts as "it was
+ * working and then something happened" rather than "it cannot start".
+ */
+const RESPAWN_HEALTHY_MS = 30_000;
+/** First backoff step, doubling per consecutive startup death. */
+const RESPAWN_MIN_DELAY_MS = 250;
+const RESPAWN_MAX_DELAY_MS = 30_000;
+
+let consecutiveStartupDeaths = 0;
+/** Respawns waiting on a backoff timer. Counted so ensureStarted doesn't see
+ * an empty `workers` mid-backoff and helpfully build a whole second pool.
+ * Held as the live timers rather than a bare count so stopTtsPool can cancel
+ * them: a count alone would stay non-zero after a teardown, and since the
+ * stale timer then declines to spawn (its generation no longer matches), the
+ * two guards between them would block ensureStarted from starting anything
+ * for the rest of the backoff. Only tests stop and restart a pool today --
+ * production only stops on the way out -- but a teardown that leaves the
+ * next pool unable to start is exactly the kind of cross-test bleed that
+ * surfaces later as an unrelated flake. */
+const pendingRespawns = new Set<NodeJS.Timeout>();
+/** Bumped by stopTtsPool, so a respawn already on a timer when the pool was
+ * torn down doesn't fork a worker into the pool that replaced it. */
+let poolGeneration = 0;
+
+/**
+ * Replaces a dead worker, with a delay when it died on startup.
+ *
+ * The delay is the fix for a hot restart loop. A worker that cannot start at
+ * all -- a missing dist/tts-worker-process.js, a native binding that won't
+ * load, an OOM at model load -- exits immediately, and the exit handler
+ * re-forked it immediately, forever: measured at ~3 node processes a second
+ * with an error line each, for the life of the process. Retrying harder
+ * cannot fix any of those conditions; all the tight loop buys is a pegged
+ * core and a log too noisy to read the original failure out of.
+ *
+ * A worker that ran normally and then died is still replaced instantly --
+ * that is the case the respawn exists for, and making a real crash wait would
+ * be a regression.
+ */
+function scheduleRespawn(diedAfterMs: number): void {
+  if (diedAfterMs >= RESPAWN_HEALTHY_MS) consecutiveStartupDeaths = 0;
+  else consecutiveStartupDeaths++;
+
+  const delay =
+    consecutiveStartupDeaths === 0
+      ? 0
+      : Math.min(RESPAWN_MAX_DELAY_MS, RESPAWN_MIN_DELAY_MS * 2 ** (consecutiveStartupDeaths - 1));
+
+  if (delay === 0) {
+    workers.push(spawnWorker());
+    pump();
+    return;
+  }
+
+  const generation = poolGeneration;
+  const timer = setTimeout(() => {
+    pendingRespawns.delete(timer);
+    if (generation !== poolGeneration) return; // pool was stopped while we waited
+    workers.push(spawnWorker());
+    pump();
+  }, delay);
+  pendingRespawns.add(timer);
+  // Never the reason the process stays alive -- a backoff timer must not hold
+  // a deploy open the way an un-unref'd interval would.
+  timer.unref();
+}
+
+/**
+ * Everything that has to happen exactly once when a worker dies, whichever of
+ * the three events reported it.
+ *
+ * There are three, and before this they were not all handled: "exit" was, but
+ * "disconnect" (delivered first) was not, and "error" had no listener at all
+ * -- which is itself a process-killer, since an EventEmitter with no "error"
+ * listener rethrows. Funnelling all three through one idempotent function is
+ * what stops one death producing three respawns.
+ */
+function retireWorker(worker: PoolWorker, reason: string): void {
+  if (worker.stopped || worker.retired) return; // deliberate shutdown, or already handled
+  worker.retired = true;
+  console.error(`[tts-pool] ${reason}, respawning`);
+
+  // A worker that dies before reporting in must still settle its readiness,
+  // or a cold start staged behind it (ensureStarted) would wait forever and
+  // the pool would be permanently stuck at one worker.
+  worker.loaded = false;
+  worker.settleReady({ ok: false, error: reason });
+
+  // That request's caller still needs to actually be told it failed: without
+  // this, a crash left its entry sitting in `inFlight` forever (nothing else
+  // was ever going to resolve or reject it), which meant the client's fetch
+  // just hung with no error and no timeout -- confirmed by hand this is
+  // strictly worse than a slow chunk, since a slow chunk at least eventually
+  // finishes.
+  if (worker.currentRequestId !== null) {
+    const task = inFlight.get(worker.currentRequestId);
+    inFlight.delete(worker.currentRequestId);
+    worker.currentRequestId = null;
+    task?.reject(new Error("TTS worker process exited unexpectedly."));
+  }
+
+  workers = workers.filter((w) => w !== worker);
+  // Usually already dead, in which case this is a no-op -- but a worker can
+  // lose its channel and keep running, and one that nothing can talk to is a
+  // process holding a ~90MB model resident for no reason. Dropping it from
+  // `workers` without killing it would leak exactly that, permanently, since
+  // stopTtsPool only ever kills what is still in the array.
+  worker.proc.kill();
+  scheduleRespawn(Date.now() - worker.spawnedAt);
 }
 
 function spawnWorker(): PoolWorker {
@@ -175,6 +316,9 @@ function spawnWorker(): PoolWorker {
     currentRequestId: null,
     loaded: false,
     stopped: false,
+    retired: false,
+    spawnedAt: Date.now(),
+    settleReady: (result) => settleReady(result),
     ready: new Promise((resolve) => {
       settleReady = resolve;
     }),
@@ -201,30 +345,23 @@ function spawnWorker(): PoolWorker {
   // A worker dying mid-generation (native crash, OOM) shouldn't take the
   // rest of the pool down with it -- replace it and let whatever request
   // it was holding fail; the client's own chunk loop already tolerates one
-  // chunk failing without aborting the whole article. That request's
-  // caller still needs to actually be told it failed, though: without this,
-  // a crash left its entry sitting in `inFlight` forever (nothing else was
-  // ever going to resolve or reject it), which meant the client's fetch
-  // just hung with no error and no timeout -- confirmed by hand this is
-  // strictly worse than a slow chunk, since a slow chunk at least
-  // eventually finishes.
-  proc.on("exit", (code) => {
-    if (worker.stopped) return; // deliberate shutdown, not a crash
-    console.error(`[tts-pool] worker exited unexpectedly (code ${code}), respawning`);
-    // A worker that dies before reporting in must still settle its readiness,
-    // or a cold start staged behind it (ensureStarted) would wait forever and
-    // the pool would be permanently stuck at one worker.
-    worker.loaded = false;
-    settleReady({ ok: false, error: `worker exited with code ${code}` });
-    if (worker.currentRequestId !== null) {
-      const task = inFlight.get(worker.currentRequestId);
-      inFlight.delete(worker.currentRequestId);
-      task?.reject(new Error("TTS worker process exited unexpectedly."));
-    }
-    workers = workers.filter((w) => w !== worker);
-    workers.push(spawnWorker());
-    pump();
-  });
+  // chunk failing without aborting the whole article. See retireWorker for
+  // the cleanup all three of these share.
+  proc.on("exit", (code) => retireWorker(worker, `worker exited unexpectedly (code ${code})`));
+
+  // Delivered *before* "exit", and the reason pump() has to check
+  // proc.connected: for the interval between the two, a dead worker was still
+  // in `workers` looking idle.
+  proc.on("disconnect", () => retireWorker(worker, "worker IPC channel closed"));
+
+  // Not optional, and not defensive decoration. A ChildProcess is an
+  // EventEmitter, and an EventEmitter with no "error" listener *rethrows* --
+  // so a failed fork, a failed kill, or an IPC send that cannot be delivered
+  // does not surface as a rejected promise here, it surfaces as an uncaught
+  // exception that ends the API process. Same failure shape as #163's
+  // tesseract.js nextTick throw, same fix: give it a listener so it comes
+  // back into ordinary control flow.
+  proc.on("error", (err) => retireWorker(worker, `worker process error: ${err.message}`));
 
   return worker;
 }
@@ -255,7 +392,11 @@ let starting = false;
  * would turn it into a permanent one-worker pool for the life of the process.
  */
 function ensureStarted(): void {
-  if (workers.length > 0 || starting) return;
+  // pendingRespawns is part of the guard, not an extra: while a crashed
+  // worker's replacement is waiting on scheduleRespawn's backoff, `workers`
+  // can legitimately be empty, and without this a request arriving in that
+  // gap would build an entire second pool alongside the one already coming.
+  if (workers.length > 0 || starting || pendingRespawns.size > 0) return;
   starting = true;
 
   const first = spawnWorker();
@@ -292,6 +433,26 @@ export function ttsPoolStatus(): { started: boolean; workers: number; loaded: nu
     workers: workers.length,
     loaded: workers.filter((w) => w.loaded).length,
   };
+}
+
+/**
+ * How many real (non-speculative) requests are waiting for a worker.
+ *
+ * Exported so /api/tts can shed load before enqueuing. The route's rate limit
+ * is per IP over ten minutes, which bounds one caller and says nothing about
+ * how many callers there are -- so the queue is the only place the aggregate
+ * is visible, and unbounded queueing on a route where each item costs a
+ * multi-second forward pass means every one of those callers holds a
+ * connection open waiting for audio that arrives long after they stopped
+ * caring.
+ *
+ * Deliberately excludes lowPriorityQueue: warming is already drained only by
+ * capacity that would otherwise be idle, so counting it would shed real
+ * requests on the strength of work that is by construction not competing
+ * with them.
+ */
+export function ttsQueueDepth(): number {
+  return queue.length;
 }
 
 /**
@@ -415,11 +576,40 @@ export function generateSpeechPooled(
  * stop the real pool repeatedly; the signal handlers below use it too. */
 export function stopTtsPool(): void {
   starting = false;
+  poolGeneration++;
+  consecutiveStartupDeaths = 0;
+  // Cancel rather than merely out-generation them, so the next pool is free to
+  // start immediately instead of waiting out a backoff belonging to the pool
+  // that just died.
+  for (const timer of pendingRespawns) clearTimeout(timer);
+  pendingRespawns.clear();
   for (const worker of workers) {
     worker.stopped = true;
     worker.proc.kill();
   }
   workers = [];
+
+  // Everything anyone was waiting on has to be failed, not abandoned.
+  //
+  // These used to be left exactly as they were: `worker.stopped` makes the
+  // kill's "exit" a no-op, so nothing ever settled an in-flight request, and
+  // the queues kept tasks whose workers no longer existed. Confirmed by hand
+  // against the real pool -- an in-flight generation was still "PENDING" long
+  // after stopTtsPool() returned, with nothing left alive that could ever
+  // change that.
+  //
+  // It matters most on the path this runs on for real. SIGTERM reaches this
+  // module's handler as well as index.ts's, so the workers die while
+  // closeWithTimeout is still draining -- and a request that can neither
+  // finish nor fail is precisely what that drain cannot get past. The deploy
+  // then burns the whole shutdown timeout and cuts the connection anyway,
+  // which is the outcome the drain exists to avoid. A rejection lets the
+  // route answer, the client retry, and the server close on time.
+  const abandoned = [...inFlight.values(), ...queue.splice(0), ...lowPriorityQueue.splice(0)];
+  inFlight.clear();
+  for (const task of abandoned) {
+    task.reject(new Error("TTS pool shut down before this request could be generated."));
+  }
 }
 
 function shutdown(): void {

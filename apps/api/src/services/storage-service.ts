@@ -10,11 +10,64 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ReadStream } from "node:fs";
 
-const STORAGE_ROOT = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "storage",
+/** Where these files actually live, and the single most important thing to
+ * get right about this module in a deployment (#173).
+ *
+ * The default is a directory inside the application itself, which is correct
+ * for `pnpm dev` and wrong everywhere else: container filesystems are
+ * replaced on every deploy, so a routine release deleted every uploaded book
+ * and every generated podcast enclosure while the rows naming them survived
+ * -- a library that lists fine and opens empty, discovered long after the
+ * deploy that caused it. FILE_STORAGE_PATH is how a deployment moves this
+ * onto a mounted disk that outlives the container; docker-compose.yml and
+ * apps/api/Dockerfile set it, and DEPLOYMENT.md treats it as a hard
+ * requirement in the same terms as the database.
+ *
+ * Named FILE_STORAGE_PATH rather than STORAGE_ROOT because "storage" alone
+ * says nothing about which storage (Redis and Postgres are storage too), and
+ * because a bare generic name is exactly the kind a hosting platform injects
+ * for its own purposes.
+ *
+ * Resolved, not used raw: a relative value would otherwise be interpreted
+ * against the process's cwd only by accident of path.join, and the default
+ * itself moves with the compiled layout -- `node dist/index.js` resolves it
+ * two directories up from dist/, not from src/services/. Setting the
+ * variable explicitly is what makes the location stop depending on which of
+ * those is running.
+ */
+/**
+ * Refuse to start in production without an explicit path.
+ *
+ * The asymmetry this fixes was the actual bug: JWT_ACCESS_SECRET has had a
+ * production guard since #174, and forgetting it is *recoverable* -- nobody
+ * can sign in until you set it, and then everything works. Forgetting this
+ * one is not. The default lands inside the application directory, the
+ * container's filesystem is ephemeral, and the first routine redeploy
+ * destroys every uploaded book and every generated episode while the rows
+ * survive pointing at them. The library looks intact and the readers open
+ * empty.
+ *
+ * So the variable whose omission costs nothing refused to boot, and the one
+ * that silently destroys user data defaulted. DEPLOYMENT.md said to set it
+ * in three places, which is documentation, not a control -- and #172 had
+ * just made the server the only copy of an uploaded file, so this stopped
+ * being cache loss and became data loss.
+ *
+ * Production only. Dev, test and CI all rely on the default, and a guard
+ * that fires there would be a guard everyone learns to work around.
+ */
+if (process.env.NODE_ENV === "production" && !process.env.FILE_STORAGE_PATH?.trim()) {
+  throw new Error(
+    "FILE_STORAGE_PATH is not set. In production it must point at a mounted persistent disk -- " +
+      "the default lives inside the application directory, which is destroyed on redeploy, taking " +
+      "every uploaded PDF, EPUB and generated podcast episode with it while the database rows " +
+      "survive pointing at nothing. See DEPLOYMENT.md, 'File storage'.",
+  );
+}
+
+const STORAGE_ROOT = path.resolve(
+  process.env.FILE_STORAGE_PATH?.trim() ||
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "storage"),
 );
 
 function keyToPath(storageKey: string): string {

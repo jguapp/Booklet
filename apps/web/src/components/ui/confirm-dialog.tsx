@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useModalFocus } from "@/lib/a11y/modal-focus";
 import { cn } from "@/lib/cn";
 
 interface ConfirmDialogProps {
@@ -26,15 +27,12 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onCancel);
 
   useEffect(() => {
     confirmRef.current?.focus();
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onCancel]);
+  }, []);
 
   // Portaled to <body> -- callers render this from inside popovers that are
   // themselves `position: fixed` + `transform` (to anchor/center over a
@@ -50,6 +48,7 @@ export function ConfirmDialog({
       }}
     >
       <div
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"

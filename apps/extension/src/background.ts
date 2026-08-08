@@ -157,8 +157,58 @@ async function importPage(url: string, highlights: StoredHighlight[]): Promise<I
   return { ok: true, articleId, importedCount };
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+/**
+ * Whether a message really came from this extension's own content script, in
+ * a tab, about the page that tab is actually on.
+ *
+ * Three separate things are being refused here, and none of them is
+ * hypothetical:
+ *
+ * 1. Another extension. manifest.json declares no `externally_connectable`,
+ *    and Chrome reads that as "no web pages, but every other installed
+ *    extension" -- so anything else on the profile can call sendMessage here
+ *    and have this script save pages to the user's library, with the user's
+ *    token, and open tabs. `sender.id` is set by the browser, not the
+ *    sender, so comparing it to our own id closes that.
+ * 2. An extension page of our own (the popup) that has no business asking for
+ *    an import. Requiring `sender.tab` limits this to content scripts.
+ * 3. A URL that isn't the sending frame's. The URL decides which article gets
+ *    created and what the API is told to fetch, and it arrives in the message
+ *    body rather than from the browser. Compared by origin rather than
+ *    exactly, because a single-page app can push a new path between the
+ *    content script reading location.href and this listener running; a
+ *    different *origin* is not that.
+ *
+ * (1) and (2) are the checks that matter -- they are what a hostile *other*
+ * extension runs into. (3) only adds anything once our own content script is
+ * already compromised, which is why it is allowed to be skipped rather than
+ * to fail the import: `sender.url` is the browser's own record of the
+ * sending frame and is not permission-gated, but `sender.tab.url` is (it
+ * needs `tabs` or a matching host permission, and this extension has neither
+ * for arbitrary pages), so the fallback can legitimately be absent and must
+ * not take the feature down with it.
+ */
+function isTrustedImportSender(sender: chrome.runtime.MessageSender, url: string): boolean {
+  if (sender.id !== chrome.runtime.id) return false;
+  if (!sender.tab) return false;
+
+  const senderUrl = sender.url ?? sender.tab.url;
+  if (!senderUrl) return true;
+  try {
+    return new URL(url).origin === new URL(senderUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isImportRequest(message)) return false;
+  if (!isTrustedImportSender(sender, message.url)) {
+    // Answered rather than ignored, so our own content script never hangs on
+    // a reply that isn't coming if this check is ever wrong.
+    sendResponse({ ok: false, error: "save_failed", message: "Couldn't save this page." } satisfies ImportResponse);
+    return false;
+  }
   importPage(message.url, message.highlights)
     .then(sendResponse)
     .catch(() => sendResponse({ ok: false, error: "save_failed", message: "Couldn't save this page." }));

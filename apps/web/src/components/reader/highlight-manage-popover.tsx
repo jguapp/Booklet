@@ -78,6 +78,7 @@ export function HighlightManagePopover({
             rows={2}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            aria-label="Note"
             placeholder="Add a note…"
             className="w-full resize-none rounded-sm border border-border bg-paper px-2.5 py-2 font-sans text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />

@@ -55,7 +55,29 @@ export function canonicalizeUrl(rawUrl: string): string | null {
   let path = parsed.pathname.replace(/\/+$/, "");
   if (path === "") path = "/";
 
-  const query = params.length > 0 ? `?${params.map(([k, v]) => `${k}=${v}`).join("&")}` : "";
+  // Re-encoded, because `searchParams.entries()` hands back *decoded* values
+  // and pasting those straight back between "=" and "&" lets a value's own
+  // separators become real ones.
+  //
+  // That is not cosmetic -- it merges distinct articles. Confirmed by running
+  // it: `?a=1%26b=2` (one param whose value is the literal "1&b=2") and
+  // `?a=1&b=2` (two params) both produced `a=1&b=2`, so saving the second URL
+  // after the first is rejected as a duplicate and the article silently never
+  // arrives. Duplicate detection deciding two different pages are the same is
+  // the one direction this feature must not fail in, and the comment at the
+  // top of the tracking-param list says exactly that about stripping params.
+  // The unencoded form was also not always a legal URL: a value containing a
+  // space came back out as a raw space.
+  //
+  // Encoding changes the stored canonicalUrl for any URL whose params contain
+  // a character encodeURIComponent escapes, so previously-saved rows won't
+  // match the newly-computed form and will miss dedupe once. That is the
+  // right way round: a missed dedupe saves a second copy the user can see and
+  // delete, while a false dedupe drops an article without saying anything.
+  const query =
+    params.length > 0
+      ? `?${params.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&")}`
+      : "";
 
   // Fragment intentionally dropped -- it never changes which extracted
   // article this is (this app fetches and parses the page server-side, it

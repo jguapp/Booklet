@@ -102,7 +102,7 @@ export function createOffsetPointFinder(
   };
 }
 
-function textNodesIntersecting(root: HTMLElement, range: Range): Text[] {
+function textNodesIntersecting(range: Range): Text[] {
   // Scoped to the range's own common ancestor rather than the whole
   // container -- for a highlight spanning a sentence or a paragraph (the
   // overwhelming common case), that's a small fraction of a whole article's
@@ -126,12 +126,8 @@ function textNodesIntersecting(root: HTMLElement, range: Range): Text[] {
  * Range#surroundContents refuses to span partial element boundaries, so a
  * highlight crossing e.g. a <p> or an <em> becomes several marks, not one).
  */
-export function wrapRangeInElements(
-  root: HTMLElement,
-  range: Range,
-  createWrapper: () => HTMLElement,
-): HTMLElement[] {
-  const nodes = textNodesIntersecting(root, range);
+export function wrapRangeInElements(range: Range, createWrapper: () => HTMLElement): HTMLElement[] {
+  const nodes = textNodesIntersecting(range);
   const wrappers: HTMLElement[] = [];
 
   for (const node of nodes) {

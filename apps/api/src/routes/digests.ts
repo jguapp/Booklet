@@ -1,44 +1,37 @@
 import type { FastifyInstance } from "fastify";
-import type { Digest, Highlight, HighlightPosition } from "@booklet/shared";
+import type { Digest } from "@booklet/shared";
 import { compileDigestEmail } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { getHighlightsToResurface } from "../services/resurface-service.js";
 import { sendEmail } from "../services/email-service.js";
+// The same serializer the /api/highlights routes use, not a second copy.
+// This file used to carry its own identical one, which is exactly the kind
+// of duplicate that goes stale silently: adding Highlight.prompt (#157) to
+// one of them would have left digests -- the one place the field actually
+// changes what the reader sees -- serving highlights without it.
+import { toHighlight } from "./highlights.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function toHighlight(row: Awaited<ReturnType<typeof getHighlightsToResurface>>[number]): Highlight {
-  return {
-    id: row.id,
-    articleId: row.articleId,
-    userId: row.userId,
-    selectedText: row.selectedText,
-    position: row.position as unknown as HighlightPosition,
-    color: row.color,
-    lastSurfacedAt: row.lastSurfacedAt?.toISOString() ?? null,
-    surfaceCount: row.surfaceCount,
-    lastFeedback: row.lastFeedback,
-    lastFeedbackAt: row.lastFeedbackAt?.toISOString() ?? null,
-    resurfaceArchivedAt: row.resurfaceArchivedAt?.toISOString() ?? null,
-    easinessFactor: row.easinessFactor,
-    intervalDays: row.intervalDays,
-    repetitions: row.repetitions,
-    nextDueAt: row.nextDueAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-    annotation: row.annotation
-      ? {
-          id: row.annotation.id,
-          highlightId: row.annotation.highlightId,
-          userId: row.annotation.userId,
-          noteText: row.annotation.noteText,
-          createdAt: row.annotation.createdAt.toISOString(),
-          updatedAt: row.annotation.updatedAt.toISOString(),
-        }
-      : null,
-  };
-}
+/**
+ * "Email me this digest" had no limit beyond the API-wide 300/minute, which
+ * is 300 messages a minute through this server's mail provider for one signed-in
+ * account. The recipient is always the account's own address, so this is not a
+ * relay the way send-to-kindle was -- but a provider does not care who the
+ * victim is when it decides the sending domain is a spam source, and the same
+ * domain sends every password reset and verification link.
+ *
+ * Keyed on the account rather than the IP (the route is behind requireAuth,
+ * so the better key exists), and sized for the feature: a digest is generated
+ * once a day or once a week, so six sends an hour is already generous for
+ * "I pressed it again because the first one hadn't arrived".
+ */
+const DIGEST_EMAIL_LIMIT = {
+  max: Number(process.env.DIGEST_EMAIL_RATE_LIMIT_MAX) || 6,
+  timeWindow: "1 hour",
+  keyGenerator: (request: { userId: string | null; ip: string }) => request.userId ?? request.ip,
+};
 
 /** DAILY -> still the same calendar day; WEEKLY -> generated within the last 7 days. */
 function isStillCurrent(generatedAt: Date, frequency: "DAILY" | "WEEKLY", now: Date): boolean {
@@ -101,7 +94,7 @@ export async function registerDigestRoutes(app: FastifyInstance): Promise<void> 
 
   app.post<{ Params: { id: string } }>(
     "/api/digests/:id/email",
-    { preHandler: requireAuth },
+    { preHandler: requireAuth, config: { rateLimit: DIGEST_EMAIL_LIMIT } },
     async (request, reply) => {
       const digest = await prisma.digest.findFirst({
         where: { id: request.params.id, userId: request.userId! },

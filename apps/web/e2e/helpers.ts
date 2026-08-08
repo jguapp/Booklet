@@ -30,6 +30,9 @@ export const FIXTURES = {
   longArticle: `${FIXTURE_ORIGIN}/long-article.html`,
   /** Returns 404, for asserting the app's own save-failure handling. */
   notFound: `${FIXTURE_ORIGIN}/not-an-article.html`,
+  /** A local RSS feed served by the fixture server, so the rss specs never
+   * touch a live third-party feed (#148/#167). */
+  feed: `${FIXTURE_ORIGIN}/feed.xml`,
 } as const;
 
 /**

@@ -142,6 +142,42 @@ export function EpubReader({
     if (!viewerRef.current) return;
     let cancelled = false;
     setLoadError(null);
+    // Held so the cleanup can tear both down without going through state:
+    // destroying from inside a setRendition updater (what this used to do)
+    // puts a side effect in a function React is allowed to call more than
+    // once per commit, and a double destroy() on epub.js throws.
+    let openedBook: ReturnType<typeof ePub> | null = null;
+    let openedRendition: Rendition | null = null;
+
+    /**
+     * Destroys whatever *this* effect run created, and can be called from
+     * either side of the race without destroying anything twice.
+     *
+     * Both handles are read and nulled before either destroy() runs, so a
+     * second call is a no-op on the same objects -- which matters because
+     * epub.js throws on a double destroy.
+     *
+     * This has to be called on the cancelled paths in open(), not only from
+     * the cleanup below. open() is async, and React (in StrictMode, on every
+     * dev mount) runs effect, cleanup, effect: the cleanup fires while open()
+     * is still awaiting arrayBuffer(), so at that moment both handles are
+     * still null and the cleanup destroys nothing. open() then continues,
+     * renders an iframe into the shared container, and -- if it doesn't tear
+     * itself down here -- leaves it there next to the one the second run
+     * creates.
+     *
+     * That is not hypothetical: removing the destroy() from these paths put
+     * two live epub.js iframes in the reader at once, which the e2e suite
+     * caught as `[data-epub-reader] iframe resolved to 2 elements`.
+     */
+    function teardown() {
+      const rendition = openedRendition;
+      const book = openedBook;
+      openedRendition = null;
+      openedBook = null;
+      rendition?.destroy();
+      book?.destroy();
+    }
 
     // Whether book.locations.generate() (below) has finished -- percentage
     // is meaningless before that, but it's *also* exactly 0 for a real,
@@ -161,6 +197,14 @@ export function EpubReader({
       try {
         const data = await fileBlob.arrayBuffer();
         const book = ePub(data);
+        openedBook = book;
+        // Checked before renderTo, not only after display(): rendering puts
+        // an iframe into a container this run no longer owns, and the tidiest
+        // version of that is never to create it.
+        if (cancelled) {
+          teardown();
+          return;
+        }
         // spread: "none" -- without it, epub.js's default "auto" spread
         // pairs two spine items side by side above its own width threshold
         // (a physical-book-style two-page spread), which on a typical
@@ -175,9 +219,10 @@ export function EpubReader({
         // actually wanted here -- always-single-page removes both the
         // duplicate-cover bug and any other spine item pairing surprise.
         const r = book.renderTo(viewerRef.current!, { width: "100%", height: "100%", flow: "paginated", spread: "none" });
+        openedRendition = r;
         await r.display();
         if (cancelled) {
-          r.destroy();
+          teardown();
           return;
         }
 
@@ -190,7 +235,7 @@ export function EpubReader({
           if (firstDoc && looksLikeCoverPage(firstDoc)) {
             await r.next();
             if (cancelled) {
-              r.destroy();
+              teardown();
               return;
             }
           }
@@ -260,10 +305,15 @@ export function EpubReader({
     open();
     return () => {
       cancelled = true;
-      setRendition((prev) => {
-        prev?.destroy();
-        return null;
-      });
+      // Tears down the Book as well as the Rendition. A Book holds the
+      // unzipped archive (every chapter's XHTML, every image) plus the
+      // generated locations index -- tens of megabytes for a large EPUB, and
+      // destroying only the rendition left all of it alive for the life of
+      // the tab, once per book opened. If open() hasn't got that far yet this
+      // does nothing, and open() cleans up after itself on its cancelled
+      // paths instead.
+      teardown();
+      setRendition(null);
     };
   }, [fileBlob]);
 

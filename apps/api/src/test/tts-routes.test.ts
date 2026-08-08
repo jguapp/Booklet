@@ -5,9 +5,15 @@ import type { FastifyInstance } from "fastify";
 // The header assertions are about how the route reports timings, not about
 // the audio, so real generation would only make them slow and flaky.
 const generateSpeechWithTimings = vi.fn();
+/** Drives the route's load-shedding check; 0 means "pool is idle". */
+let queueDepth = 0;
+/** Two workers, so the cap under test is a multiple rather than the floor. */
+let poolWorkers = 2;
 vi.mock("../services/tts-pool.js", () => ({
   generateSpeechWithTimings: (...args: unknown[]) => generateSpeechWithTimings(...args),
   generateSpeechPooled: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+  ttsQueueDepth: () => queueDepth,
+  ttsPoolStatus: () => ({ started: poolWorkers > 0, workers: poolWorkers, loaded: poolWorkers }),
 }));
 
 const { buildApp } = await import("../app.js");
@@ -44,6 +50,93 @@ describe("TTS routes", () => {
       const res = await app.inject({ method: "POST", url: "/api/tts", payload: { text: "a".repeat(1001), voice: "af_heart" } });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("text_too_long");
+    });
+
+    /**
+     * The rate limit above this bounds one IP over ten minutes and says
+     * nothing about how many IPs there are, and the route is
+     * unauthenticated -- so without a depth check, N distinct callers queue
+     * an unbounded backlog of multi-second forward passes, each holding a
+     * connection open for audio that arrives long after they gave up.
+     */
+    describe("load shedding", () => {
+      it("serves normally while the queue is shallow", async () => {
+        queueDepth = 0;
+        generateSpeechWithTimings.mockResolvedValueOnce({
+          buffer: Buffer.alloc(8),
+          cacheTier: "miss",
+          queueMs: 1,
+          generateMs: 2,
+        });
+        const res = await app.inject({
+          method: "POST",
+          url: "/api/tts",
+          payload: { text: "hello", voice: "af_heart" },
+        });
+        expect(res.statusCode).toBe(200);
+      });
+
+      it("sheds with 503 and a Retry-After once the queue is at the cap", async () => {
+        // 2 workers x 8 per worker = 16.
+        queueDepth = 16;
+        const res = await app.inject({
+          method: "POST",
+          url: "/api/tts",
+          payload: { text: "hello", voice: "af_heart" },
+        });
+        expect(res.statusCode).toBe(503);
+        expect(res.json().error).toBe("overloaded");
+        // Without this the client is left to guess, and the obvious guess --
+        // retry straight away -- is what turns a busy pool into a stuck one.
+        expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
+      });
+
+      it("sheds before generation rather than after", async () => {
+        queueDepth = 16;
+        generateSpeechWithTimings.mockClear();
+        await app.inject({ method: "POST", url: "/api/tts", payload: { text: "hello", voice: "af_heart" } });
+        // The whole point is not spending the forward pass. A 503 returned
+        // after generating would cost exactly as much as serving it.
+        expect(generateSpeechWithTimings).not.toHaveBeenCalled();
+      });
+
+      it("still rejects bad input while shedding", async () => {
+        // Validation comes first, so an overloaded pool doesn't start
+        // answering 503 to requests that were never going to be generated.
+        queueDepth = 16;
+        const res = await app.inject({
+          method: "POST",
+          url: "/api/tts",
+          payload: { text: "hello", voice: "not_a_real_voice" },
+        });
+        expect(res.statusCode).toBe(400);
+      });
+
+      it("does not shed before the pool has spawned its first worker", async () => {
+        // workers is 0 until the first request arrives, and a cap computed
+        // straight from it would be 0 -- shedding the very request that
+        // starts the pool, permanently.
+        poolWorkers = 0;
+        queueDepth = 0;
+        generateSpeechWithTimings.mockResolvedValueOnce({
+          buffer: Buffer.alloc(8),
+          cacheTier: "miss",
+          queueMs: 1,
+          generateMs: 2,
+        });
+        const res = await app.inject({
+          method: "POST",
+          url: "/api/tts",
+          payload: { text: "hello", voice: "af_heart" },
+        });
+        poolWorkers = 2;
+        expect(res.statusCode).toBe(200);
+      });
+
+      afterAll(() => {
+        queueDepth = 0;
+        poolWorkers = 2;
+      });
     });
 
     it("rejects an unknown voice", async () => {

@@ -85,6 +85,26 @@ model User {
 
   resurfaceFrequency  ResurfaceFrequency @default(DAILY)
   highlightsPerDigest Int                @default(5)
+
+  /// Failed-login tracking, keyed to the account rather than the IP (#170).
+  /// Per-IP alone is the wrong unit: behind one office NAT or carrier CGNAT
+  /// hundreds of unrelated people share an address, so ten failures between
+  /// them locked out everyone there -- while an attacker, who has more
+  /// addresses than the legitimate users do, was barely inconvenienced.
+  /// These drive an escalating delay rather than a lockout: a hard lock on a
+  /// known email is itself a denial-of-service vector, so the wait grows and
+  /// self-clears instead. Reset to zero on any successful login.
+  failedLoginCount   Int       @default(0)
+  lastFailedLoginAt  DateTime?
+
+  /// Opt-in to having this account's *already-public* highlights (those on a
+  /// shared article/collection) counted toward the cross-user aggregate that
+  /// seeds new accounts -- see PublicHighlightStat (#158). Off by default,
+  /// and separate from sharing itself: publishing a page for one friend is
+  /// not consent to be mined for everyone.
+  contributesToPublicHighlights Boolean @default(false)
+
+  shares Share[]
 }
 
 // Personal access token for /api/v1 -- long-lived and revocable, unlike
@@ -340,6 +360,8 @@ model Article {
 
   highlights  Highlight[]
   collections ArticleCollection[]
+  audio       ArticleAudio?
+  shares      Share[]
   embeddings  ArticleEmbedding[]
 
   @@unique([userId, url])
@@ -441,6 +463,13 @@ model Highlight {
   /// highlight colors could be genuinely user-customizable.
   color String @default("YELLOW")
 
+  /// Optional question whose answer is this highlight (#157). When set, the
+  /// Daily Review card shows the prompt and keeps selectedText hidden until
+  /// the reader asks to see it, so the REMEMBERED/FORGOT grade that feeds
+  /// SM-2 below is grading a real retrieval attempt rather than a re-read.
+  /// null on every highlight predating this, which keeps their old behavior.
+  prompt String? @db.Text
+
   lastSurfacedAt DateTime?
   surfaceCount   Int       @default(0)
 
@@ -518,9 +547,108 @@ model Collection {
   updatedAt DateTime @updatedAt
 
   articles ArticleCollection[]
+  shares   Share[]
 
   @@unique([userId, name])
   @@index([userId, parentId])
+}
+
+/// A public, read-only page for one article's highlights or one collection's
+/// (#158). Unlisted rather than discoverable: the slug is the capability.
+///
+/// Revocation *deletes the row*. The issue asked for the slug to be
+/// regenerated rather than a boolean flipped, and deleting is the strongest
+/// form of that -- there is no soft-deleted row left holding the old slug,
+/// so a leaked URL cannot be un-revoked by flipping a column back, and
+/// re-sharing mints a genuinely new one. The cost is that view counts don't
+/// survive a revoke, which is the right trade for a privacy control.
+model Share {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The capability. Long and random -- this is the only thing standing
+  /// between an unlisted page and the public, so it is sized against
+  /// guessing, not against looking tidy in a URL bar.
+  slug String @unique
+
+  /// Exactly one of these is set. Enforced in the route rather than by the
+  /// schema: Prisma has no cross-column check constraint, and a polymorphic
+  /// `targetType`/`targetId` pair would trade that for losing the foreign
+  /// keys, which is the worse deal -- these cascade correctly when the
+  /// article or collection is deleted, so a share can never outlive what it
+  /// points at.
+  articleId    String?
+  article      Article?    @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  collectionId String?
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  viewCount Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([articleId])
+  @@index([collectionId])
+}
+
+/// One concatenated audio file per article, for the podcast feed's enclosure
+/// (#154). Podcast clients want a single file per item; TTS generates per
+/// chunk, so this is where the joined result lives.
+///
+/// Its own model rather than four more nullable columns on Article: it is
+/// derived, regenerable, and wants deleting wholesale when the voice changes
+/// or the article's text does. A row here is also the cheapest way to answer
+/// "has this been generated yet" without a storage round trip, which the
+/// feed needs for every item it lists.
+model ArticleAudio {
+  articleId String  @id
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  storageKey String
+  /// Needed for the RSS <enclosure length> attribute, which is mandatory and
+  /// which some clients use to show download progress before fetching.
+  bytes           Int
+  durationSeconds Int
+  /// Regeneration triggers: audio generated with a different voice or speed
+  /// than the user now prefers is stale and gets rebuilt.
+  voice String
+  speed Float
+
+  generatedAt DateTime @default(now())
+}
+
+/// Cross-user aggregate of which passages people highlight (#158 part 2),
+/// used to seed new accounts with something worth reading on day one.
+///
+/// Deliberately stores no user ids and no highlight ids -- only a normalized
+/// passage, where it came from, and how many *distinct* accounts highlighted
+/// it. There is no join back to an individual, by construction rather than
+/// by policy, so this table cannot be the thing that deanonymizes someone
+/// even if it leaks.
+model PublicHighlightStat {
+  id String @id @default(cuid())
+
+  /// Whitespace- and case-normalized passage text, hashed. The hash is the
+  /// identity so that near-identical highlights of the same sentence
+  /// collapse into one row; the readable text is kept alongside for display.
+  textHash String @unique
+  text     String @db.Text
+
+  /// Attribution, carried so a surfaced passage can always point back at its
+  /// source. Denormalized on purpose: the article rows these came from belong
+  /// to individual users and may be deleted, and the aggregate must not hold
+  /// a reference into anyone's library.
+  sourceTitle String?
+  sourceUrl   String?
+  sourceAuthor String?
+
+  /// Distinct contributing accounts. Nothing surfaces below the threshold in
+  /// aggregation-service.ts -- below it, "an aggregate" is just one person's
+  /// library with extra steps.
+  userCount   Int      @default(0)
+  lastSeenAt  DateTime @default(now())
+
+  @@index([userCount])
 }
 
 model ArticleCollection {

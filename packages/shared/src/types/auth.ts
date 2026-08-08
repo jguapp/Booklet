@@ -11,6 +11,14 @@ export interface UserProfile {
   email: string;
   name: string | null;
   emailVerified: boolean;
+  /**
+   * False for an account created through OAuth that never set a password
+   * (User.passwordHash is null). The client needs this to know which
+   * confirmation DELETE /api/auth/me will accept -- password re-entry, or a
+   * typed email address for accounts that have no password to re-enter.
+   * The hash itself is of course never sent.
+   */
+  hasPassword: boolean;
   resurfaceFrequency: ResurfaceFrequency;
   highlightsPerDigest: number;
   /** Amazon's per-account "Send to Kindle" address -- null until set in Settings. */
@@ -64,6 +72,19 @@ export interface ResetPasswordRequest {
 
 export interface VerifyEmailRequest {
   token: string;
+}
+
+/**
+ * Body of DELETE /api/auth/me. Exactly one of these is the confirmation the
+ * server will accept, and which one depends on the account rather than on
+ * the caller's preference: `password` for an account that has one,
+ * `confirmEmail` (the account's own address, typed out) for an OAuth-only
+ * account where there is no password to check. Sending the other one is
+ * refused rather than ignored -- see the route.
+ */
+export interface DeleteAccountRequest {
+  password?: string;
+  confirmEmail?: string;
 }
 
 export interface SessionInfo {

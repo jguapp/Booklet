@@ -11,6 +11,7 @@ import { useDevicePrefs } from "@/lib/data/device-prefs-provider";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { searchLibrary } from "@/lib/data/search";
 import { fuzzyScore } from "@/lib/command-palette/fuzzy-match";
+import { useModalFocus } from "@/lib/a11y/modal-focus";
 import { cn } from "@/lib/cn";
 
 interface NavItem {
@@ -69,18 +70,12 @@ export function CommandPalette({ navItems, collections, onClose }: CommandPalett
   });
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onClose);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
 
   useEffect(() => {
     const q = query.trim();
@@ -221,6 +216,7 @@ export function CommandPalette({ navItems, collections, onClose }: CommandPalett
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"

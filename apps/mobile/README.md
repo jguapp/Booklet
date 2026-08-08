@@ -157,6 +157,41 @@ Also needed `@babel/runtime` as an explicit direct dependency (joining
 Metro's transform workers need it resolvable from this app's own
 `node_modules`, and pnpm doesn't hoist transitive deps there by default.
 
+### Changed since that pass, and not re-run
+
+A later audit against the web app's `lib/data/*` found divergences and
+unhandled async paths and fixed them. `tsc --noEmit` is clean, but **none of
+the following has been executed** -- not on a device, not on the web target:
+
+- **Migration is now batched** (`src/lib/data/sync.ts`), the way the web
+  client's is. It used to POST the whole local library as one body against a
+  32MB route limit, which a few image-heavy saves exceed on their own; the
+  failure surfaced as a signed-in library that was simply empty. Batches are
+  cleared from AsyncStorage only after the server accepts them, and
+  `localArticles.deleteMany` exists because clearing a batch with a
+  `Promise.all` of single-id deletes would have had them overwrite each
+  other -- every entity type is one JSON map under one key.
+- **Highlight colors** come from `@booklet/shared` rather than a hand-copied
+  list. `HighlightColor` is any legacy name *or* a literal `#RRGGBB` now, and
+  a custom color from the web found no entry in that list, so it rendered with
+  no background at all.
+- **`textSource` and `canonicalUrl`** are populated on locally-saved articles,
+  matching the web app: the first is the only marker that a PDF's text came
+  from OCR, the second is what makes local duplicate detection catch a
+  tracking-param variant of an already-saved URL.
+- **Error handling** on every async path that previously rejected into
+  nothing: library load, collection membership load and toggle, file picker,
+  logout, article load, highlight removal, Daily Review load and grading, the
+  startup session check, and the login-time migration. Several of these left
+  the user with no feedback at all -- a blank Daily Review, a "Nothing here
+  yet." that meant "couldn't reach the API", a launch spinner that never
+  cleared if the stored session was corrupt.
+
+Worth re-checking first on a real device: that the migration notice actually
+renders on the Library screen (it is a `Text` row, not an `Alert`, precisely
+because react-native-web's `Alert.alert` is a no-op), and that a batched
+migration of a genuinely large library completes.
+
 Still real, unresolved gaps: this environment has no iOS Simulator,
 Android emulator, or physical device, so `ios`/`android` remain
 type-checked-only, not run. And still out of reach entirely: publishing to

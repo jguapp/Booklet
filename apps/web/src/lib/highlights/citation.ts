@@ -1,5 +1,5 @@
 import type { Highlight } from "@booklet/shared";
-import { EpubCFI } from "epubjs";
+import { cfiSpinePosition } from "./cfi";
 
 /** "p. 42" for a PDF highlight (the page number is already captured on
  * every PdfPosition, just never surfaced anywhere). "Section 4" for an
@@ -20,8 +20,8 @@ export function highlightCitation(highlight: Highlight, extractedText?: string |
   const position = highlight.position;
   if (position.type === "pdf") return `p. ${position.pageNumber}`;
   if (position.type === "epub") {
-    const spinePos = new EpubCFI(position.cfi).spinePos;
-    return typeof spinePos === "number" && spinePos >= 0 ? `Section ${spinePos + 1}` : null;
+    const spinePos = cfiSpinePosition(position.cfi);
+    return spinePos >= 0 ? `Section ${spinePos + 1}` : null;
   }
   if (position.type === "text") {
     if (!extractedText) return null;

@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
-import type { CreateArticleRequest, CreateHighlightRequest, HighlightPosition } from "@booklet/shared";
-import { canonicalizeUrl, isValidHighlightColor } from "@booklet/shared";
+import type { CreateArticleRequest, CreateHighlightRequest } from "@booklet/shared";
+import { canonicalizeUrl, isValidHighlightColor, isValidRecallPrompt, normalizeRecallPrompt } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
+import { sanitizeArticleHtml } from "../lib/sanitize.js";
 import { requireAuth, requireWriteScope } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
 import { toArticle, toSummary } from "./articles.js";
-import { toHighlight } from "./highlights.js";
+import { isValidPosition, toHighlight } from "./highlights.js";
 import { toCollection } from "./collections.js";
 
 const LIST_PAGE_SIZE = 30;
@@ -14,12 +15,6 @@ const LIST_PAGE_SIZE = 30;
 // Zapier connection shouldn't be able to run up against (or exhaust) the
 // same limit the web app's own UI relies on.
 const V1_RATE_LIMIT = { max: 100, timeWindow: "1 minute" };
-
-function isValidPosition(value: unknown): value is HighlightPosition {
-  if (typeof value !== "object" || value === null) return false;
-  const type = (value as Record<string, unknown>).type;
-  return type === "text" || type === "pdf" || type === "epub";
-}
 
 /**
  * The public, versioned surface for personal access tokens (see
@@ -87,7 +82,8 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
         sourceType: "HTML",
         extractionStatus: extracted ? "SUCCESS" : "FAILED",
         extractionError,
-        extractedHtml: extracted?.html ?? null,
+        // Sanitized before storage -- see routes/articles.ts.
+        extractedHtml: sanitizeArticleHtml(extracted?.html),
         extractedText: extracted?.text ?? null,
         readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
         skippedImageCount: extracted?.skippedImageCount ?? 0,
@@ -114,7 +110,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
   });
 
   app.post<{ Body: CreateHighlightRequest }>("/api/v1/highlights", writeOpts, async (request, reply) => {
-    const { articleId, selectedText, position, color, noteText } = request.body ?? {};
+    const { articleId, selectedText, position, color, noteText, prompt } = request.body ?? {};
     if (typeof articleId !== "string" || !articleId) {
       return reply.code(400).send({ error: "invalid_article", message: "articleId is required." });
     }
@@ -126,6 +122,9 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     }
     if (typeof color !== "string" || !isValidHighlightColor(color)) {
       return reply.code(400).send({ error: "invalid_color", message: "Invalid highlight color." });
+    }
+    if (!isValidRecallPrompt(prompt)) {
+      return reply.code(400).send({ error: "invalid_prompt", message: "Invalid recall prompt." });
     }
 
     const article = await prisma.article.findFirst({ where: { id: articleId, userId: request.userId! } });
@@ -139,6 +138,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
         selectedText,
         position: position as object,
         color,
+        prompt: normalizeRecallPrompt(prompt),
         ...(trimmedNote ? { annotation: { create: { userId: request.userId!, noteText: trimmedNote } } } : {}),
       },
       include: { annotation: true },

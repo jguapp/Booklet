@@ -2,10 +2,18 @@
  * The local-vs-synced swap point for highlights -- mirrors the web app's
  * lib/data/highlights.ts, scoped to what the mobile reader and Daily
  * Review screen actually do (create/list/delete while reading, list-all +
- * feedback for resurfacing). No notes/annotations UI on mobile yet.
+ * feedback for resurfacing).
+ *
+ * Deliberately absent, because no screen here has the control that would
+ * call them: saveNote / deleteNote (no annotations UI) and
+ * saveHighlightPrompt (no prompt-authoring UI, #157). Prompts written on the
+ * web still sync down and are honored by DailyReviewScreen's reveal step, so
+ * the feature is read-only here rather than missing. updateHighlightFeedback
+ * below still applies a `prompt` in its patch if one ever arrives -- see the
+ * comment there.
  */
 import type { Highlight, HighlightColor, HighlightPosition, UpdateHighlightRequest } from "@booklet/shared";
-import { DEFAULT_SM2_STATE } from "@booklet/shared";
+import { DEFAULT_SM2_STATE, normalizeRecallPrompt } from "@booklet/shared";
 import { apiFetch } from "../api";
 import { generateLocalId, localHighlights } from "../local/db";
 
@@ -37,6 +45,9 @@ export async function createHighlight(input: CreateHighlightInput, authenticated
     selectedText: input.selectedText,
     position: input.position,
     color: input.color,
+    // No prompt-authoring UI on mobile yet -- prompts written on the web sync
+    // down and are honored by DailyReviewScreen's reveal step all the same.
+    prompt: null,
     lastSurfacedAt: null,
     surfaceCount: 0,
     lastFeedback: null,
@@ -71,6 +82,13 @@ export async function updateHighlightFeedback(
   const updated: Highlight = {
     ...highlight,
     ...(patch.color !== undefined ? { color: patch.color } : {}),
+    // Handled even though no mobile screen writes a prompt yet. The
+    // authenticated branch above forwards the whole patch to the API, so a
+    // caller that sent one would have it saved when signed in and silently
+    // dropped when signed out -- the exact asymmetry that makes local mode
+    // untrustworthy. normalizeRecallPrompt matches every other writer
+    // (see packages/shared/src/recall-prompt.ts).
+    ...(patch.prompt !== undefined ? { prompt: normalizeRecallPrompt(patch.prompt) } : {}),
     ...(patch.resurfaceArchivedAt !== undefined ? { resurfaceArchivedAt: patch.resurfaceArchivedAt } : {}),
     ...(patch.lastSurfacedAt !== undefined ? { lastSurfacedAt: patch.lastSurfacedAt } : {}),
     ...(patch.surfaceCount !== undefined ? { surfaceCount: patch.surfaceCount } : {}),

@@ -145,6 +145,7 @@ export function HighlightColorPicker() {
             onKeyDown={(e) => {
               if (e.key === "Enter") addHex(hexDraft);
             }}
+            aria-label="Custom highlight colour, as a hex code"
             placeholder="#7EC8E3"
             maxLength={7}
             className={cn(

@@ -13,6 +13,32 @@ let barStatus: HTMLElement;
 let barButton: HTMLButtonElement;
 let pendingRange: Range | null = null;
 let selectedMarkId: string | null = null;
+let uiReady = false;
+
+/**
+ * Build the UI on first use, not on page load.
+ *
+ * The content script matches every http(s) page (see manifest.json), which
+ * it has to: highlighting cannot ask you to declare in advance which pages
+ * you might highlight on. What it does *not* have to do is mutate every one
+ * of those pages on arrival. buildUi() appends a host element to
+ * <html> and a <style> to <head>, and doing that at document_idle meant this
+ * extension modified the DOM of every page the user visited -- their bank,
+ * their webmail, an internal admin tool -- whether or not they ever used it
+ * there. That shows up in the page's own MutationObservers, in anything
+ * fingerprinting the DOM, and in a CSP report for a site that restricts
+ * inline styles.
+ *
+ * Deferring it means a page the user only reads is left byte-for-byte alone.
+ * The trigger is a real text selection, a click on an existing mark, or a
+ * page that already has stored highlights to restore -- all three are the
+ * user having actually engaged with the feature.
+ */
+function ensureUi(): void {
+  if (uiReady) return;
+  buildUi();
+  uiReady = true;
+}
 
 /**
  * The page's own CSS is hostile by default -- a site with
@@ -126,6 +152,9 @@ function showToolbar(x: number, y: number, buttons: { label: string; onClick: ()
 }
 
 function hideToolbar(): void {
+  // Nothing to hide before the UI exists, and no state to clear either --
+  // pendingRange and selectedMarkId are only ever set alongside it.
+  if (!uiReady) return;
   toolbar.removeAttribute("data-open");
   pendingRange = null;
   selectedMarkId = null;
@@ -133,14 +162,18 @@ function hideToolbar(): void {
 
 function renderBar(): void {
   if (highlights.length === 0) {
-    bar.removeAttribute("data-open");
+    if (uiReady) bar.removeAttribute("data-open");
     return;
   }
+  ensureUi();
   bar.setAttribute("data-open", "");
   barCount.textContent = `${highlights.length} highlight${highlights.length === 1 ? "" : "s"}`;
 }
 
 function setStatus(message: string, isError = false): void {
+  // Every caller runs off the bar or the toolbar, so the UI is always up by
+  // now; this is here so a future one can't crash a page on a null reference.
+  if (!uiReady) return;
   barStatus.textContent = message;
   if (isError) barStatus.setAttribute("data-error", "");
   else barStatus.removeAttribute("data-error");
@@ -150,21 +183,36 @@ async function addHighlight(range: Range): Promise<void> {
   const anchor = anchorFromRange(buildTextMap(document.body), range);
   if (!anchor) return;
 
+  ensureUi();
   const highlight: StoredHighlight = { ...anchor, id: crypto.randomUUID(), createdAt: new Date().toISOString() };
   paintRange(range, highlight.id, MARK_CLASS);
   window.getSelection()?.removeAllRanges();
 
   highlights = [...highlights, highlight];
-  await setPageHighlights(location.href, highlights);
-  setStatus("");
   renderBar();
+  // Kept painted and importable even if the write fails -- it is usable for
+  // the rest of this page view, and "Open in Booklet" is right there. What is
+  // not acceptable is the silence: chrome.storage.local has a quota, this
+  // used to reject into nothing, and the highlight then vanished on the next
+  // reload having looked saved the whole time.
+  try {
+    await setPageHighlights(location.href, highlights);
+    setStatus("");
+  } catch {
+    setStatus("Couldn't save this for later -- import before reloading.", true);
+  }
 }
 
 async function removeHighlight(id: string): Promise<void> {
   unpaint(id);
   highlights = highlights.filter((h) => h.id !== id);
-  await setPageHighlights(location.href, highlights);
   renderBar();
+  try {
+    await setPageHighlights(location.href, highlights);
+  } catch {
+    // Removed on screen but still in storage, so a reload brings it back.
+    setStatus("Couldn't save that removal.", true);
+  }
 }
 
 async function importPage(): Promise<void> {
@@ -188,8 +236,15 @@ async function importPage(): Promise<void> {
     // import is confirmed would silently lose highlights on any failure.
     for (const highlight of highlights) unpaint(highlight.id);
     highlights = [];
-    await setPageHighlights(location.href, highlights);
     renderBar();
+    try {
+      await setPageHighlights(location.href, highlights);
+    } catch {
+      // They are already on the server, so a reload resurrecting them here is
+      // cosmetic rather than duplicating: the import route dedupes highlights
+      // by (article, text, position). Worth saying, not worth failing over.
+      setStatus("Imported, but couldn't clear this page's copy.", true);
+    }
   } catch {
     setStatus("Couldn't reach Booklet.", true);
   } finally {
@@ -206,9 +261,12 @@ function onSelectionSettled(): void {
   }
 
   const range = selection.getRangeAt(0);
-  // A selection inside our own UI isn't a page selection.
-  if (shadow.host.contains(range.commonAncestorContainer)) return;
+  // A selection inside our own UI isn't a page selection. Only possible once
+  // that UI exists, hence the guard rather than an unconditional check.
+  if (uiReady && shadow.host.contains(range.commonAncestorContainer)) return;
 
+  // First real selection on this page is what brings the UI into existence.
+  ensureUi();
   pendingRange = range.cloneRange();
   const rect = range.getBoundingClientRect();
   showToolbar(rect.left + rect.width / 2, rect.top, [
@@ -235,6 +293,9 @@ function onDocumentClick(event: MouseEvent): void {
   const id = mark.dataset.bookletHighlightId;
   if (!id) return;
 
+  // A mark can only exist if restore() or addHighlight() painted it, both of
+  // which build the UI first -- but showToolbar dereferences it either way.
+  ensureUi();
   selectedMarkId = id;
   const rect = mark.getBoundingClientRect();
   showToolbar(rect.left + rect.width / 2, rect.top, [
@@ -249,9 +310,14 @@ function onDocumentClick(event: MouseEvent): void {
 }
 
 async function restore(): Promise<void> {
-  highlights = await getPageHighlights(location.href);
+  highlights = await getPageHighlights(location.href).catch(() => []);
+  // The overwhelmingly common case, and the one that must leave the page
+  // untouched: nothing was ever highlighted here, so nothing is injected.
   if (highlights.length === 0) return;
 
+  // Before painting: the <mark> rule buildUi() adds to document.head is what
+  // makes a restored highlight visible at all.
+  ensureUi();
   const map = buildTextMap(document.body);
   const stillResolvable: StoredHighlight[] = [];
   for (const highlight of highlights) {
@@ -273,14 +339,18 @@ function init(): void {
   if (window.top !== window) return;
   if (!/^https?:$/.test(location.protocol)) return;
 
-  buildUi();
+  // Listeners only. The UI itself is built on first use -- see ensureUi().
   document.addEventListener("mouseup", () => setTimeout(onSelectionSettled, 0));
   document.addEventListener("click", onDocumentClick, true);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") hideToolbar();
   });
 
-  void restore();
+  void restore().catch((err) => {
+    // restore() is fire-and-forget from here; an unhandled rejection in a
+    // content script surfaces as a console error on someone else's page.
+    console.error("[booklet] couldn't restore this page's highlights", err);
+  });
 }
 
 try {

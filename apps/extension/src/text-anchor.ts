@@ -104,7 +104,7 @@ export function anchorFromRange(map: TextMap, range: Range): TextAnchor | null {
 }
 
 /** Turn a character range back into a DOM Range spanning the same text. */
-export function rangeFromOffsets(map: TextMap, start: number, end: number): Range | null {
+function rangeFromOffsets(map: TextMap, start: number, end: number): Range | null {
   const startEntry = map.nodes.find((n) => start >= n.start && start < n.end);
   const endEntry = map.nodes.find((n) => end > n.start && end <= n.end);
   if (!startEntry || !endEntry) return null;

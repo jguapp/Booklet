@@ -1,7 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { KOKORO_VOICE_IDS } from "@booklet/shared";
 import { isAllowedOrigin } from "../lib/cors.js";
-import { generateSpeechPooled, generateSpeechWithTimings } from "../services/tts-pool.js";
+import {
+  generateSpeechPooled,
+  generateSpeechWithTimings,
+  ttsPoolStatus,
+  ttsQueueDepth,
+} from "../services/tts-pool.js";
 
 /**
  * Public (no auth) -- same reasoning as /api/extract: TTS doesn't persist
@@ -51,6 +56,36 @@ const TTS_WARM_LIMIT = {
 const MAX_WARM_CHUNKS = 8;
 const MAX_WARM_TOTAL_CHARS = 2000;
 
+/**
+ * How deep the pool's queue may get before this route starts shedding.
+ *
+ * The rate limit above bounds one IP; it says nothing about how many IPs
+ * there are, and this route is unauthenticated. Nothing else stood between a
+ * few hundred distinct callers and an unbounded queue of multi-second
+ * forward passes -- and queueing is the wrong response to more work than the
+ * machine can do, because every waiting caller is holding a connection open
+ * for audio that will arrive long after the reader has given up. The failure
+ * is worse than it looks from the server side: the client requests chunks
+ * in order, so a caller who waits two minutes for chunk 3 hears nothing at
+ * all, rather than hearing something slightly late.
+ *
+ * A 503 is the honest answer to "we cannot do this right now", and it is
+ * also the actionable one -- the client's chunk loop already tolerates a
+ * failed chunk, and Retry-After tells it when to come back instead of
+ * leaving it to guess.
+ *
+ * Sized as a multiple of the pool rather than a flat number, because what
+ * counts as "too deep" is entirely a function of how fast the queue drains.
+ * At ~5s per forward pass, 8 deep per worker is roughly 40 seconds of
+ * backlog: comfortably above the burst a single reader's prefetch produces
+ * (six chunks ahead, and those are deduplicated by key), and well below the
+ * point where waiting is pointless.
+ */
+const TTS_MAX_QUEUE_PER_WORKER = Number(process.env.TTS_MAX_QUEUE_PER_WORKER) || 8;
+
+/** Seconds. Roughly the time it takes the queue to drain from the cap. */
+const TTS_SHED_RETRY_AFTER_SECONDS = 30;
+
 interface TtsRequestBody {
   text?: string;
   voice?: string;
@@ -94,6 +129,24 @@ export async function registerTtsRoute(app: FastifyInstance): Promise<void> {
     }
     const checked = checkVoiceAndSpeed(voice, speed);
     if (!checked.ok) return reply.code(400).send({ error: checked.error, message: checked.message });
+
+    // Shed before enqueuing, not after. Checked here rather than inside the
+    // pool because the pool has no reply to send -- and because warming and
+    // the podcast generator legitimately queue past this point, while an
+    // anonymous request for audio nobody is waiting on yet does not.
+    //
+    // Math.max(1, ...) because the pool spawns lazily: workers is 0 until the
+    // first request, and a cap of zero would shed the very request that
+    // starts the pool.
+    const { workers } = ttsPoolStatus();
+    const maxQueueDepth = Math.max(1, workers) * TTS_MAX_QUEUE_PER_WORKER;
+    if (ttsQueueDepth() >= maxQueueDepth) {
+      request.log.warn({ queueDepth: ttsQueueDepth(), maxQueueDepth }, "[tts] shedding load");
+      return reply
+        .code(503)
+        .header("Retry-After", String(TTS_SHED_RETRY_AFTER_SECONDS))
+        .send({ error: "overloaded", message: "Speech generation is busy right now. Try again shortly." });
+    }
 
     try {
       const result = await generateSpeechWithTimings(text, checked.voice, checked.speed);

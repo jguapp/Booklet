@@ -6,7 +6,7 @@ import { applySm2Review, feedbackToQuality, selectHighlightsToResurface } from "
 import { Button } from "@/components/ui/button";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
 import { loadArticles } from "@/lib/data/articles";
-import { loadHighlights, updateHighlightFeedback } from "@/lib/data/highlights";
+import { loadHighlights, saveHighlightPrompt, updateHighlightFeedback } from "@/lib/data/highlights";
 import { emailDigest, loadCurrentDigest } from "@/lib/data/digests";
 import { loadUserSettings } from "@/lib/mock/store";
 import { formatNextDue } from "@/lib/format";
@@ -31,6 +31,11 @@ export default function ResurfacePage() {
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
   const [digestId, setDigestId] = useState<string | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
+  // Which prompted highlights have had their passage revealed this session,
+  // keyed by id rather than held as one "revealed" flag for the card on
+  // screen: the batch is a list, and a single flag would leak across it,
+  // showing the next highlight's answer before its question was even asked.
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("REMEMBERED");
@@ -170,6 +175,21 @@ export default function ResurfacePage() {
     }
   }
 
+  async function handleSavePrompt(highlightId: string, prompt: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await saveHighlightPrompt(target, prompt, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+    toast("Prompt saved — you'll be asked this before seeing the highlight.");
+  }
+
+  async function handleDeletePrompt(highlightId: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await saveHighlightPrompt(target, null, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+  }
+
   async function handleEmailDigest() {
     if (!digestId) return;
     setEmailStatus("Sending…");
@@ -216,26 +236,43 @@ export default function ResurfacePage() {
       )}
 
       <div className="flex flex-col gap-3">
-        {batch.map((h) => (
-          <HighlightListItem
-            key={h.id}
-            highlight={h}
-            article={articleById.get(h.articleId)}
-            actions={
-              <>
-                <Button variant="secondary" onClick={() => applyFeedback(h.id, "FORGOT", false)}>
-                  Forgot this
-                </Button>
-                <Button variant="secondary" onClick={() => applyFeedback(h.id, null, true)}>
-                  Archive
-                </Button>
-                <Button variant="primary" onClick={() => applyFeedback(h.id, "REMEMBERED", false)}>
-                  Remembered this
-                </Button>
-              </>
-            }
-          />
-        ))}
+        {batch.map((h) => {
+          // A prompted highlight is concealed until revealed. Grading is
+          // withheld for exactly as long: "remembered this" answered against
+          // a passage you are looking at is a recognition judgment, and
+          // feeding that to SM-2 is what #157 set out to stop. Archive stays
+          // available throughout -- deciding you're done with a highlight
+          // isn't a recall judgment and needs no answer.
+          const concealed = !!h.prompt && !revealedIds.has(h.id);
+          return (
+            <HighlightListItem
+              key={h.id}
+              highlight={h}
+              article={articleById.get(h.articleId)}
+              concealed={concealed}
+              onReveal={() => setRevealedIds((prev) => new Set(prev).add(h.id))}
+              actions={
+                concealed ? (
+                  <Button variant="secondary" onClick={() => applyFeedback(h.id, null, true)}>
+                    Archive
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="secondary" onClick={() => applyFeedback(h.id, "FORGOT", false)}>
+                      Forgot this
+                    </Button>
+                    <Button variant="secondary" onClick={() => applyFeedback(h.id, null, true)}>
+                      Archive
+                    </Button>
+                    <Button variant="primary" onClick={() => applyFeedback(h.id, "REMEMBERED", false)}>
+                      Remembered this
+                    </Button>
+                  </>
+                )
+              }
+            />
+          );
+        })}
       </div>
 
       <div className="mt-12 border-t border-border pt-8">
@@ -290,6 +327,12 @@ export default function ResurfacePage() {
                     highlight={h}
                     article={articleById.get(h.articleId)}
                     extraMeta={libraryTab === "ARCHIVED" ? "Won't resurface again" : formatNextDue(h.nextDueAt)}
+                    // Never concealed here: the library is for browsing what
+                    // you've reviewed, not for reviewing. It's also the one
+                    // place a prompt can be written for a highlight that's
+                    // already in rotation.
+                    onSavePrompt={handleSavePrompt}
+                    onDeletePrompt={handleDeletePrompt}
                     actions={
                       libraryTab === "ARCHIVED" ? (
                         <Button variant="secondary" onClick={() => handleRestore(h.id)}>

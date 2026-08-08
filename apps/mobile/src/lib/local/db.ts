@@ -6,6 +6,21 @@
  * a flat key/value store (no indexes, no transactions), so each entity
  * type is kept as a single JSON-encoded map of id -> record rather than
  * IndexedDB's per-row storage.
+ *
+ * That single-map shape is also why deleting several records needs
+ * deleteMany() rather than a Promise.all of delete() calls -- see the note
+ * on localArticles.deleteMany.
+ *
+ * One thing the web layer has and this one does not: normalize-on-read
+ * (normalizeArticle / normalizeCollection there). Those exist because that
+ * store has shipped and holds rows written before fields like `tags`,
+ * `canonicalUrl` and `textSource` existed, which TypeScript believes are
+ * present and which are not. Nothing on a device has ever written to this
+ * store -- see the repo's #1/#2, no build has been run on real hardware --
+ * so there is no old shape to normalize *yet*. The first release changes
+ * that: anything added to Article, Collection or Highlight after it ships
+ * needs a normalizer here, or reads will hand out records with undefined
+ * where a number or an array is declared.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Article, Collection, Highlight } from "@booklet/shared";
@@ -56,9 +71,19 @@ export const localArticles = {
     map[article.id] = article;
     await writeMap(ARTICLES_KEY, map);
   },
-  async delete(id: string): Promise<void> {
+  /**
+   * One read-modify-write for the whole set, and the only safe way to remove
+   * more than one record here. Every entity type is a single JSON-encoded
+   * map under one key (AsyncStorage has no transactions), so N concurrent
+   * single-id deletes each read the *same* map, remove their own id, and
+   * write the whole thing back -- last writer wins and every other deletion
+   * is silently undone. The migration in data/sync.ts clears a batch of
+   * articles at once, which is exactly that shape.
+   */
+  async deleteMany(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
     const map = await readMap<Article>(ARTICLES_KEY);
-    delete map[id];
+    for (const id of ids) delete map[id];
     await writeMap(ARTICLES_KEY, map);
   },
   async clear(): Promise<void> {
@@ -83,6 +108,13 @@ export const localHighlights = {
     delete map[id];
     await writeMap(HIGHLIGHTS_KEY, map);
   },
+  /** See localArticles.deleteMany -- same lost-update hazard, same fix. */
+  async deleteMany(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const map = await readMap<Highlight>(HIGHLIGHTS_KEY);
+    for (const id of ids) delete map[id];
+    await writeMap(HIGHLIGHTS_KEY, map);
+  },
   async clear(): Promise<void> {
     await AsyncStorage.removeItem(HIGHLIGHTS_KEY);
   },
@@ -97,11 +129,10 @@ export const localCollections = {
     map[collection.id] = collection;
     await writeMap(COLLECTIONS_KEY, map);
   },
-  async delete(id: string): Promise<void> {
-    const map = await readMap<Collection>(COLLECTIONS_KEY);
-    delete map[id];
-    await writeMap(COLLECTIONS_KEY, map);
-  },
+  // No delete(): there is no delete-collection control on any mobile screen
+  // (see data/collections.ts), and an unreachable one here would also need
+  // the web app's cascade -- reparent the children, drop the join rows --
+  // which is real behaviour nothing would be exercising.
   async clear(): Promise<void> {
     await AsyncStorage.removeItem(COLLECTIONS_KEY);
   },
@@ -110,9 +141,6 @@ export const localCollections = {
 export const localArticleCollections = {
   async getAll(): Promise<LocalArticleCollection[]> {
     return Object.values(await readMap<LocalArticleCollection>(ARTICLE_COLLECTIONS_KEY));
-  },
-  async getForArticle(articleId: string): Promise<LocalArticleCollection[]> {
-    return (await this.getAll()).filter((l) => l.articleId === articleId);
   },
   async getForCollection(collectionId: string): Promise<LocalArticleCollection[]> {
     return (await this.getAll()).filter((l) => l.collectionId === collectionId);

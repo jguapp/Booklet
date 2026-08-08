@@ -22,11 +22,12 @@ const SCROLL_DISMISS_PX = 8;
 
 /**
  * Whether the page has moved far enough since the popover opened to dismiss
- * it. Extracted from the scroll handler purely so it can be unit-tested --
- * the rule is subtle enough to have already been wrong once, and testing it
- * through a rendered component is currently blocked (see #166).
+ * it. Named rather than inlined because the rule is subtle enough to have
+ * already been wrong once. It used to be exported so it could be unit-tested
+ * in isolation, which #166 made unnecessary -- highlight-popover.test.tsx now
+ * drives the real component through real scroll events.
  */
-export function hasScrolledAway(openedAtScrollY: number, currentScrollY: number): boolean {
+function hasScrolledAway(openedAtScrollY: number, currentScrollY: number): boolean {
   return Math.abs(currentScrollY - openedAtScrollY) > SCROLL_DISMISS_PX;
 }
 
@@ -175,6 +176,7 @@ export function HighlightPopover({ anchorRect, selectedText, onConfirm, onDismis
             autoFocus
             value={note}
             onChange={(e) => setNote(e.target.value)}
+            aria-label="Note"
             placeholder="Add a note…"
             rows={2}
             className="w-56 resize-none rounded-sm border border-border bg-paper px-2.5 py-2 font-sans text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:ring-2 focus-visible:ring-accent"

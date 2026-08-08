@@ -108,27 +108,17 @@ function loadModel(): Promise<KokoroTTS> {
 }
 
 /** Loads the model, propagating failure to the caller. Used by the pool
- * worker, which has to report whether the load actually succeeded -- see
- * warmTtsModel below for why it cannot use that instead. */
+ * worker, which has to report whether the load actually succeeded.
+ *
+ * This deliberately has no error-swallowing sibling. There used to be a
+ * `warmTtsModel()` that caught and logged instead of throwing, and a worker
+ * built on it reported "loaded" even when the load had failed -- the exact
+ * lie /api/health exists to stop telling (#161). Caught for real: with the
+ * weights CDN unreachable, health cheerfully reported loaded: 1. Anything
+ * that only wants best-effort warming should catch here, at its own call
+ * site, rather than reintroduce a load that cannot fail. */
 export function loadTtsModel(): Promise<KokoroTTS> {
   return loadModel();
-}
-
-/** Warms the model on server startup rather than the first request paying
- * for it -- see app.ts. Failures here are logged, not thrown: TTS being
- * temporarily unavailable shouldn't take the whole API down.
- *
- * Deliberately NOT what the pool worker awaits to decide readiness: because
- * this resolves either way, a worker built on it reports "loaded" even when
- * the model failed -- which is the exact lie /api/health exists to stop
- * telling (#161). Caught here for real: with the weights CDN unreachable,
- * health cheerfully reported loaded: 1. */
-export async function warmTtsModel(): Promise<void> {
-  try {
-    await loadModel();
-  } catch (err) {
-    console.error("[tts] failed to warm the model at startup:", err);
-  }
 }
 
 export class TtsGenerationError extends Error {}

@@ -19,6 +19,7 @@
     "@datadog/browser-rum": "^7.7.0",
     "@huggingface/transformers": "^3.8.1",
     "@sentry/browser": "^10.68.0",
+    "dompurify": "3.2.3",
     "epubjs": "^0.3.93",
     "jszip": "^3.10.1",
     "minisearch": "^7.2.0",

@@ -9,6 +9,7 @@ import type {
 } from "@booklet/shared";
 import { canonicalizeUrl } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
+import { sanitizeArticleHtml } from "../lib/sanitize.js";
 import { utcMidnight } from "../lib/dates.js";
 import { requireAuth } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
@@ -19,12 +20,48 @@ import { deleteStoredFile, saveFile, streamStoredFile } from "../services/storag
 import { isAllowedOrigin } from "../lib/cors.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
 import { sendEmail } from "../services/email-service.js";
+import { isKindleAddress } from "./auth.js";
 import { indexArticleEmbeddings } from "../services/article-embedding-service.js";
 
 export type ArticleRow = Awaited<ReturnType<typeof prisma.article.findFirstOrThrow>>;
 
 const STATUSES: ArticleStatus[] = ["UNREAD", "READING", "ARCHIVED"];
 const LIST_PAGE_SIZE = 30;
+
+/**
+ * The one route in this app that sends mail somewhere the account holder
+ * typed, with a body they control, and it had no limit of its own -- so the
+ * API-wide 300/minute was the whole bound on how much mail one account could
+ * make this server's provider send. Everything else about the request is
+ * attacker-shaped too: POST /api/sync/import accepts arbitrary extractedHtml
+ * and a title, so the attachment's contents are chosen, not extracted. That
+ * is a spam relay with our envelope sender on it, and the cost of it landing
+ * is the domain's deliverability for password resets and verification links.
+ *
+ * Keyed on the account, not the IP, unlike most limits here: this route is
+ * behind requireAuth, so there is a better key available than "whoever shares
+ * this NAT" -- see auth.ts's FAILED_LOGIN_LIMIT for the same reasoning about
+ * who pays for an IP-keyed budget. Twelve an hour is well above sending a few
+ * articles to a device in one sitting and far below anything worth spamming
+ * from. Paired with the kindleEmail domain check in routes/auth.ts, which is
+ * what stops the recipient being an arbitrary stranger in the first place.
+ */
+const SEND_TO_KINDLE_LIMIT = {
+  max: Number(process.env.KINDLE_SEND_RATE_LIMIT_MAX) || 12,
+  timeWindow: "1 hour",
+  keyGenerator: (request: { userId: string | null; ip: string }) => request.userId ?? request.ip,
+};
+
+/** HTML-escapes a value going into the emailed document. The body paragraphs
+ * below already do this; the title did not, so `</title><script>` in an
+ * article title reached the reader's device as markup. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 export function toArticle(row: ArticleRow): Article {
   return {
@@ -66,6 +103,58 @@ export function toArticle(row: ArticleRow): Article {
 
 const TRASH_RETENTION_DAYS = 30;
 
+/**
+ * A Content-Disposition value for a filename that came from an upload.
+ *
+ * The old form was `inline; filename="${originalFilename.replace(/"/g, "")}"`,
+ * and stripping quotes was not enough by a distance. Node validates header
+ * values and throws ERR_INVALID_CHAR on anything outside latin-1 -- but the
+ * throw happens *after* reply.hijack(), so Fastify's error handler can no
+ * longer write to the reply, and the request never gets a response at all:
+ * the socket is simply held open until something upstream times out.
+ * Confirmed by injection -- `日本語のほん.pdf`, `emoji-📕.pdf` and a filename
+ * containing CRLF each produced no response in 2 seconds, while `plain.pdf`
+ * answered normally.
+ *
+ * So this is two bugs wearing one coat. Anyone who uploads a book whose name
+ * has an emoji or a non-Latin script in it -- ordinary, not an attack -- can
+ * never open it again, and gets a hung connection each time they try, which
+ * is a cheap way for one account to pin every connection the instance has.
+ *
+ * RFC 6266 is the fix rather than mangling the name: `filename` carries an
+ * ASCII fallback for anything that cannot read the second form, and
+ * `filename*` carries the real UTF-8 name percent-encoded, so a browser
+ * saving the file still gets `日本語のほん.pdf`. Control characters (the CRLF
+ * case) are dropped from the fallback entirely -- there is no representation
+ * of them that belongs in a header.
+ */
+export function contentDispositionInline(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "");
+  return `inline; filename="${ascii || "download"}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+/** Everything an article owns on disk, which is two files and not one: the
+ * uploaded PDF/EPUB, and the podcast episode generated from it. Only the
+ * first was ever cleaned up. The second is easy to miss because deleting the
+ * article cascades its ArticleAudio row away, so after the delete there is
+ * nothing left that even names the WAV -- it just stays on the disk forever,
+ * and on a paid volume that is a bill (#173).
+ *
+ * Selected as a shape rather than passed as keys so every caller below has to
+ * ask for `audio` in its query, and forgetting to is a type error instead of
+ * another silent leak. */
+type ArticleFileRefs = { fileStorageKey: string | null; audio: { storageKey: string } | null };
+const ARTICLE_FILE_SELECT = { fileStorageKey: true, audio: { select: { storageKey: true } } } as const;
+
+/** Always after the rows are gone, never before: a delete that fails
+ * mid-flight should leave a row pointing at bytes that exist, not the
+ * reverse. Individually best-effort, since a file already missing (a
+ * half-finished earlier delete) must not fail the request. */
+async function deleteArticleFiles(articles: ArticleFileRefs[]): Promise<void> {
+  const keys = articles.flatMap((a) => [a.fileStorageKey, a.audio?.storageKey ?? null]).filter((k) => k !== null);
+  await Promise.all(keys.map((key) => deleteStoredFile(key).catch(() => undefined)));
+}
+
 /** Best-effort -- called before reading the trash view, not on a schedule
  * (no background worker in this app). Failing silently just means a purge
  * happens on the next read instead. */
@@ -73,13 +162,11 @@ async function purgeExpiredTrash(userId: string): Promise<void> {
   const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const expired = await prisma.article.findMany({
     where: { userId, deletedAt: { lt: cutoff } },
-    select: { id: true, fileStorageKey: true },
+    select: { id: true, ...ARTICLE_FILE_SELECT },
   });
   if (expired.length === 0) return;
   await prisma.article.deleteMany({ where: { id: { in: expired.map((a) => a.id) } } });
-  await Promise.all(
-    expired.filter((a) => a.fileStorageKey).map((a) => deleteStoredFile(a.fileStorageKey!).catch(() => undefined)),
-  );
+  await deleteArticleFiles(expired);
 }
 
 /** Takes a row that never had extractedHtml/extractedText selected in the
@@ -191,7 +278,10 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
           sourceType: "HTML",
           extractionStatus: extracted ? "SUCCESS" : "FAILED",
           extractionError,
-          extractedHtml: extracted?.html ?? null,
+          // Sanitized before storage. Readability strips <script> and looks
+          // like it has handled this; it passes <img onerror>, <svg onload>
+          // and <details ontoggle> through untouched.
+          extractedHtml: sanitizeArticleHtml(extracted?.html),
           extractedText: extracted?.text ?? null,
           readingTimeEstimate: extracted?.readingTimeEstimate ?? null,
           skippedImageCount: extracted?.skippedImageCount ?? 0,
@@ -326,6 +416,71 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
     },
   );
 
+  /**
+   * Attaches the original bytes to an article that already exists. Exists for
+   * exactly one caller: the local -> account migration, which imports the
+   * *row* for an anonymously-uploaded PDF/EPUB via POST /api/sync/import and
+   * then has to send the file separately, because the bytes live in the
+   * browser's IndexedDB and JSON is the wrong transport for them (#172).
+   *
+   * A separate route rather than a mode on POST /api/articles/upload above:
+   * that route derives a title, runs extraction, enriches from Open Library,
+   * creates the row and fires `article.created`. None of that is wanted here
+   * -- the article already exists with the title, text and reading time the
+   * anonymous client extracted, and firing `article.created` for a row that
+   * was created by a previous request would be a lie to webhook subscribers.
+   * A mode flag would have to branch around nearly every line of it. This
+   * also sits on the path that already serves the same bytes back (the GET
+   * below), which is where "attach a file to this article" belongs.
+   */
+  app.post<{ Params: { id: string } }>(
+    "/api/articles/:id/file",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const article = await prisma.article.findFirst({
+        where: { id: request.params.id, userId: request.userId! },
+      });
+      if (!article) return reply.code(404).send({ error: "not_found", message: "Article not found." });
+
+      // The client clears a file from IndexedDB only once this route has
+      // accepted it, so an accepted upload whose response was lost gets sent
+      // again -- the same batch-then-clear rule #164 established for
+      // articles. Writing a second copy would orphan the first on disk with
+      // nothing left pointing at it, so a replay is a no-op, not an error.
+      if (article.fileStorageKey) return reply.send(toArticle(article));
+
+      const file = await request.file();
+      if (!file) return reply.code(400).send({ error: "no_file", message: "No file was uploaded." });
+
+      const originalFilename = file.filename;
+      const ext = originalFilename.toLowerCase().split(".").pop();
+      if (ext !== "pdf" && ext !== "epub") {
+        return reply.code(400).send({ error: "unsupported_type", message: "Only .pdf and .epub files are supported." });
+      }
+      // GET /api/articles/:id/file picks its Content-Type from sourceType
+      // alone, so an EPUB stored on a row that says PDF would be served as
+      // application/pdf and fail to open in a reader that trusts the header.
+      if (article.sourceType !== (ext === "pdf" ? "PDF" : "EPUB")) {
+        return reply
+          .code(400)
+          .send({ error: "type_mismatch", message: `This article is not a ${ext.toUpperCase()}.` });
+      }
+
+      const buffer = await file.toBuffer();
+      const fileStorageKey = await saveFile(request.userId!, originalFilename, buffer);
+
+      // Deliberately narrow: nothing else on the row is touched. The
+      // extracted text, title and reading time already came across in the
+      // import payload, and re-deriving them from the file here would
+      // overwrite what the user has been reading with a second opinion.
+      const updated = await prisma.article.update({
+        where: { id: article.id },
+        data: { fileStorageKey, originalFilename: article.originalFilename ?? originalFilename },
+      });
+      return reply.send(toArticle(updated));
+    },
+  );
+
   app.get<{ Params: { id: string } }>(
     "/api/articles/:id/file",
     { preHandler: requireAuth },
@@ -363,16 +518,28 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       }
 
       reply.hijack();
-      reply.raw.writeHead(200, {
-        ...corsHeaders,
-        "Content-Type": contentType,
-        "Content-Disposition": `inline; filename="${(article.originalFilename ?? "download").replace(/"/g, "")}"`,
-        // fileStorageKey is set once at upload and never replaced in place
-        // (only deleted, on the article's own deletion) -- safe to tell the
-        // browser this response never needs revalidating, so re-opening
-        // the same PDF/EPUB doesn't re-download it every time.
-        "Cache-Control": "private, max-age=31536000, immutable",
-      });
+      // Everything after hijack() is outside Fastify's error handling: a
+      // throw here cannot become a 500, it just leaves the socket open with
+      // nothing ever written to it (which is exactly what the malformed
+      // Content-Disposition above used to do). Belt and braces alongside
+      // contentDispositionInline -- if some future header value is rejected
+      // by Node, the client gets a closed connection instead of a hang.
+      try {
+        reply.raw.writeHead(200, {
+          ...corsHeaders,
+          "Content-Type": contentType,
+          "Content-Disposition": contentDispositionInline(article.originalFilename ?? "download"),
+          // fileStorageKey is set once at upload and never replaced in place
+          // (only deleted, on the article's own deletion) -- safe to tell the
+          // browser this response never needs revalidating, so re-opening
+          // the same PDF/EPUB doesn't re-download it every time.
+          "Cache-Control": "private, max-age=31536000, immutable",
+        });
+      } catch (err) {
+        request.log.error({ err, articleId: article.id }, "could not write file response headers");
+        reply.raw.destroy();
+        return;
+      }
       const stream = streamStoredFile(article.fileStorageKey);
       stream.on("error", () => reply.raw.destroy());
       stream.pipe(reply.raw);
@@ -598,12 +765,11 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
     async (request, reply) => {
       const existing = await prisma.article.findFirst({
         where: { id: request.params.id, userId: request.userId! },
+        select: { id: true, ...ARTICLE_FILE_SELECT },
       });
       if (!existing) return reply.code(404).send({ error: "not_found", message: "Article not found." });
       await prisma.article.delete({ where: { id: existing.id } });
-      if (existing.fileStorageKey) {
-        await deleteStoredFile(existing.fileStorageKey).catch(() => undefined);
-      }
+      await deleteArticleFiles([existing]);
       return reply.code(204).send();
     },
   );
@@ -615,13 +781,11 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
   app.delete("/api/articles/trash", { preHandler: requireAuth }, async (request, reply) => {
     const trashed = await prisma.article.findMany({
       where: { userId: request.userId!, deletedAt: { not: null } },
-      select: { id: true, fileStorageKey: true },
+      select: { id: true, ...ARTICLE_FILE_SELECT },
     });
     if (trashed.length > 0) {
       await prisma.article.deleteMany({ where: { id: { in: trashed.map((a) => a.id) } } });
-      await Promise.all(
-        trashed.filter((a) => a.fileStorageKey).map((a) => deleteStoredFile(a.fileStorageKey!).catch(() => undefined)),
-      );
+      await deleteArticleFiles(trashed);
     }
     return reply.code(204).send();
   });
@@ -634,13 +798,23 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
   // this shipped from for why real two-way sync isn't attempted.
   app.post<{ Params: { id: string } }>(
     "/api/articles/:id/send-to-kindle",
-    { preHandler: requireAuth },
+    { preHandler: requireAuth, config: { rateLimit: SEND_TO_KINDLE_LIMIT } },
     async (request, reply) => {
       const user = await prisma.user.findUniqueOrThrow({ where: { id: request.userId! } });
       if (!user.kindleEmail) {
         return reply
           .code(400)
           .send({ error: "no_kindle_email", message: "Add your Kindle email in Settings first." });
+      }
+      // Re-checked at the point of sending, not only where the setting is
+      // written: a row saved before that rule existed still holds whatever
+      // address it holds, and this is the line that actually hands an address
+      // to the mail provider.
+      if (!isKindleAddress(user.kindleEmail)) {
+        return reply.code(400).send({
+          error: "invalid_kindle_email",
+          message: "Send to Kindle only delivers to Amazon addresses. Update your Kindle email in Settings.",
+        });
       }
 
       const article = await prisma.article.findFirst({
@@ -654,13 +828,14 @@ export async function registerArticleRoutes(app: FastifyInstance): Promise<void>
       }
 
       const title = article.title ?? "Untitled";
+      const safeTitle = escapeHtml(title);
       const bodyHtml =
         article.extractedHtml ??
         article.extractedText!
           .split(/\n{2,}/)
           .map((p) => `<p>${p.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`)
           .join("\n");
-      const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1>${bodyHtml}</body></html>`;
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>${safeTitle}</title></head><body><h1>${safeTitle}</h1>${bodyHtml}</body></html>`;
 
       await sendEmail({
         to: user.kindleEmail,

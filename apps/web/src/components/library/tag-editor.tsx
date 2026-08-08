@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Article } from "@booklet/shared";
 import { updateArticleTags } from "@/lib/data/articles";
+import { useToast } from "@/lib/toast/toast-provider";
 
 const MAX_TAG_LENGTH = 40;
 
@@ -13,6 +14,7 @@ interface TagEditorProps {
 }
 
 export function TagEditor({ article, authenticated, onChange }: TagEditorProps) {
+  const { toast } = useToast();
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -21,6 +23,11 @@ export function TagEditor({ article, authenticated, onChange }: TagEditorProps) 
     try {
       const updated = await updateArticleTags(article, nextTags, authenticated);
       onChange(updated);
+    } catch {
+      // try/finally with no catch left this as an unhandled rejection and a
+      // tag that simply never appeared -- identical, from the outside, to
+      // having mistyped and pressed Enter on an empty field.
+      toast("Couldn't save those tags.");
     } finally {
       setSaving(false);
     }
@@ -59,6 +66,7 @@ export function TagEditor({ article, authenticated, onChange }: TagEditorProps) 
       <form onSubmit={handleAdd} className="flex items-center">
         <input
           type="text"
+          aria-label="Add a tag"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={article.tags.length === 0 ? "Add a tag…" : "Add…"}

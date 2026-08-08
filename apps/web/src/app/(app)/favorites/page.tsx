@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, ArticleCollectionMemberships, Collection } from "@booklet/shared";
 import { ArticleCard } from "@/components/library/article-card";
+import { LoadError } from "@/components/ui/load-error";
 import { RenameDialog } from "@/components/ui/rename-dialog";
 import { loadArticles, renameArticle, trashArticle, updateArticleFavorited, updateArticleStatus } from "@/lib/data/articles";
 import { loadCollectionMemberships, loadCollections } from "@/lib/data/collections";
@@ -15,6 +16,7 @@ export default function FavoritesPage() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [membership, setMembership] = useState<ArticleCollectionMemberships>({});
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [renaming, setRenaming] = useState<Article | null>(null);
 
   const refresh = useCallback(() => {
@@ -23,12 +25,16 @@ export default function FavoritesPage() {
       loadArticles(isAuthenticated),
       loadCollections(isAuthenticated),
       loadCollectionMemberships(isAuthenticated),
-    ]).then(([loadedArticles, loadedCollections, loadedMembership]) => {
-      setArticles(loadedArticles);
-      setCollections(loadedCollections);
-      setMembership(loadedMembership);
-      setLoaded(true);
-    });
+    ])
+      .then(([loadedArticles, loadedCollections, loadedMembership]) => {
+        setArticles(loadedArticles);
+        setCollections(loadedCollections);
+        setMembership(loadedMembership);
+        setLoaded(true);
+      })
+      // Without this a rejected fetch left `loaded` false forever, and the
+      // page rendered nothing at all -- see components/ui/load-error.tsx.
+      .catch(() => setLoadFailed(true));
   }, [status, isAuthenticated]);
 
   useEffect(() => {
@@ -70,6 +76,15 @@ export default function FavoritesPage() {
       const next = isMember ? [...current, collectionId] : current.filter((id) => id !== collectionId);
       return { ...prev, [articleId]: next };
     });
+  }
+
+  if (!loaded && loadFailed) {
+    return (
+      <div className="mx-auto max-w-4xl px-8 py-10">
+        <h1 className="mb-6 font-serif text-2xl font-semibold text-ink">Favorites</h1>
+        <LoadError message="Couldn't load your favorites. Check your connection and try again." onRetry={refresh} />
+      </div>
+    );
   }
 
   if (!loaded) return null;

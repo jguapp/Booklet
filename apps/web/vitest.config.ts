@@ -22,16 +22,19 @@ import path from "node:path";
  * Range#getClientRects return zeros, so anything geometry-dependent belongs
  * in Playwright, not here.
  *
- * Rendering React components is deliberately NOT set up yet -- see #166. It
- * needs @testing-library/react, which cannot currently resolve the same React
- * instance the components do: this repo carries three copies (root react
- * 19.0.0, which Expo pins and apps/mobile resolves; root react-dom 19.2.8;
- * apps/web's own 19.2.4 pair). Rendering across two instances fails as a bare
- * "Cannot read properties of null (reading 'useState')", or silently renders
- * nothing. That is a dependency-hygiene problem worth fixing on its own terms
- * rather than papering over with resolver aliases here -- attempts with
- * resolve.alias, resolve.dedupe and server.deps.inline all failed, because
- * the renderer resolves React through Node before Vite ever sees it.
+ * React components ARE renderable here, via a small local helper in
+ * src/test/render.tsx rather than @testing-library/react. That is not a
+ * preference: the library sits in the *root* node_modules (this workspace uses
+ * `nodeLinker: hoisted`, see pnpm-workspace.yaml) and so resolves root's react
+ * 19.0.0 -- hoisted from apps/mobile, which Expo pins -- and root's react-dom
+ * 19.2.8, hoisted from Prisma Studio. apps/web has its own matched 19.2.4 pair
+ * nested because it conflicts with root, so rendering through the library
+ * crosses two React instances and fails as a bare "Cannot read properties of
+ * null (reading 'useState')", or silently renders nothing. resolve.alias,
+ * resolve.dedupe and server.deps.inline were all tried; none work, because the
+ * renderer resolves React through Node before Vite sees the import. A helper
+ * that lives inside apps/web resolves apps/web's React, which is the whole
+ * trick (#166).
  *
  * e2e is deliberately left out of this runner: Playwright owns e2e/, and
  * running the two in one command would mean neither can be run alone.

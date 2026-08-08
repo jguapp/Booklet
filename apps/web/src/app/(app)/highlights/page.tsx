@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, Highlight } from "@booklet/shared";
 import { HighlightListItem } from "@/components/highlights/highlight-list-item";
+import { SeedCollections } from "@/components/highlights/seed-collections";
+import { SharePanel } from "@/components/highlights/share-panel";
 import { SourceIcon } from "@/components/library/source-icon";
 import { Input } from "@/components/ui/input";
+import { LoadError } from "@/components/ui/load-error";
 import { IconSearch } from "@/components/ui/icons";
 import { loadArticles } from "@/lib/data/articles";
-import { deleteHighlight, deleteNote, loadHighlights, saveNote } from "@/lib/data/highlights";
+import { deleteHighlight, deleteNote, loadHighlights, saveHighlightPrompt, saveNote } from "@/lib/data/highlights";
 import { comparePositionInArticle } from "@/lib/highlights/position-sort";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
@@ -20,16 +23,26 @@ export default function HighlightsPage() {
   const { status, isAuthenticated } = useAuth();
   const [articles, setArticles] = useState<Article[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [articleFilter, setArticleFilter] = useState<string>("ALL");
   const [viewMode, setViewMode] = useState<ViewMode>("grouped");
   const [search, setSearch] = useState("");
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
-    Promise.all([loadArticles(isAuthenticated), loadHighlights(isAuthenticated)]).then(([a, h]) => {
-      setArticles(a);
-      setHighlights(h);
-    });
+    Promise.all([loadArticles(isAuthenticated), loadHighlights(isAuthenticated)])
+      .then(([a, h]) => {
+        setArticles(a);
+        setHighlights(h);
+        setLoaded(true);
+      })
+      // This page has no "not loaded yet" gate -- it renders its empty state
+      // straight away -- so a rejected fetch told the reader "No highlights
+      // yet", which is a claim about their account rather than about the
+      // request. Only the first load turns into an error block; a failed
+      // refresh over something already on screen stays quiet.
+      .catch(() => setLoadFailed(true));
   }, [status, isAuthenticated]);
 
   useEffect(() => {
@@ -109,7 +122,33 @@ export default function HighlightsPage() {
     setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
   }
 
+  // Writing prompts is a browsing-time activity -- you go through a book's
+  // highlights and turn the ones worth remembering into questions -- which
+  // makes this page, not the reader, where it belongs.
+  async function handleSavePrompt(highlightId: string, prompt: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await saveHighlightPrompt(target, prompt, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+  }
+
+  async function handleDeletePrompt(highlightId: string) {
+    const target = highlights.find((h) => h.id === highlightId);
+    if (!target) return;
+    const updated = await saveHighlightPrompt(target, null, isAuthenticated);
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? updated : h)));
+  }
+
   const selectedArticle = showingOneArticle ? articleById.get(articleFilter) : undefined;
+
+  if (!loaded && loadFailed) {
+    return (
+      <div className="mx-auto max-w-2xl px-8 py-10">
+        <h1 className="mb-6 font-serif text-2xl font-semibold text-ink">Highlights</h1>
+        <LoadError message="Couldn't load your highlights. Check your connection and try again." onRetry={refresh} />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl px-8 py-10">
@@ -126,6 +165,18 @@ export default function HighlightsPage() {
             <h1 className="font-serif text-2xl font-semibold text-ink">
               {selectedArticle?.title ?? "Untitled"}
             </h1>
+            {/* Sharing is offered per article, and only once one is in view
+                (#158) -- a link to "all your highlights" would publish every
+                book you have ever read, which is not a thing anyone means to
+                send to a friend. */}
+            <div className="mt-4">
+              {/* Keyed so switching articles remounts it: without that, the
+                  panel keeps showing the previous article's link until its
+                  refetch lands, and a share URL for the wrong page is the
+                  one stale value here that could actually be copied and
+                  sent. */}
+              <SharePanel key={articleFilter} articleId={articleFilter} authenticated={isAuthenticated} />
+            </div>
           </>
         ) : (
           <h1 className="font-serif text-2xl font-semibold text-ink">Highlights</h1>
@@ -137,6 +188,7 @@ export default function HighlightsPage() {
           <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <Input
             type="text"
+            aria-label="Search your highlights"
             placeholder="Search highlights, notes…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -145,6 +197,7 @@ export default function HighlightsPage() {
         </div>
 
         <select
+          aria-label="Filter by article"
           value={articleFilter}
           onChange={(e) => setArticleFilter(e.target.value)}
           className="rounded-sm border border-border bg-surface px-3 py-2 font-sans text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -212,10 +265,17 @@ export default function HighlightsPage() {
           </div>
         )
       ) : visible.length === 0 ? (
-        <div className="rounded-md border border-dashed border-border px-6 py-16 text-center">
-          <p className="font-sans text-sm text-ink-muted">
-            {search.trim() ? "No highlights match that search." : "No highlights yet for this filter."}
-          </p>
+        <div>
+          <div className="rounded-md border border-dashed border-border px-6 py-16 text-center">
+            <p className="font-sans text-sm text-ink-muted">
+              {search.trim() ? "No highlights match that search." : "No highlights yet for this filter."}
+            </p>
+          </div>
+          {/* Only when the library is genuinely empty, not when a filter or
+              search happens to match nothing -- someone with 400 highlights
+              searching for a word they didn't use is not looking for
+              onboarding suggestions. */}
+          {highlights.length === 0 && !isSearching && <SeedCollections />}
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -228,6 +288,8 @@ export default function HighlightsPage() {
               onDelete={handleDelete}
               onSaveNote={handleSaveNote}
               onDeleteNote={handleDeleteNote}
+              onSavePrompt={handleSavePrompt}
+              onDeletePrompt={handleDeletePrompt}
             />
           ))}
         </div>
