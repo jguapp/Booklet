@@ -35,6 +35,36 @@ import type { ReadStream } from "node:fs";
  * variable explicitly is what makes the location stop depending on which of
  * those is running.
  */
+/**
+ * Refuse to start in production without an explicit path.
+ *
+ * The asymmetry this fixes was the actual bug: JWT_ACCESS_SECRET has had a
+ * production guard since #174, and forgetting it is *recoverable* -- nobody
+ * can sign in until you set it, and then everything works. Forgetting this
+ * one is not. The default lands inside the application directory, the
+ * container's filesystem is ephemeral, and the first routine redeploy
+ * destroys every uploaded book and every generated episode while the rows
+ * survive pointing at them. The library looks intact and the readers open
+ * empty.
+ *
+ * So the variable whose omission costs nothing refused to boot, and the one
+ * that silently destroys user data defaulted. DEPLOYMENT.md said to set it
+ * in three places, which is documentation, not a control -- and #172 had
+ * just made the server the only copy of an uploaded file, so this stopped
+ * being cache loss and became data loss.
+ *
+ * Production only. Dev, test and CI all rely on the default, and a guard
+ * that fires there would be a guard everyone learns to work around.
+ */
+if (process.env.NODE_ENV === "production" && !process.env.FILE_STORAGE_PATH?.trim()) {
+  throw new Error(
+    "FILE_STORAGE_PATH is not set. In production it must point at a mounted persistent disk -- " +
+      "the default lives inside the application directory, which is destroyed on redeploy, taking " +
+      "every uploaded PDF, EPUB and generated podcast episode with it while the database rows " +
+      "survive pointing at nothing. See DEPLOYMENT.md, 'File storage'.",
+  );
+}
+
 const STORAGE_ROOT = path.resolve(
   process.env.FILE_STORAGE_PATH?.trim() ||
     path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "storage"),
