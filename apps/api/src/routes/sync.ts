@@ -112,7 +112,48 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
       // createMany would trip @@unique([userId, url]) on the second, taking the
       // whole batch down with it, so the duplicate is treated exactly like an
       // already-on-the-server one: mapped to the same id, counted as skipped.
+      // The URL dedupe above covers saved links. It does not cover an
+      // article with no URL -- every uploaded PDF and EPUB, and every
+      // Kindle-clippings BOOK -- because `if (a.url)` simply skips them, so
+      // a replayed batch created them again, unconditionally. Their
+      // highlights doubled too: the fresh duplicate lands in toCreate, which
+      // is exactly the set the highlight dedupe query excludes as "can't
+      // already have highlights".
+      //
+      // That is the same replay this route's comments already describe
+      // defending against. It was defended on one arm only, and the tests
+      // covered only that arm.
+      //
+      // The natural key for a url-less article is its title and the moment
+      // it was saved. savedAt comes from the client and is preserved
+      // exactly, so a replay carries identical values, while two genuinely
+      // distinct uploads sharing a title *and* a millisecond is not a
+      // situation worth splitting. Deliberately not localId: nothing stores
+      // it server-side, and adding a column to hold it would be a schema
+      // change to solve what a natural key already answers.
+      const urllessKey = (title: string | null | undefined, savedAt: string | null | undefined) =>
+        [title ?? "", savedAt ?? ""].join(KEY_SEPARATOR);
+
+      const urllessCandidates = valid.filter((a) => !a.url);
+      const existingUrlless = urllessCandidates.length
+        ? await prisma.article.findMany({
+            where: {
+              userId,
+              url: null,
+              OR: urllessCandidates.map((a) => ({
+                title: a.title ?? null,
+                savedAt: a.savedAt ? new Date(a.savedAt) : undefined,
+              })),
+            },
+            select: { id: true, title: true, savedAt: true },
+          })
+        : [];
+      const existingByUrlless = new Map(
+        existingUrlless.map((e) => [urllessKey(e.title, e.savedAt.toISOString()), e.id]),
+      );
+
       const claimedUrls = new Map<string, string>();
+      const claimedUrlless = new Map<string, string>();
       const toCreate: { id: string; article: (typeof valid)[number] }[] = [];
 
       for (const a of valid) {
@@ -123,9 +164,18 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
             skippedArticles++;
             continue;
           }
+        } else {
+          const key = urllessKey(a.title, a.savedAt);
+          const already = existingByUrlless.get(key) ?? claimedUrlless.get(key);
+          if (already) {
+            localIdToServerId.set(a.localId, already);
+            skippedArticles++;
+            continue;
+          }
         }
         const id = randomUUID();
         if (a.url) claimedUrls.set(a.url, id);
+        else claimedUrlless.set(urllessKey(a.title, a.savedAt), id);
         localIdToServerId.set(a.localId, id);
         toCreate.push({ id, article: a });
       }
