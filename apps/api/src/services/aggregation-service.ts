@@ -214,7 +214,7 @@ export async function recomputePublicHighlightStats(): Promise<{ passages: numbe
  * though nothing below it is ever stored -- belt and braces on the one query
  * whose output is served to anyone with the URL.
  */
-export async function getCommunitySeeds(limit = COMMUNITY_SEED_LIMIT): Promise<SeedHighlight[]> {
+async function getCommunitySeeds(limit = COMMUNITY_SEED_LIMIT): Promise<SeedHighlight[]> {
   const rows = await prisma.publicHighlightStat.findMany({
     where: { userCount: { gte: MIN_DISTINCT_USERS } },
     orderBy: [{ userCount: "desc" }, { lastSeenAt: "desc" }],

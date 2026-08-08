@@ -1,12 +1,12 @@
 import type { FastifyInstance } from "fastify";
-import type { CreateArticleRequest, CreateHighlightRequest, HighlightPosition } from "@booklet/shared";
+import type { CreateArticleRequest, CreateHighlightRequest } from "@booklet/shared";
 import { canonicalizeUrl, isValidHighlightColor, isValidRecallPrompt, normalizeRecallPrompt } from "@booklet/shared";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireWriteScope } from "../lib/auth/context.js";
 import { ExtractionError, fetchAndExtract } from "../services/extraction-service.js";
 import { fireWebhookEvent } from "../services/webhook-service.js";
 import { toArticle, toSummary } from "./articles.js";
-import { toHighlight } from "./highlights.js";
+import { isValidPosition, toHighlight } from "./highlights.js";
 import { toCollection } from "./collections.js";
 
 const LIST_PAGE_SIZE = 30;
@@ -14,12 +14,6 @@ const LIST_PAGE_SIZE = 30;
 // Zapier connection shouldn't be able to run up against (or exhaust) the
 // same limit the web app's own UI relies on.
 const V1_RATE_LIMIT = { max: 100, timeWindow: "1 minute" };
-
-function isValidPosition(value: unknown): value is HighlightPosition {
-  if (typeof value !== "object" || value === null) return false;
-  const type = (value as Record<string, unknown>).type;
-  return type === "text" || type === "pdf" || type === "epub";
-}
 
 /**
  * The public, versioned surface for personal access tokens (see

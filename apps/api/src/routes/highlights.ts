@@ -52,7 +52,10 @@ export function toHighlight(row: HighlightRow): Highlight {
   };
 }
 
-function isValidPosition(value: unknown): value is HighlightPosition {
+/** Shared with the public v1 routes, which validate the same body shape --
+ * exported for the same reason toHighlight below is, so /api/v1/highlights
+ * stays a wrapper over this module rather than a parallel copy of it. */
+export function isValidPosition(value: unknown): value is HighlightPosition {
   if (typeof value !== "object" || value === null) return false;
   const type = (value as Record<string, unknown>).type;
   return type === "text" || type === "pdf" || type === "epub";

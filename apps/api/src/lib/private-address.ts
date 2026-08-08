@@ -67,7 +67,7 @@ export async function checkPublicHost(hostname: string): Promise<HostCheck> {
   return { ok: true };
 }
 
-export function isPrivateOrReservedIp(address: string, family: number): boolean {
+function isPrivateOrReservedIp(address: string, family: number): boolean {
   if (family === 4) {
     const [a, b] = address.split(".").map(Number);
     if (a === 10 || a === 127 || a === 0) return true;
