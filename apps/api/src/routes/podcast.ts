@@ -293,11 +293,15 @@ export async function registerPodcastRoutes(app: FastifyInstance): Promise<void>
    * user's library. The cost is that "show me my feed URL again" is
    * unavailable and regenerating (which invalidates the old URL, requiring a
    * resubscribe) is the only way back to it.
+   *
+   * The URL comes back with no ?filter, i.e. the queue. Choosing "all"
+   * deliberately has no knob here: appending ?filter=all to the URL is
+   * already the whole mechanism, and a mint-time copy of the same choice
+   * would be a second place for it to be wrong without being a second thing
+   * anyone can do.
    */
   app.post("/api/podcast/feed", { preHandler: requireAuth }, async (request, reply) => {
     const userId = request.userId!;
-    const { filter: rawFilter } = request.query as { filter?: string };
-    const filter = isPodcastFeedFilter(rawFilter) ? rawFilter : DEFAULT_PODCAST_FEED_FILTER;
 
     // Revoked rather than deleted, and revoked before the new row exists, so
     // there is never a moment where two feed URLs both work -- "regenerate"
@@ -317,7 +321,10 @@ export async function registerPodcastRoutes(app: FastifyInstance): Promise<void>
       },
     });
 
-    const body: PodcastFeedSecret = { ...toStatus(created), url: feedUrl(request, token, filter) };
+    const body: PodcastFeedSecret = {
+      ...toStatus(created),
+      url: feedUrl(request, token, DEFAULT_PODCAST_FEED_FILTER),
+    };
     return reply.code(201).send(body);
   });
 
