@@ -42,13 +42,41 @@
 import { createHash } from "node:crypto";
 import { redisGetBuffer, redisSetBuffer, redisTouch } from "./redis-client.js";
 
-const MAX_CACHE_BYTES = Number(process.env.TTS_CACHE_MAX_MB || 200) * 1024 * 1024;
+/**
+ * Both numbers below used to be `Number(process.env.X || default)`, which
+ * silently produces NaN for anything that isn't a bare number -- and NaN is
+ * the worst possible value for each of them.
+ *
+ * `currentBytes > NaN` is false, so a NaN budget doesn't fall back to the
+ * default, it disables the eviction loop entirely: the "bounded" L1 map grows
+ * for the life of the process until the container is OOM-killed. Confirmed by
+ * running it -- `TTS_CACHE_MAX_MB="200MB"` (a units typo, and the most likely
+ * way anyone gets this wrong) retained 800 MB against a 200 MB cap, and would
+ * have retained any amount. The Redis TTL is milder but the same shape: a NaN
+ * lands in `setex`, every write errors, and the circuit breaker turns L2 off.
+ *
+ * So this validates and says so. A bad value falling back quietly would leave
+ * the operator believing a cap that isn't in force, which is the specific
+ * thing that makes the memory case dangerous rather than merely wrong.
+ */
+function positiveNumberFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(`[tts-cache] ${name}="${raw}" is not a positive number -- using the default of ${fallback}.`);
+    return fallback;
+  }
+  return parsed;
+}
+
+const MAX_CACHE_BYTES = positiveNumberFromEnv("TTS_CACHE_MAX_MB", 200) * 1024 * 1024;
 
 /** How long generated audio survives in Redis without being read. Long,
  * deliberately: a saved article's text doesn't change, so a chunk generated
  * a month ago is still exactly correct today, and re-reading an article is
  * the single most valuable cache hit there is. */
-const REDIS_TTL_SECONDS = Number(process.env.TTS_REDIS_TTL_DAYS || 30) * 86400;
+const REDIS_TTL_SECONDS = positiveNumberFromEnv("TTS_REDIS_TTL_DAYS", 30) * 86400;
 
 /** A 1000-char chunk (the route's ceiling) is roughly 350 KB at 16-bit, so
  * this only ever catches pathology -- but refusing outright beats writing a

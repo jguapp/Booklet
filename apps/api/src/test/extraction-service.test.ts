@@ -109,6 +109,37 @@ describe("inlineImages", () => {
     expect(skippedImageCount).toBe(5);
   });
 
+  /**
+   * The whole-article byte cap, which four concurrent fetch workers used to
+   * be able to walk straight past.
+   *
+   * Each worker computed its own limit as `MAX_TOTAL_IMAGE_BYTES -
+   * totalBytes` before any of the others had added theirs, so all four sized
+   * themselves against a budget the other three were already spending.
+   * Measured against a real server handing out 2MB images: 20MB inlined under
+   * a 15MB cap, with a true ceiling of 15MB + 3 * MAX_IMAGE_BYTES = 24MB --
+   * on input a hostile page fully controls, ending up in Article.html.
+   *
+   * Sized in real bytes rather than mocked counters because the accounting
+   * being tested is the byte accounting.
+   */
+  it("holds the whole-article byte budget even with several fetches in flight", async () => {
+    const TWO_MB = 2 * 1024 * 1024;
+    const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024;
+    // Under the 3MB per-image cap, so nothing is rejected individually -- only
+    // the running total can stop this.
+    fetchMock.mockImplementation(async () => pngResponse(TWO_MB));
+
+    const imgs = Array.from({ length: 20 }, (_, i) => `<img src="https://example.com/${i}.png">`).join("");
+    const { html } = await inlineImages(imgs, "https://example.com");
+
+    const inlined = (html.match(/data:image/g) ?? []).length;
+    // Was 10 (20MB). Seven 2MB images is 14MB, the most that fits.
+    expect(inlined * TWO_MB).toBeLessThanOrEqual(MAX_TOTAL_IMAGE_BYTES);
+    // And it must still fill the budget rather than bailing out early.
+    expect(inlined).toBe(7);
+  });
+
   it("returns the input unchanged with a zero count when there are no images", async () => {
     const { html, skippedImageCount } = await inlineImages("<p>no pictures here</p>", "https://example.com");
     expect(html).toBe("<p>no pictures here</p>");
