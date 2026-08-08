@@ -1,10 +1,11 @@
 # Booklet mobile app
 
 An Expo/React Native app: continue without an account or log in, see your
-library, save a URL or upload a PDF/EPUB, organize into collections, read
-and highlight, and run Daily Review. Reuses the same API and
-`@booklet/shared` types as the web app, per the README roadmap's "reusing
-the same API and data model rather than a rewrite."
+library, save a URL or upload a PDF/EPUB, organize into collections, search
+your library, favorite and trash articles, read and highlight, and run
+Daily Review. Reuses the same API and `@booklet/shared` types as the web
+app, per the README roadmap's "reusing the same API and data model rather
+than a rewrite."
 
 ## Scope
 
@@ -37,6 +38,25 @@ article with a ✓/+ toggle rather than filtering to members-only -- caught
 by hand that filtering to members-only hides exactly the non-member
 articles the + button exists to add, since a hidden card's button can
 never be tapped.
+
+**Search, favorites, and trash** -- the everyday library actions the web
+app has, now on mobile too. The Library screen has a client-side search box
+(title / site / author / excerpt, filtered in memory over the already-
+loaded list -- no round trip) and per-card ★ favorite and 🗑 delete
+buttons, both optimistic. Two screens back them: `FavoritesScreen` (the
+favorited articles, newest-saved first) and `TrashScreen` (soft-deleted
+articles, kept 30 days, with Restore / Delete forever / Empty trash). Delete
+from the Library is a *soft* delete -- it sets `deletedAt` and the article
+moves to Trash rather than vanishing, which is why the Library button
+doesn't confirm and the Trash buttons do. The destructive Trash actions arm
+on the first tap and fire on the second (an inline "Tap to confirm") rather
+than using `Alert.alert`, which is a hard no-op on react-native-web, the one
+target this app runs on today (same reason the highlight-removal confirm is
+noted as unexercised below). All of it routes through
+`src/lib/data/articles.ts` the same way everything else does -- a PATCH/DELETE
+when signed in, a read-modify-put against AsyncStorage when not -- and
+`localArticles.getAll()` now filters out soft-deleted rows so a trashed
+local article stops coming back into the library list.
 
 **Daily Review** -- `DailyReviewScreen` mirrors the web app's `/resurface`
 page: authenticated mode asks `GET /api/digests/current` for the
@@ -76,7 +96,12 @@ pnpm --filter @booklet/mobile android   # needs Android Studio + an emulator
 ```
 
 Points at `http://localhost:4000` (`10.0.2.2:4000` on the Android emulator,
-which aliases the host machine) by default -- see `src/lib/config.ts`.
+which aliases the host machine) by default -- see `src/lib/config.ts`. For a
+real (TestFlight / Play / production) build, set `EXPO_PUBLIC_API_URL` to the
+deployed API's origin; Expo inlines any `EXPO_PUBLIC_*` variable into the
+bundle at build time, so this is the build-time config the app previously had
+no way to set -- without it a shipped build would talk to `localhost`, which
+is only reachable from a simulator on the same host.
 
 All four scripts run with `EXPO_OFFLINE=1` baked in (via `cross-env`, for
 Windows compatibility -- plain `VAR=value cmd` isn't reliably portable in a

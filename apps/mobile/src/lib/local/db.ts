@@ -61,7 +61,18 @@ async function writeMap<T>(key: string, map: Record<string, T>): Promise<void> {
 
 export const localArticles = {
   async getAll(): Promise<Article[]> {
-    return Object.values(await readMap<Article>(ARTICLES_KEY));
+    // Trashed rows are excluded here, exactly like the web app's
+    // localArticles.getAll() -- otherwise a soft-deleted article comes
+    // straight back into the library list. getTrash() is the deliberate way
+    // to see them; the migration in data/sync.ts reads getAll(), so a locally
+    // trashed article is left behind on signup rather than resurrected on the
+    // account, which matches web.
+    return Object.values(await readMap<Article>(ARTICLES_KEY)).filter((a) => !a.deletedAt);
+  },
+  /** The soft-deleted rows -- the Trash screen's source, and the exact
+   * complement of getAll(). */
+  async getTrash(): Promise<Article[]> {
+    return Object.values(await readMap<Article>(ARTICLES_KEY)).filter((a) => !!a.deletedAt);
   },
   async get(id: string): Promise<Article | undefined> {
     return (await readMap<Article>(ARTICLES_KEY))[id];
@@ -85,6 +96,13 @@ export const localArticles = {
     const map = await readMap<Article>(ARTICLES_KEY);
     for (const id of ids) delete map[id];
     await writeMap(ARTICLES_KEY, map);
+  },
+  /** Removes one record for good -- the Trash screen's per-item "delete
+   * forever", one at a time from a tap. Routed through deleteMany so it
+   * shares the single read-modify-write; a batch (Empty Trash) still calls
+   * deleteMany directly to avoid the concurrent-delete lost update above. */
+  async delete(id: string): Promise<void> {
+    await this.deleteMany([id]);
   },
   async clear(): Promise<void> {
     await AsyncStorage.removeItem(ARTICLES_KEY);

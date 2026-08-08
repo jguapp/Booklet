@@ -13,7 +13,14 @@ import {
 import * as DocumentPicker from "expo-document-picker";
 import type { Article, Collection } from "@booklet/shared";
 import { clearSession } from "../lib/api";
-import { ApiError, loadArticles, saveArticleFromFile, saveArticleFromUrl } from "../lib/data/articles";
+import {
+  ApiError,
+  loadArticles,
+  saveArticleFromFile,
+  saveArticleFromUrl,
+  trashArticle,
+  updateArticleFavorited,
+} from "../lib/data/articles";
 import {
   addArticleToCollection,
   createCollection,
@@ -26,6 +33,8 @@ interface LibraryScreenProps {
   authenticated: boolean;
   onOpenArticle: (id: string) => void;
   onOpenDailyReview: () => void;
+  onOpenFavorites: () => void;
+  onOpenTrash: () => void;
   onSignedOut: () => void;
   /** Set when logging in couldn't move this device's local library onto the
    * account (see App.tsx). Shown here rather than in an Alert because it is
@@ -39,6 +48,8 @@ export function LibraryScreen({
   authenticated,
   onOpenArticle,
   onOpenDailyReview,
+  onOpenFavorites,
+  onOpenTrash,
   onSignedOut,
   migrationNotice,
 }: LibraryScreenProps) {
@@ -53,6 +64,7 @@ export function LibraryScreen({
   const [url, setUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -226,12 +238,48 @@ export function LibraryScreen({
     onSignedOut();
   }
 
+  async function handleToggleFavorite(article: Article) {
+    const next = !article.favorited;
+    // Optimistic; revert on failure.
+    setArticles((prev) => prev.map((a) => (a.id === article.id ? { ...a, favorited: next } : a)));
+    setError(null);
+    try {
+      await updateArticleFavorited(article, next, authenticated);
+    } catch {
+      setArticles((prev) => prev.map((a) => (a.id === article.id ? { ...a, favorited: !next } : a)));
+      setError("Couldn't update that. Try again.");
+    }
+  }
+
+  // A soft delete -- the article moves to Trash (restorable for 30 days), so
+  // a single tap without a confirm is fine here, unlike Trash's own
+  // delete-forever. Dropped from the list optimistically.
+  async function handleTrash(article: Article) {
+    setArticles((prev) => prev.filter((a) => a.id !== article.id));
+    setError(null);
+    try {
+      await trashArticle(article, authenticated);
+    } catch {
+      setArticles((prev) => [article, ...prev]);
+      setError("Couldn't delete that. Try again.");
+    }
+  }
+
   // Selecting a collection shows every article (not just members) with a
   // +/checkmark toggle -- filtering down to members-only would hide exactly
   // the non-member articles the toggle exists to add, since a hidden card's
   // button can never be tapped. Membership is still visually obvious (✓ vs
   // +), so this doubles as "browse this collection"'s checked-off view.
-  const visibleArticles = articles;
+  //
+  // Search narrows the same list by title/site/author/excerpt, client-side --
+  // there's no mobile search endpoint, and the whole library is already in
+  // hand here.
+  const needle = search.trim().toLowerCase();
+  const visibleArticles = needle
+    ? articles.filter((a) =>
+        [a.title, a.siteName, a.author, a.excerpt].some((f) => (f ?? "").toLowerCase().includes(needle)),
+      )
+    : articles;
 
   if (loading) {
     return (
@@ -255,6 +303,15 @@ export function LibraryScreen({
         </View>
       </View>
 
+      <View style={styles.navRow}>
+        <TouchableOpacity onPress={onOpenFavorites}>
+          <Text style={styles.navLink}>★ Favorites</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onOpenTrash}>
+          <Text style={styles.navLink}>🗑 Trash</Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.saveRow}>
         <TextInput
           style={styles.input}
@@ -270,6 +327,14 @@ export function LibraryScreen({
       <TouchableOpacity onPress={handleUploadFile} disabled={saving} style={styles.uploadRow}>
         <Text style={styles.uploadText}>Or upload a PDF / EPUB</Text>
       </TouchableOpacity>
+      <TextInput
+        style={styles.search}
+        placeholder="Search your library"
+        autoCapitalize="none"
+        value={search}
+        onChangeText={setSearch}
+        clearButtonMode="while-editing"
+      />
       {migrationNotice && <Text style={styles.error}>{migrationNotice}</Text>}
       {error && <Text style={styles.error}>{error}</Text>}
 
@@ -329,6 +394,16 @@ export function LibraryScreen({
                   {item.siteName ?? item.author ?? item.sourceType} · {item.status}
                 </Text>
               </View>
+              <TouchableOpacity
+                style={styles.iconButton}
+                onPress={() => handleToggleFavorite(item)}
+                accessibilityLabel={item.favorited ? "Remove from favorites" : "Add to favorites"}
+              >
+                <Text style={item.favorited ? styles.starActive : styles.starInactive}>{item.favorited ? "★" : "☆"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.iconButton} onPress={() => handleTrash(item)} accessibilityLabel="Delete">
+                <Text style={styles.deleteGlyph}>🗑</Text>
+              </TouchableOpacity>
               {activeCollectionId && (
                 <TouchableOpacity
                   style={[styles.memberButton, collectionMemberIds?.has(item.id) && styles.memberButtonActive]}
@@ -369,6 +444,17 @@ const styles = StyleSheet.create({
   saveButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   uploadRow: { marginBottom: 8 },
   uploadText: { color: "#b5502f", fontSize: 12, fontWeight: "600" },
+  navRow: { flexDirection: "row", gap: 18, marginBottom: 12 },
+  navLink: { color: "#6b6558", fontSize: 13, fontWeight: "600" },
+  search: {
+    borderWidth: 1,
+    borderColor: "#ddd6c7",
+    borderRadius: 6,
+    padding: 10,
+    backgroundColor: "#fff",
+    fontSize: 14,
+    marginBottom: 8,
+  },
   error: { color: "#b5502f", fontSize: 12, marginBottom: 8 },
   chipRow: { marginBottom: 12, flexGrow: 0 },
   chip: {
@@ -398,6 +484,10 @@ const styles = StyleSheet.create({
   cardRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   cardTitle: { fontSize: 16, fontWeight: "600", color: "#1c1a16", marginBottom: 4 },
   cardMeta: { fontSize: 12, color: "#6b6558" },
+  iconButton: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
+  starActive: { fontSize: 18, color: "#b5502f" },
+  starInactive: { fontSize: 18, color: "#b0a998" },
+  deleteGlyph: { fontSize: 15 },
   memberButton: {
     width: 28,
     height: 28,
