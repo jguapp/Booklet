@@ -35,7 +35,15 @@ import {
 
 const RUN = Date.now();
 const PASSWORD = "hunter22222";
-const STORAGE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "storage");
+/** Mirrors storage-service.ts's own root resolution, FILE_STORAGE_PATH
+ * included (#173) -- hardcoding apps/api/storage here would make this file
+ * silently stop checking anything the moment a deployment or a future test
+ * environment sets that variable, since existsSync would just be asked about
+ * a path nothing ever wrote to. */
+const STORAGE_ROOT = path.resolve(
+  process.env.FILE_STORAGE_PATH?.trim() ||
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "storage"),
+);
 
 /** Long enough to clear MIN_PASSAGE_CHARS, and distinctive enough that no
  * other suite's data can land in the same aggregate bucket. */

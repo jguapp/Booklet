@@ -8,6 +8,7 @@ import { BookletPeekMark, PasswordPeekProvider } from "@/components/ui/password-
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { OAuthButtons } from "@/components/auth/oauth-buttons";
+import { LegalFooter } from "@/components/legal/legal-footer";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { ApiError } from "@/lib/api/client";
 
@@ -97,6 +98,8 @@ function SignupPageInner() {
             Skip this — no account needed
           </Link>
         </p>
+
+        <LegalFooter />
       </div>
     </div>
   );

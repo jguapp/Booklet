@@ -298,9 +298,16 @@ docker-build:
         sleep 2
       done
     - |
+      # A real random secret, not the placeholder above. This container runs
+      # the production image, so NODE_ENV is production and tokens.ts refuses
+      # known placeholders and anything under 32 chars there (#174). Passing
+      # the placeholder makes the API refuse to boot and the health check
+      # below time out -- the guard working, reported as a mysterious CI
+      # failure. Whitelisting the placeholder would make the guard theatre.
+      export SMOKE_SECRET=$(head -c 32 /dev/urandom | base64)
       docker run -d --name booklet-api --network booklet-ci \
         -e DATABASE_URL="postgresql://postgres:postgres@booklet-postgres:5432/booklet?schema=public" \
-        -e JWT_ACCESS_SECRET=ci-test-secret-not-for-production \
+        -e JWT_ACCESS_SECRET="$SMOKE_SECRET" \
         -e WEB_ORIGIN=http://localhost:3000 \
         booklet-api \
         sh -c "pnpm --filter @booklet/api exec prisma migrate deploy && node apps/api/dist/index.js"

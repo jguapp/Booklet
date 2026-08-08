@@ -645,6 +645,11 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       //
       // No `deletedAt: null` filter, unlike every read query in the app: a
       // trashed article's upload is still a file on disk.
+      //
+      // Same select and same flatMap as articles.ts's own deleteArticleFiles
+      // (#173), which is module-private there. Duplicated rather than
+      // exported across a route-module boundary for one caller; if a third
+      // caller appears it belongs in storage-service.ts.
       const articles = await prisma.article.findMany({
         where: { userId: user.id },
         select: { fileStorageKey: true, audio: { select: { storageKey: true } } },
