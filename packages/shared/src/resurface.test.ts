@@ -45,6 +45,30 @@ describe("applySm2Review", () => {
     expect(forgot.easinessFactor).toBeLessThan(reviewed.easinessFactor);
   });
 
+  /**
+   * SM-2's interval multiplies without bound, and the result is written into
+   * `Highlight.intervalDays`, a Postgres `Int`. Confirmed by running the
+   * recurrence out at quality 4: review 20 produces ~3.5 billion days (past
+   * Int4's 2,147,483,647, so the write is rejected) and review 21 threw
+   * "RangeError: Invalid time value" out of `new Date(...).toISOString()` --
+   * a bare throw from a pure function, on the client, while recording a
+   * review the reader had already given.
+   */
+  it("caps a long recall streak instead of overflowing the column and then Date", () => {
+    const now = new Date("2026-01-01T00:00:00Z");
+    let reviewed = applySm2Review(DEFAULT_SM2_STATE, feedbackToQuality("REMEMBERED"), now);
+
+    for (let review = 2; review <= 40; review++) {
+      reviewed = applySm2Review(reviewed, feedbackToQuality("REMEMBERED"), now);
+      // Postgres Int4. Was exceeded around review 20.
+      expect(reviewed.intervalDays).toBeLessThanOrEqual(2_147_483_647);
+      // Was a RangeError from review 21 onwards.
+      expect(Number.isNaN(new Date(reviewed.nextDueAt).getTime())).toBe(false);
+    }
+
+    expect(reviewed.intervalDays).toBe(36_500);
+  });
+
   it("never lets the easiness factor drop below 1.3", () => {
     let state = DEFAULT_SM2_STATE;
     for (let i = 0; i < 50; i++) {

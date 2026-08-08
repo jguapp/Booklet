@@ -180,10 +180,29 @@ export async function inlineImages(
     while (nextIndex < attemptedSrcs.length && totalBytes < MAX_TOTAL_IMAGE_BYTES) {
       const src = attemptedSrcs[nextIndex++];
       const dataUri = await fetchImageAsDataUri(src, baseUrl, MAX_TOTAL_IMAGE_BYTES - totalBytes);
-      if (dataUri) {
-        dataUriBySrc.set(src, dataUri.uri);
-        totalBytes += dataUri.byteLength;
-      }
+      if (!dataUri) continue;
+
+      // The budget is spent here, after the await, and the check is redone
+      // against the value totalBytes has *now*.
+      //
+      // Only passing `MAX_TOTAL_IMAGE_BYTES - totalBytes` into the fetch looks
+      // sufficient and is not: IMAGE_FETCH_CONCURRENCY workers run this loop
+      // at the same time, and each of them reads totalBytes before any of them
+      // has added its own image, so all four size themselves against a budget
+      // the other three are already spending. Measured against a server handing
+      // out 2MB images: 20MB inlined under a 15MB cap. The real ceiling was
+      // MAX_TOTAL_IMAGE_BYTES + (concurrency - 1) * MAX_IMAGE_BYTES -- 24MB --
+      // on input a hostile page fully controls, and the result goes into
+      // Article.html, which is stored in Postgres and re-sent on every open.
+      //
+      // Nothing awaits between this test and the increment, so the pair is
+      // atomic with respect to the other workers, and the stale figure handed
+      // to fetchImageAsDataUri now only ever makes it *more* permissive --
+      // which costs at most one already-capped download that gets discarded,
+      // the same thing its own post-download size check already does.
+      if (totalBytes + dataUri.byteLength > MAX_TOTAL_IMAGE_BYTES) continue;
+      dataUriBySrc.set(src, dataUri.uri);
+      totalBytes += dataUri.byteLength;
     }
   }
   await Promise.all(Array.from({ length: IMAGE_FETCH_CONCURRENCY }, worker));
