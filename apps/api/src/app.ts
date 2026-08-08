@@ -19,6 +19,8 @@ import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerV1Routes } from "./routes/v1.js";
 import { registerTtsRoute } from "./routes/tts.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { registerShareRoutes } from "./routes/shares.js";
+import { registerPodcastRoutes } from "./routes/podcast.js";
 import { captureException, initErrorMonitoring } from "./lib/error-monitoring.js";
 import { isAllowedOrigin } from "./lib/cors.js";
 import { ttsPoolStatus } from "./services/tts-pool.js";
@@ -142,6 +144,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerV1Routes(app);
   await registerTtsRoute(app);
   await registerStatsRoutes(app);
+  await registerShareRoutes(app);
+  await registerPodcastRoutes(app);
 
   return app;
 }
