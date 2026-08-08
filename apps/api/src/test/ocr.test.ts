@@ -30,10 +30,34 @@ describe("isTextSparse", () => {
 // exercises the exact same recognize() call pdf-extraction.ts makes
 // against a rendered page image, just without the PDF-parsing layer
 // around it.
+/** tesseract.js fetches its ~15MB trained data from a CDN on first use, so
+ * this test is only meaningful where that CDN is reachable. Probing and
+ * skipping, rather than letting it fail, is the difference between a verify
+ * run that stays trustworthy offline and one that is permanently red -- and a
+ * permanently red check is one people learn to ignore. The failure path is
+ * covered without any network at all in ocr-failure.test.ts, so skipping here
+ * loses only the "does real OCR work in this environment" signal, which is
+ * exactly the thing that cannot be answered without the network anyway. */
+async function trainedDataReachable(): Promise<boolean> {
+  try {
+    const res = await fetch("https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz", {
+      method: "HEAD",
+      signal: AbortSignal.timeout(5000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 describe("OcrWorkerPool", () => {
   it(
     "recognizes real rendered text from an image",
-    async () => {
+    async (test) => {
+      if (!(await trainedDataReachable())) {
+        test.skip("tesseract trained-data CDN unreachable -- see ocr-failure.test.ts for the offline coverage");
+        return;
+      }
       const canvas = createCanvas(400, 100);
       const ctx = canvas.getContext("2d");
       ctx.fillStyle = "white";
