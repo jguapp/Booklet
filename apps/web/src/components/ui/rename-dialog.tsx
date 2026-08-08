@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useModalFocus } from "@/lib/a11y/modal-focus";
 import { Input } from "./input";
 
 interface RenameDialogProps {
@@ -27,17 +28,14 @@ export function RenameDialog({
   onCancel,
 }: RenameDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const [value, setValue] = useState(initialValue);
+  useModalFocus(formRef, onCancel);
 
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onCancel]);
+  }, []);
 
   const trimmed = value.trim();
   const canSave = trimmed.length > 0 && trimmed !== initialValue.trim();
@@ -50,6 +48,7 @@ export function RenameDialog({
       }}
     >
       <form
+        ref={formRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="rename-dialog-title"

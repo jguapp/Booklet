@@ -129,6 +129,20 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   const generationRef = useRef(0);
   const resolveCurrentChunkRef = useRef<(() => void) | null>(null);
 
+  // Which engine is actually producing sound right now, decided once by
+  // play() and not re-derived afterwards.
+  //
+  // pause()/resume() used to branch on isKokoroVoice(reader.ttsVoice) -- the
+  // *current* preference, not the engine that started this playback. Those
+  // are the same value only until someone changes the voice mid-article, and
+  // the player bar puts that dropdown right next to the pause button (see
+  // tts-player-bar.tsx), so it takes two clicks: start on the system voice,
+  // switch to a Kokoro voice, press Pause. pause() then called
+  // audioElRef.current?.pause() on a null ref while SpeechSynthesis kept
+  // talking, and the bar showed "Paused" over a voice that would not stop --
+  // short of pressing Stop, which cancels both engines unconditionally.
+  const engineRef = useRef<"kokoro" | "native" | null>(null);
+
   // Real, measured first-chunk generation time is the whole "TTS feels slow
   // to start" complaint -- several seconds on CPU, unavoidable without
   // dedicated inference hardware (see tts-service.ts's own doc comment).
@@ -272,6 +286,7 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
     utteranceRef.current = null;
     audioElRef.current?.pause();
     audioElRef.current = null;
+    engineRef.current = null;
     resolveCurrentChunkRef.current?.();
     resolveCurrentChunkRef.current = null;
     revokeObjectUrl();
@@ -291,11 +306,15 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
     utterance.rate = readerRef.current.ttsRate;
     utterance.volume = readerRef.current.ttsVolume;
     utterance.onend = () => {
+      engineRef.current = null;
       setStatus("idle");
       setArticleId(null);
       setArticleTitle(null);
     };
-    utterance.onerror = () => setStatus("idle");
+    utterance.onerror = () => {
+      engineRef.current = null;
+      setStatus("idle");
+    };
     utteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
     setStatus("playing");
@@ -500,6 +519,14 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
         }
       } finally {
         if (generationRef.current === myGeneration) {
+          // Only stop() used to reach these, so an article played to its end
+          // left the last chunk's Blob URL alive (several MB of decoded audio
+          // pinned for the life of the tab, once per article finished) and
+          // left audioElRef pointing at a finished element the transport
+          // controls could still act on.
+          revokeObjectUrl();
+          audioElRef.current = null;
+          engineRef.current = null;
           setStatus("idle");
           setArticleId(null);
           setArticleTitle(null);
@@ -518,8 +545,10 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
       setArticleId(newArticleId);
       setArticleTitle(newArticleTitle);
       if (isKokoroVoice(reader.ttsVoice)) {
+        engineRef.current = "kokoro";
         playKokoro(newArticleId, text);
       } else {
+        engineRef.current = "native";
         playNative(text);
       }
     },
@@ -527,24 +556,31 @@ export function TtsPlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const pause = useCallback(() => {
-    if (!supported) return;
-    if (isKokoroVoice(reader.ttsVoice)) {
+    if (!supported || !engineRef.current) return;
+    if (engineRef.current === "kokoro") {
       audioElRef.current?.pause();
     } else {
       window.speechSynthesis.pause();
     }
     setStatus("paused");
-  }, [supported, reader.ttsVoice]);
+  }, [supported]);
 
   const resume = useCallback(() => {
-    if (!supported) return;
-    if (isKokoroVoice(reader.ttsVoice)) {
-      audioElRef.current?.play();
+    if (!supported || !engineRef.current) return;
+    if (engineRef.current === "kokoro") {
+      // HTMLMediaElement#play() reports failure by rejecting, not throwing.
+      // Left unhandled that is a console rejection plus a bar stuck on
+      // "Playing" with nothing audible behind it, which is the same silent
+      // failure the chunk-fetch path above already refuses to ship.
+      audioElRef.current?.play().catch(() => {
+        setStatus("paused");
+        toast("Couldn't resume reading aloud.");
+      });
     } else {
       window.speechSynthesis.resume();
     }
     setStatus("playing");
-  }, [supported, reader.ttsVoice]);
+  }, [supported, toast]);
 
   return (
     <TtsPlayerContext.Provider

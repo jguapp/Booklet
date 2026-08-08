@@ -176,6 +176,7 @@ export function HighlightPopover({ anchorRect, selectedText, onConfirm, onDismis
             autoFocus
             value={note}
             onChange={(e) => setNote(e.target.value)}
+            aria-label="Note"
             placeholder="Add a note…"
             rows={2}
             className="w-56 resize-none rounded-sm border border-border bg-paper px-2.5 py-2 font-sans text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:ring-2 focus-visible:ring-accent"

@@ -156,9 +156,20 @@ export async function loadArticlesInCollection(
       .sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
   }
 
-  const links = await localArticleCollections.getForCollection(collectionId);
-  const articleIds = new Set(links.map((l) => l.articleId));
-  return all.filter((a) => articleIds.has(a.id));
+  // Most-recently-added first, the same order the server returns (its route
+  // orders the join rows by addedAt desc -- see apps/api's
+  // /api/collections/:id/articles). Without this the local branch handed back
+  // whatever order IndexedDB's getAll happened to produce, which is key order
+  // over random UUIDs -- so the same collection listed its articles in one
+  // order signed out and a completely different one signed in, and adding an
+  // article to a collection didn't put it at the top the way it does on the
+  // server. The smart-collection branch above already sorts for exactly this
+  // reason; the manual branch was simply missed.
+  const links = (await localArticleCollections.getForCollection(collectionId)).sort(
+    (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
+  );
+  const byId = new Map(all.map((a) => [a.id, a]));
+  return links.map((l) => byId.get(l.articleId)).filter((a) => a !== undefined);
 }
 
 export async function addArticleToCollection(

@@ -8,6 +8,7 @@ import { loadArticles } from "@/lib/data/articles";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { useOnTrashed } from "@/lib/dnd/trash-drop";
 import { useToast } from "@/lib/toast/toast-provider";
+import { LoadError } from "@/components/ui/load-error";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
@@ -41,11 +42,14 @@ export default function RecapPage() {
   const { status, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [articles, setArticles] = useState<Article[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [period, setPeriod] = useState<RecapPeriod>("week");
 
   const refresh = useCallback(() => {
     if (status === "loading") return;
-    loadArticles(isAuthenticated).then(setArticles);
+    // Without the catch, a rejected fetch left `articles` null forever and
+    // the page rendered nothing -- see components/ui/load-error.tsx.
+    loadArticles(isAuthenticated).then(setArticles).catch(() => setLoadFailed(true));
   }, [status, isAuthenticated]);
 
   useEffect(() => {
@@ -54,6 +58,15 @@ export default function RecapPage() {
   useOnTrashed(refresh);
 
   const recap = useMemo(() => (articles ? computeRecap(articles, period) : null), [articles, period]);
+
+  if (!articles && loadFailed) {
+    return (
+      <div className="mx-auto max-w-2xl px-8 py-10">
+        <h1 className="mb-6 font-serif text-2xl font-semibold text-ink">Recap</h1>
+        <LoadError message="Couldn't load your recap. Check your connection and try again." onRetry={refresh} />
+      </div>
+    );
+  }
 
   if (!articles || !recap) return null;
 

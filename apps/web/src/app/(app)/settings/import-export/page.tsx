@@ -111,6 +111,9 @@ export default function ImportExportPage() {
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportingAnki, setExportingAnki] = useState(false);
+  // Shown under the export buttons. Only ever set on failure: a successful
+  // export announces itself by the browser's own download.
+  const [exportError, setExportError] = useState<string | null>(null);
 
   async function runImport(rows: ImportRow[]) {
     if (rows.length === 0) {
@@ -119,11 +122,19 @@ export default function ImportExportPage() {
     }
     setImporting(true);
     setImportStatus(`Importing 0 / ${rows.length}…`);
-    const result = await importUrls(rows, status === "authenticated", (done, total) =>
-      setImportStatus(`Importing ${done} / ${total}…`),
-    );
-    setImporting(false);
-    setImportStatus(`Imported ${result.imported}, skipped ${result.skipped} already-saved, ${result.failed} failed.`);
+    try {
+      const result = await importUrls(rows, status === "authenticated", (done, total) =>
+        setImportStatus(`Importing ${done} / ${total}…`),
+      );
+      setImportStatus(`Imported ${result.imported}, skipped ${result.skipped} already-saved, ${result.failed} failed.`);
+    } catch {
+      // importUrls swallows per-article failures into its own counts, so
+      // reaching here means the whole run died -- and the status line would
+      // otherwise sit on "Importing 12 / 300…" forever.
+      setImportStatus("The import stopped early. Whatever was imported before that is in your library.");
+    } finally {
+      setImporting(false);
+    }
   }
 
   async function handleCsvFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -163,8 +174,14 @@ export default function ImportExportPage() {
 
   async function handleExport() {
     setExporting(true);
+    setExportError(null);
     try {
       await exportAsMarkdownZip(status === "authenticated");
+    } catch {
+      // try/finally with no catch meant a failed export was indistinguishable
+      // from a finished one: the button went back to "Export .zip" and no
+      // file arrived, which reads as the browser having blocked the download.
+      setExportError("Couldn't build that export. Check your connection and try again.");
     } finally {
       setExporting(false);
     }
@@ -172,8 +189,11 @@ export default function ImportExportPage() {
 
   async function handleAnkiExport() {
     setExportingAnki(true);
+    setExportError(null);
     try {
       await exportAsAnkiText(status === "authenticated");
+    } catch {
+      setExportError("Couldn't build that export. Check your connection and try again.");
     } finally {
       setExportingAnki(false);
     }
@@ -322,6 +342,7 @@ export default function ImportExportPage() {
             onClick={handleAnkiExport}
           />
         </div>
+        {exportError && <p className="mt-3 font-sans text-sm text-ink-muted">{exportError}</p>}
       </section>
     </div>
   );

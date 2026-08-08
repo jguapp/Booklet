@@ -169,6 +169,7 @@ export function HighlightListItem({
                 maxLength={MAX_RECALL_PROMPT_LENGTH}
                 value={promptDraft}
                 onChange={(e) => setPromptDraft(e.target.value)}
+                aria-label="Recall prompt"
                 placeholder="Ask a question this highlight answers…"
                 className="w-full resize-none rounded-sm border border-border bg-paper px-2.5 py-2 font-sans text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />
@@ -190,6 +191,7 @@ export function HighlightListItem({
                 rows={2}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                aria-label="Note"
                 placeholder="Add a note…"
                 className="w-full resize-none rounded-sm border border-border bg-paper px-2.5 py-2 font-sans text-sm text-ink placeholder:text-ink-faint outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />

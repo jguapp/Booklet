@@ -1,10 +1,5 @@
 import type { Highlight } from "@booklet/shared";
-import { EpubCFI } from "epubjs";
-
-// One EpubCFI instance reused for every comparison -- compare() doesn't
-// hold any state between calls, this just avoids constructing a fresh one
-// per pair.
-const cfiComparer = new EpubCFI();
+import { compareCfi } from "./cfi";
 
 /** Where a highlight sits within its own article, in reading order --
  * unlike `createdAt`, which only reflects when it happened to be made
@@ -25,7 +20,7 @@ export function comparePositionInArticle(a: Highlight, b: Highlight): number {
     return topOf(posB.rects) - topOf(posA.rects);
   }
   if (posA.type === "epub" && posB.type === "epub") {
-    return cfiComparer.compare(posA.cfi, posB.cfi);
+    return compareCfi(posA.cfi, posB.cfi);
   }
   // Different position types (shouldn't happen within one article) --
   // stable no-op rather than an arbitrary ordering.
