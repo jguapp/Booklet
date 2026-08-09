@@ -2,10 +2,10 @@
 
 An Expo/React Native app: continue without an account or log in, see your
 library, save a URL or upload a PDF/EPUB, organize into collections, search
-your library, favorite and trash articles, read and highlight, and run
-Daily Review. Reuses the same API and `@booklet/shared` types as the web
-app, per the README roadmap's "reusing the same API and data model rather
-than a rewrite."
+your library, favorite and trash articles, read and highlight, browse all
+your highlights with notes and recall prompts, and run Daily Review. Reuses
+the same API and `@booklet/shared` types as the web app, per the README
+roadmap's "reusing the same API and data model rather than a rewrite."
 
 ## Scope
 
@@ -81,6 +81,24 @@ styled nested `Text`. Anchoring reuses `computeTextPosition` from
 `@booklet/shared` unchanged -- it's already just plain-text-offset based,
 the same one the web app uses for HTML articles, and mobile only ever
 highlights `extractedText`, never a PDF/EPUB position.
+
+**Highlights browsing** -- `HighlightsScreen` mirrors the web app's
+/highlights page minus sharing and onboarding seeds: grouped-by-article
+cards when browsing everything (only when there are 2+ articles with
+highlights, same rule as web), a flat list once an article is picked or a
+search is typed (reading order within one article -- mobile only ever
+creates plain-text positions, so `position.start` is the whole ordering;
+creation order across articles), search over highlight text and notes, and
+per-highlight actions: add/edit a note, add/edit a recall prompt (#157 --
+shown as a question in Daily Review before the reveal), and delete with the
+same two-tap inline confirm Trash uses. Emptying a note and saving removes
+it (the API's annotation DELETE is a `deleteMany`, so deleting a
+never-created note is a safe no-op). The reader (`ArticleScreen`) also
+gained the two article-level edits whose data functions previously had no
+UI: a status chip row (Unread / Reading / Archived) and inline rename --
+explicit Save/Cancel buttons rather than submit-on-blur, because the
+collection input's Done-press-also-blurs double-fire is a class of bug two
+buttons can't have.
 
 No navigation library -- a handful of screens and a session check don't
 need React Navigation's setup (and its native-linking config) for an app
