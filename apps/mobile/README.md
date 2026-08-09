@@ -4,10 +4,11 @@ An Expo/React Native app: continue without an account or log in, see your
 library, save a URL or upload a PDF/EPUB, organize into collections, search
 your library, favorite and trash articles, read and highlight, listen with
 server-generated read-aloud, browse all your highlights with notes and
-recall prompts, follow RSS feeds, check your reading stats and Recap, tune
-device settings, and run Daily Review. Reuses the same API and
-`@booklet/shared` types as the web app, per the README roadmap's "reusing
-the same API and data model rather than a rewrite."
+recall prompts, follow RSS feeds, check your reading stats and Recap, pick
+a theme, get a Daily Review reminder, manage your account, and run Daily
+Review. Reuses the same API and `@booklet/shared` types as the web app,
+per the README roadmap's "reusing the same API and data model rather than
+a rewrite."
 
 ## Scope
 
@@ -147,18 +148,53 @@ never-listened article keeps its `null` fraction. Starting the player
 resumes from `listeningFraction`, including a position written by the web
 reader on another device.
 
-**Settings** -- device-level preferences plus a light account section:
-reader text size (small/medium/large, applied in `ArticleScreen`),
-read-aloud voice and speed (`src/lib/device-prefs.ts`, AsyncStorage,
-validated on read like the web's device-prefs loader), and signed-in
-email (fetched fresh from `GET /api/auth/me` -- the profile isn't stored
-beside the token, where it would go stale) with log out. Deliberately much
-smaller than web Settings: Kindle email, the podcast feed URL, session
-management, import/export and account deletion stay web-only -- each
-either needs UI this app doesn't have or shouldn't exist without its full
-confirmation flow. These prefs are device-local on web too: ideal text
-size and which voice sounds best are properties of the screen/ear, not
-the account.
+**Settings** -- device-level preferences plus the account section: theme
+(below), reader text size (small/medium/large, applied in
+`ArticleScreen`), read-aloud voice and speed (`src/lib/device-prefs.ts`,
+AsyncStorage, validated on read like the web's device-prefs loader), the
+Daily Review reminder (below), signed-in email (fetched fresh from `GET
+/api/auth/me` -- the profile isn't stored beside the token, where it
+would go stale) with log out, and account deletion. Deletion uses the
+same confirmation contract as the web page: the server re-checks a
+password, or the typed-out email address for an OAuth-only account
+(`UserProfile.hasPassword` picks which field the form shows), so the
+client cannot skip the deliberate step even in principle; afterwards the
+local token is cleared so the next launch doesn't render a signed-in
+shell for an account that no longer exists. (App Store and Play policy
+both require in-app deletion for published apps, so this stopped being
+web-only ahead of any store submission.) Still web-only: Kindle email,
+the podcast feed URL (a reveal-once secret needing a clipboard), session
+management, and import/export (file downloads).
+
+**Themes** -- the same four as the web app (Paper, Lamp, Night, Kindle),
+with the same palette hexes as `apps/web/src/app/globals.css`, so an
+article looks like the same product on both clients. The web keys its
+palettes off a `data-theme` attribute and CSS variables; React Native has
+neither, so `src/lib/theme.tsx` hands each theme out as a concrete
+palette object through context and every screen builds its `StyleSheet`
+from it (`makeStyles(palette)`, memoized per theme). The default is
+"System" -- resolved against `useColorScheme()`, matching what the web
+does when nothing is stored (its `prefers-color-scheme` block picks Night
+on a dark device). Two RN-only palette additions: `accentSoft` (the
+stand-in for the web's translucent `bg-accent/10` chip fill, which RN
+can't express over a variable background) and `danger` (the web uses
+red-500 and lets Kindle's blanket `grayscale(1)` CSS filter neutralize
+it; RN has no such filter, so Kindle picks its gray by hand). The status
+bar follows the theme rather than the OS -- "auto" is wrong the moment
+the user picks Night on a light-mode phone.
+
+**Daily Review reminder** -- a locally-scheduled notification
+(`expo-notifications`), not remote push: there is no push infrastructure
+to build on (no sender, no device-token store), and a fixed-time daily
+reminder doesn't need any -- the OS fires it on-device, connection or
+not, and nothing about your reading leaves the phone for it. Off by
+default; enabling asks for the OS notification permission and refuses to
+record an hour if it's denied, so the control never shows an
+enabled-looking reminder that will never fire. Hidden entirely on the web
+target, where expo-notifications doesn't exist. Note: remote push was
+removed from Expo Go in SDK 53, but locally-scheduled notifications like
+this one still work there on Android/iOS dev builds -- worth re-checking
+on a real device all the same.
 
 No navigation library -- a handful of screens and a session check don't
 need React Navigation's setup (and its native-linking config) for an app

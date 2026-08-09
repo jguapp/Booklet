@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { ApiError, login } from "../lib/api";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface LoginScreenProps {
   onLoggedIn: () => void;
@@ -8,6 +9,8 @@ interface LoginScreenProps {
 }
 
 export function LoginScreen({ onLoggedIn, onContinueWithoutAccount }: LoginScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -36,6 +39,7 @@ export function LoginScreen({ onLoggedIn, onContinueWithoutAccount }: LoginScree
 
       <TextInput
         style={styles.input}
+        placeholderTextColor={palette.inkFaint}
         placeholder="Email"
         autoCapitalize="none"
         keyboardType="email-address"
@@ -44,6 +48,7 @@ export function LoginScreen({ onLoggedIn, onContinueWithoutAccount }: LoginScree
       />
       <TextInput
         style={styles.input}
+        placeholderTextColor={palette.inkFaint}
         placeholder="Password"
         secureTextEntry
         value={password}
@@ -53,7 +58,7 @@ export function LoginScreen({ onLoggedIn, onContinueWithoutAccount }: LoginScree
       {error && <Text style={styles.error}>{error}</Text>}
 
       <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={submitting}>
-        {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log in</Text>}
+        {submitting ? <ActivityIndicator color={palette.accentContrast} /> : <Text style={styles.buttonText}>Log in</Text>}
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.secondaryButton} onPress={onContinueWithoutAccount} disabled={submitting}>
@@ -63,22 +68,24 @@ export function LoginScreen({ onLoggedIn, onContinueWithoutAccount }: LoginScree
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 24, backgroundColor: "#f7f4ee" },
-  title: { fontSize: 28, fontWeight: "700", marginBottom: 8, color: "#1c1a16" },
-  subtitle: { fontSize: 13, color: "#6b6558", marginBottom: 24, lineHeight: 18 },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ddd6c7",
-    borderRadius: 6,
-    padding: 12,
-    marginBottom: 12,
-    backgroundColor: "#fff",
-    fontSize: 15,
-  },
-  button: { backgroundColor: "#b5502f", borderRadius: 6, padding: 14, alignItems: "center", marginTop: 8 },
-  buttonText: { color: "#fff", fontWeight: "600", fontSize: 15 },
-  secondaryButton: { padding: 14, alignItems: "center", marginTop: 4 },
-  secondaryButtonText: { color: "#6b6558", fontWeight: "600", fontSize: 14 },
-  error: { color: "#b5502f", marginBottom: 12, fontSize: 13 },
-});
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+    container: { flex: 1, justifyContent: "center", padding: 24, backgroundColor: t.paper },
+    title: { fontSize: 28, fontWeight: "700", marginBottom: 8, color: t.ink },
+    subtitle: { fontSize: 13, color: t.inkMuted, marginBottom: 24, lineHeight: 18 },
+    input: {
+      borderWidth: 1,
+      borderColor: t.border,
+      borderRadius: 6,
+      padding: 12,
+      marginBottom: 12,
+      backgroundColor: t.surface,
+      fontSize: 15,
+      color: t.ink,
+    },
+    button: { backgroundColor: t.accent, borderRadius: 6, padding: 14, alignItems: "center", marginTop: 8 },
+    buttonText: { color: t.accentContrast, fontWeight: "600", fontSize: 15 },
+    secondaryButton: { padding: 14, alignItems: "center", marginTop: 4 },
+    secondaryButtonText: { color: t.inkMuted, fontWeight: "600", fontSize: 14 },
+    error: { color: t.danger, marginBottom: 12, fontSize: 13 },
+  });

@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { AuthResponse, UserProfile } from "@booklet/shared";
+import type { AuthResponse, DeleteAccountRequest, UserProfile } from "@booklet/shared";
 import { API_URL } from "./config";
 
 interface StoredSession {
@@ -117,16 +117,14 @@ export async function apiFetch<T>(path: string, options: RequestInit & { auth?: 
 }
 
 /**
- * Login and getProfile are the only auth calls this app makes, and that is
- * a scope decision rather than an oversight. Signup, password reset,
- * settings updates, session management and account deletion (#174, DELETE
- * /api/auth/me) all exist on the API and all have web counterparts in
- * apps/web/src/lib/data/; none has a screen here, and shipping a data
- * function with no caller would just be untested code that looks supported.
- * Account deletion in particular must not be added without its confirmation
- * UI: the route takes a password or a typed-out email depending on
- * UserProfile.hasPassword, and getting that branch wrong on a mobile
- * keyboard deletes a library that cannot come back.
+ * Login, getProfile and deleteAccount are the only auth calls this app
+ * makes, and that is a scope decision rather than an oversight. Signup,
+ * password reset, settings updates and session management all exist on the
+ * API and all have web counterparts in apps/web/src/lib/data/; none has a
+ * screen here, and shipping a data function with no caller would just be
+ * untested code that looks supported. deleteAccount was held back until the
+ * Settings screen grew its confirmation UI for exactly that reason -- see
+ * its own comment below.
  */
 export async function login(email: string, password: string): Promise<UserProfile> {
   const body = await apiFetch<AuthResponse>("/api/auth/login", {
@@ -144,5 +142,18 @@ export async function login(email: string, password: string): Promise<UserProfil
  * fetches it fresh. */
 export async function getProfile(): Promise<UserProfile> {
   return apiFetch<UserProfile>("/api/auth/me");
+}
+
+/**
+ * Permanently deletes the account (#174). The server re-checks the
+ * confirmation itself -- password, or the typed-out email for an OAuth-only
+ * account -- so this can't be called meaningfully without the Settings
+ * screen's confirmation UI, which is exactly the property the module
+ * comment above demands of it. No local-mode counterpart on purpose, same
+ * as the web's account.ts: a device with no account has nothing on the
+ * server to delete, and clearing local data is a different action.
+ */
+export async function deleteAccount(confirmation: DeleteAccountRequest): Promise<void> {
+  await apiFetch("/api/auth/me", { method: "DELETE", body: JSON.stringify(confirmation) });
 }
 

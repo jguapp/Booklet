@@ -27,17 +27,25 @@ export const TEXT_SIZES: { value: TextSize; label: string; fontSize: number; lin
 /** Matches the web picker's range; the server validates 0.5-2 too. */
 export const TTS_RATES = [0.75, 1, 1.25, 1.5];
 
+/** The reminder hours Settings offers -- morning, lunch, evening. */
+export const REMINDER_HOURS = [8, 12, 20];
+
 export interface DevicePrefs {
   textSize: TextSize;
   /** A Kokoro voice id -- see the header for why there's no "system" option. */
   ttsVoice: string;
   ttsRate: number;
+  /** Hour (0-23) of the local daily-review reminder; null = off. The
+   * notification itself is scheduled through lib/notifications.ts -- this
+   * is only what the Settings UI reads back. */
+  reviewReminderHour: number | null;
 }
 
 export const DEFAULT_PREFS: DevicePrefs = {
   textSize: "md",
   ttsVoice: "af_heart",
   ttsRate: 1,
+  reviewReminderHour: null,
 };
 
 export async function loadDevicePrefs(): Promise<DevicePrefs> {
@@ -59,6 +67,13 @@ export async function loadDevicePrefs(): Promise<DevicePrefs> {
         typeof parsed.ttsRate === "number" && parsed.ttsRate >= 0.5 && parsed.ttsRate <= 2
           ? parsed.ttsRate
           : DEFAULT_PREFS.ttsRate,
+      reviewReminderHour:
+        typeof parsed.reviewReminderHour === "number" &&
+        Number.isInteger(parsed.reviewReminderHour) &&
+        parsed.reviewReminderHour >= 0 &&
+        parsed.reviewReminderHour <= 23
+          ? parsed.reviewReminderHour
+          : DEFAULT_PREFS.reviewReminderHour,
     };
   } catch {
     return DEFAULT_PREFS;

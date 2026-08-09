@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -28,6 +28,7 @@ import {
   loadCollections,
   removeArticleFromCollection,
 } from "../lib/data/collections";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface LibraryScreenProps {
   authenticated: boolean;
@@ -61,6 +62,8 @@ export function LibraryScreen({
   onSignedOut,
   migrationNotice,
 }: LibraryScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
@@ -335,13 +338,14 @@ export function LibraryScreen({
       <View style={styles.saveRow}>
         <TextInput
           style={styles.input}
+          placeholderTextColor={palette.inkFaint}
           placeholder="Paste a URL to save"
           autoCapitalize="none"
           value={url}
           onChangeText={setUrl}
         />
         <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
-          {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveButtonText}>Save</Text>}
+          {saving ? <ActivityIndicator color={palette.accentContrast} size="small" /> : <Text style={styles.saveButtonText}>Save</Text>}
         </TouchableOpacity>
       </View>
       <TouchableOpacity onPress={handleUploadFile} disabled={saving} style={styles.uploadRow}>
@@ -349,6 +353,7 @@ export function LibraryScreen({
       </TouchableOpacity>
       <TextInput
         style={styles.search}
+        placeholderTextColor={palette.inkFaint}
         placeholder="Search your library"
         autoCapitalize="none"
         value={search}
@@ -377,6 +382,7 @@ export function LibraryScreen({
         {addingCollection ? (
           <TextInput
             style={styles.newCollectionInput}
+            placeholderTextColor={palette.inkFaint}
             placeholder="Collection name"
             autoFocus
             value={newCollectionName}
@@ -442,82 +448,86 @@ export function LibraryScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f4ee", paddingTop: 56, paddingHorizontal: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f4ee" },
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.paper, paddingTop: 56, paddingHorizontal: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.paper },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16" },
+  title: { fontSize: 24, fontWeight: "700", color: t.ink },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 14 },
-  dailyReviewLink: { color: "#1F6F6B", fontSize: 13, fontWeight: "600" },
-  logout: { color: "#6b6558", fontSize: 13 },
+  dailyReviewLink: { color: t.accent, fontSize: 13, fontWeight: "600" },
+  logout: { color: t.inkMuted, fontSize: 13 },
   saveRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 6,
     padding: 10,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     fontSize: 14,
+      color: t.ink,
   },
-  saveButton: { backgroundColor: "#b5502f", borderRadius: 6, paddingHorizontal: 16, justifyContent: "center" },
-  saveButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
+  saveButton: { backgroundColor: t.accent, borderRadius: 6, paddingHorizontal: 16, justifyContent: "center" },
+  saveButtonText: { color: t.accentContrast, fontWeight: "600", fontSize: 14 },
   uploadRow: { marginBottom: 8 },
-  uploadText: { color: "#b5502f", fontSize: 12, fontWeight: "600" },
+  uploadText: { color: t.accent, fontSize: 12, fontWeight: "600" },
   navRow: { flexDirection: "row", flexWrap: "wrap", gap: 18, marginBottom: 12 },
-  navLink: { color: "#6b6558", fontSize: 13, fontWeight: "600" },
+  navLink: { color: t.inkMuted, fontSize: 13, fontWeight: "600" },
   search: {
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 6,
     padding: 10,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     fontSize: 14,
     marginBottom: 8,
+      color: t.ink,
   },
-  error: { color: "#b5502f", fontSize: 12, marginBottom: 8 },
+  error: { color: t.danger, fontSize: 12, marginBottom: 8 },
   chipRow: { marginBottom: 12, flexGrow: 0 },
   chip: {
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
   },
-  chipActive: { borderColor: "#b5502f", backgroundColor: "#fbe9e3" },
-  chipText: { fontSize: 13, color: "#6b6558" },
-  chipTextActive: { color: "#b5502f", fontWeight: "600" },
+  chipActive: { borderColor: t.accent, backgroundColor: t.accentSoft },
+  chipText: { fontSize: 13, color: t.inkMuted },
+  chipTextActive: { color: t.accent, fontWeight: "600" },
   newCollectionInput: {
     borderWidth: 1,
-    borderColor: "#b5502f",
+    borderColor: t.accent,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     fontSize: 13,
     minWidth: 140,
+      color: t.ink,
   },
-  empty: { textAlign: "center", color: "#6b6558", marginTop: 40 },
-  hint: { fontSize: 11, color: "#6b6558", marginBottom: 10 },
-  card: { backgroundColor: "#fff", borderRadius: 8, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#ece6d8" },
+  empty: { textAlign: "center", color: t.inkMuted, marginTop: 40 },
+  hint: { fontSize: 11, color: t.inkMuted, marginBottom: 10 },
+  card: { backgroundColor: t.surface, borderRadius: 8, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: t.border },
   cardRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  cardTitle: { fontSize: 16, fontWeight: "600", color: "#1c1a16", marginBottom: 4 },
-  cardMeta: { fontSize: 12, color: "#6b6558" },
+  cardTitle: { fontSize: 16, fontWeight: "600", color: t.ink, marginBottom: 4 },
+  cardMeta: { fontSize: 12, color: t.inkMuted },
   iconButton: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
-  starActive: { fontSize: 18, color: "#b5502f" },
-  starInactive: { fontSize: 18, color: "#b0a998" },
+  starActive: { fontSize: 18, color: t.accent },
+  starInactive: { fontSize: 18, color: t.inkFaint },
   deleteGlyph: { fontSize: 15 },
   memberButton: {
     width: 28,
     height: 28,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     alignItems: "center",
     justifyContent: "center",
   },
-  memberButtonActive: { backgroundColor: "#b5502f", borderColor: "#b5502f" },
-  memberButtonText: { fontSize: 14, color: "#6b6558", fontWeight: "600" },
-  memberButtonTextActive: { color: "#fff" },
+  memberButtonActive: { backgroundColor: t.accent, borderColor: t.accent },
+  memberButtonText: { fontSize: 14, color: t.inkMuted, fontWeight: "600" },
+  memberButtonTextActive: { color: t.accentContrast },
 });
