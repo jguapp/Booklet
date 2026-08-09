@@ -3,9 +3,10 @@
 An Expo/React Native app: continue without an account or log in, see your
 library, save a URL or upload a PDF/EPUB, organize into collections, search
 your library, favorite and trash articles, read and highlight, browse all
-your highlights with notes and recall prompts, and run Daily Review. Reuses
-the same API and `@booklet/shared` types as the web app, per the README
-roadmap's "reusing the same API and data model rather than a rewrite."
+your highlights with notes and recall prompts, check your reading stats and
+Recap, and run Daily Review. Reuses the same API and `@booklet/shared`
+types as the web app, per the README roadmap's "reusing the same API and
+data model rather than a rewrite."
 
 ## Scope
 
@@ -99,6 +100,21 @@ UI: a status chip row (Unread / Reading / Archived) and inline rename --
 explicit Save/Cancel buttons rather than submit-on-blur, because the
 collection input's Done-press-also-blurs double-fire is a class of bug two
 buttons can't have.
+
+**Stats and Recap** -- ports of the web pages, computed by the same
+`computeReadingStats` / `computeRecap` from `@booklet/shared` over the same
+loaded article list. `StatsScreen` has the six stat cards, the past-year
+reading heatmap (real per-day minutes from `/api/stats/reading-activity`
+when signed in; the articles-finished-per-day `archivedAt` heuristic in
+local mode, same fallback as web -- mobile itself doesn't track reading
+time yet), top tags, and the by-source breakdown. The heatmap starts
+scrolled to its right end, where "now" is, and has no per-day tooltips (no
+hover on a touch screen, and an 11px square isn't a tap target).
+`RecapScreen` is the week/month toggle and big numbers, minus web's "Copy
+summary" -- RN's core Clipboard is deprecated and `expo-clipboard` isn't a
+dependency that one button justifies adding. `formatDuration` is copied
+into `src/lib/format.ts` rather than moved to shared, since it's the only
+formatter mobile needs.
 
 No navigation library -- a handful of screens and a session check don't
 need React Navigation's setup (and its native-linking config) for an app

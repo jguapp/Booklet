@@ -35,6 +35,7 @@ interface LibraryScreenProps {
   onOpenDailyReview: () => void;
   onOpenFavorites: () => void;
   onOpenHighlights: () => void;
+  onOpenStats: () => void;
   onOpenTrash: () => void;
   onSignedOut: () => void;
   /** Set when logging in couldn't move this device's local library onto the
@@ -51,6 +52,7 @@ export function LibraryScreen({
   onOpenDailyReview,
   onOpenFavorites,
   onOpenHighlights,
+  onOpenStats,
   onOpenTrash,
   onSignedOut,
   migrationNotice,
@@ -312,6 +314,9 @@ export function LibraryScreen({
         <TouchableOpacity onPress={onOpenHighlights}>
           <Text style={styles.navLink}>✎ Highlights</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={onOpenStats}>
+          <Text style={styles.navLink}>▤ Stats</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={onOpenTrash}>
           <Text style={styles.navLink}>🗑 Trash</Text>
         </TouchableOpacity>
@@ -449,7 +454,7 @@ const styles = StyleSheet.create({
   saveButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   uploadRow: { marginBottom: 8 },
   uploadText: { color: "#b5502f", fontSize: 12, fontWeight: "600" },
-  navRow: { flexDirection: "row", gap: 18, marginBottom: 12 },
+  navRow: { flexDirection: "row", flexWrap: "wrap", gap: 18, marginBottom: 12 },
   navLink: { color: "#6b6558", fontSize: 13, fontWeight: "600" },
   search: {
     borderWidth: 1,
