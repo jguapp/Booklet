@@ -8,6 +8,7 @@ import { LibraryScreen } from "./src/screens/LibraryScreen";
 import { ArticleScreen } from "./src/screens/ArticleScreen";
 import { DailyReviewScreen } from "./src/screens/DailyReviewScreen";
 import { FavoritesScreen } from "./src/screens/FavoritesScreen";
+import { HighlightsScreen } from "./src/screens/HighlightsScreen";
 import { TrashScreen } from "./src/screens/TrashScreen";
 
 // No navigation library -- a handful of screens and a session check don't
@@ -23,6 +24,7 @@ type Screen =
   | { name: "article"; id: string; authenticated: boolean }
   | { name: "resurface"; authenticated: boolean }
   | { name: "favorites"; authenticated: boolean }
+  | { name: "highlights"; authenticated: boolean }
   | { name: "trash"; authenticated: boolean };
 
 export default function App() {
@@ -104,6 +106,7 @@ export default function App() {
           onOpenArticle={(id) => setScreen({ name: "article", id, authenticated: screen.authenticated })}
           onOpenDailyReview={() => setScreen({ name: "resurface", authenticated: screen.authenticated })}
           onOpenFavorites={() => setScreen({ name: "favorites", authenticated: screen.authenticated })}
+          onOpenHighlights={() => setScreen({ name: "highlights", authenticated: screen.authenticated })}
           onOpenTrash={() => setScreen({ name: "trash", authenticated: screen.authenticated })}
           onSignedOut={() => {
             setMigrationNotice(null);
@@ -126,6 +129,13 @@ export default function App() {
       )}
       {screen.name === "favorites" && (
         <FavoritesScreen
+          authenticated={screen.authenticated}
+          onBack={() => setScreen({ name: "library", authenticated: screen.authenticated })}
+          onOpenArticle={(id) => setScreen({ name: "article", id, authenticated: screen.authenticated })}
+        />
+      )}
+      {screen.name === "highlights" && (
+        <HighlightsScreen
           authenticated={screen.authenticated}
           onBack={() => setScreen({ name: "library", authenticated: screen.authenticated })}
           onOpenArticle={(id) => setScreen({ name: "article", id, authenticated: screen.authenticated })}
