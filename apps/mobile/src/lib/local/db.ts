@@ -23,12 +23,13 @@
  * where a number or an array is declared.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { Article, Collection, Highlight } from "@booklet/shared";
+import type { Article, Collection, Feed, Highlight } from "@booklet/shared";
 
 const ARTICLES_KEY = "booklet_local_articles";
 const HIGHLIGHTS_KEY = "booklet_local_highlights";
 const COLLECTIONS_KEY = "booklet_local_collections";
 const ARTICLE_COLLECTIONS_KEY = "booklet_local_article_collections";
+const FEEDS_KEY = "booklet_local_feeds";
 
 export interface LocalArticleCollection {
   id: string; // `${articleId}:${collectionId}`
@@ -153,6 +154,30 @@ export const localCollections = {
   // which is real behaviour nothing would be exercising.
   async clear(): Promise<void> {
     await AsyncStorage.removeItem(COLLECTIONS_KEY);
+  },
+};
+
+// Subscriptions only, same as the web's localFeeds -- a feed's items are
+// always fetched live through the public preview endpoint, never persisted
+// (no background worker exists to poll them). Deliberately not part of the
+// signup migration: the web app doesn't migrate feeds either, so adding it
+// here alone would make the two clients disagree about what signup means.
+export const localFeeds = {
+  async getAll(): Promise<Feed[]> {
+    return Object.values(await readMap<Feed>(FEEDS_KEY));
+  },
+  async put(feed: Feed): Promise<void> {
+    const map = await readMap<Feed>(FEEDS_KEY);
+    map[feed.id] = feed;
+    await writeMap(FEEDS_KEY, map);
+  },
+  async delete(id: string): Promise<void> {
+    const map = await readMap<Feed>(FEEDS_KEY);
+    delete map[id];
+    await writeMap(FEEDS_KEY, map);
+  },
+  async clear(): Promise<void> {
+    await AsyncStorage.removeItem(FEEDS_KEY);
   },
 };
 
