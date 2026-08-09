@@ -331,7 +331,41 @@ renders on the Library screen (it is a `Text` row, not an `Alert`, precisely
 because react-native-web's `Alert.alert` is a no-op), and that a batched
 migration of a genuinely large library completes.
 
+### Second verification pass (2026-08-09): the parity waves, on the web target
+
+Everything added in the parity waves -- and the data-layer changes the
+section above said had never been executed -- was then run end-to-end on
+the web target: a 30-step Playwright drive against the real dev API, a
+real Postgres, and the e2e fixture server (for extraction and the RSS
+feed, so no external network was involved). All 30 steps passed:
+
+- Save by URL (real extraction), status chips, rename, search,
+  favorite/unfavorite from both Library and Favorites, the full trash
+  lifecycle (soft delete → restore → delete forever, each two-tap confirm).
+- Highlighting via the select-then-highlight flow (real keyboard
+  selection driving `onSelectionChange`), then notes, recall prompts,
+  search-over-notes, and two-tap delete on the Highlights screen.
+- Stats (cards, heatmap, source breakdown), Recap with the period toggle,
+  RSS subscribe → live items → save-an-item → unsubscribe.
+- All four themes applied and screenshotted, persistence across a reload
+  confirmed (Night's `#14181A` actually rendered, not just stored), Large
+  text size measured at 19px in the reader, and the reminder section
+  confirmed hidden on web.
+- Signed-in: login **ran the batched migration for real** (the local
+  library appeared on the account), Settings fetched the profile email,
+  account deletion refused a wrong password with the error rendered in
+  the form, deleted with the right one, returned to login, and the
+  account was confirmed dead (re-login 401).
+- Read-aloud exercised its error path cleanly (the TTS model host is
+  blocked in this environment): the player bar appeared, showed a real
+  message instead of hanging, and offered retry. **Audible playback
+  remains unverified** -- it needs a network that can reach Hugging Face
+  once, or the Docker image with baked weights.
+
 Still real, unresolved gaps: this environment has no iOS Simulator,
 Android emulator, or physical device, so `ios`/`android` remain
-type-checked-only, not run. And still out of reach entirely: publishing to
-the App Store or Play Store, which need Apple/Google developer accounts.
+type-checked-only, not run -- react-native-web proves the logic and the
+theming, not native Alert/audio/notification behavior. The notification
+permission flow is native-only by construction and has never run. And
+still out of reach entirely: publishing to the App Store or Play Store,
+which need Apple/Google developer accounts.
