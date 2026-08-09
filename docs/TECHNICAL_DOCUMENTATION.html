@@ -3740,11 +3740,19 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           selection API does. PDF/EPUB upload works as extracted text only;
           real page/CFI rendering would need a WebView bridge to reuse the
           web app's pdfjs-dist/epub.js code, or a native renderer — real
-          future work. And the standing verification caveat: this
-          environment has no simulator or device, so the entire mobile
-          build-out is <em>typecheck-verified only</em> — the themes want a
-          visual pass on Night, and read-aloud wants a real device with a
-          running API before either is called done.
+          future work. The verification story improved after v10 shipped:
+          the whole build-out was driven end-to-end <em>on the web
+          target</em> — a 30-step Playwright run against the real dev API,
+          a real Postgres, and the e2e fixture server, all 30 passing —
+          covering every screen, the four themes (screenshotted and
+          checked visually, persistence confirmed by rendered color rather
+          than stored value), the batched signup migration running for
+          real, and account deletion through to a 401 on re-login.
+          Read-aloud verified its <em>error path</em> only (the model host
+          is blocked here); audible playback, native
+          Alert/audio/notification behavior, and anything iOS/Android-
+          specific still need a real device — react-native-web proves the
+          logic and the theming, not the platform.
         </p>
       </section>
 
@@ -6158,10 +6166,13 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             (<code>EXPO_PUBLIC_API_URL</code> /
             <code>BOOKLET_API_URL</code>) instead of a hardcoded
             localhost.</li>
-          <li>Mobile needs real device or simulator verification — this is
-            now the <em>largest</em> unverified surface in the repo, since
-            the full parity build-out (eleven screens, read-aloud, themes,
-            notifications) is typecheck-verified only. The screen count has
+          <li>Mobile needs real device or simulator verification for what
+            react-native-web cannot prove: native Alert/audio/notification
+            behavior, the permission flow, and audible read-aloud. The
+            parity build-out itself is no longer typecheck-only — it has
+            since been driven end-to-end on the web target (30 Playwright
+            steps against the real API, all passing; see
+            <a href="#feat-mobile">Mobile App</a>). The screen count has
             also long since passed the "worth a navigation library" bar the
             scaffold set; the hand-rolled union type still works but React
             Navigation would now pay for its setup cost.</li>
