@@ -9,9 +9,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import type { Article, Highlight, HighlightColor } from "@booklet/shared";
+import type { Article, ArticleStatus, Highlight, HighlightColor } from "@booklet/shared";
 import { computeTextPosition, highlightColorHex, LEGACY_HIGHLIGHT_COLORS } from "@booklet/shared";
-import { loadArticle } from "../lib/data/articles";
+import { loadArticle, renameArticle, updateArticleStatus } from "../lib/data/articles";
 import { createHighlight, deleteHighlight, loadHighlights } from "../lib/data/highlights";
 
 interface ArticleScreenProps {
@@ -36,6 +36,13 @@ const COLORS: { value: HighlightColor; hex: string; label: string }[] = LEGACY_H
   hex: c.hex,
   label: c.label,
 }));
+
+// The same three states the web reader offers, in reading-life order.
+const STATUSES: { value: ArticleStatus; label: string }[] = [
+  { value: "UNREAD", label: "Unread" },
+  { value: "READING", label: "Reading" },
+  { value: "ARCHIVED", label: "Archived" },
+];
 
 interface Segment {
   key: string;
@@ -75,6 +82,9 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const [saving, setSaving] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     // `cancelled` because tapping Back unmounts this screen while the fetch
@@ -126,6 +136,42 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
       Alert.alert("Couldn't save that highlight", "Try again.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSetStatus(status: ArticleStatus) {
+    if (!article || article.status === status) return;
+    const previous = article;
+    // Optimistic, reverted on failure -- but committed from the server's
+    // response on success, because updateArticleStatus also derives
+    // readAt/archivedAt and this screen's copy must not drift from what was
+    // actually stored.
+    setArticle({ ...article, status });
+    setActionError(null);
+    try {
+      setArticle(await updateArticleStatus(previous, status, authenticated));
+    } catch {
+      setArticle(previous);
+      setActionError("Couldn't update the status. Try again.");
+    }
+  }
+
+  // Explicit Save/Cancel rather than submit-on-blur: LibraryScreen's
+  // collection input needed a ref guard because Done-press also blurs and
+  // fired its handler twice. Two buttons can't double-fire.
+  async function handleRename() {
+    if (!article) return;
+    const cleaned = titleDraft.trim();
+    setRenaming(false);
+    if (!cleaned || cleaned === (article.title ?? "")) return;
+    const previous = article;
+    setArticle({ ...article, title: cleaned });
+    setActionError(null);
+    try {
+      setArticle(await renameArticle(previous, cleaned, authenticated));
+    } catch {
+      setArticle(previous);
+      setActionError("Couldn't rename that. Try again.");
     }
   }
 
@@ -189,8 +235,51 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>{article.title ?? "Untitled"}</Text>
+        {renaming ? (
+          <View style={styles.renameRow}>
+            <TextInput
+              style={styles.renameInput}
+              autoFocus
+              value={titleDraft}
+              onChangeText={setTitleDraft}
+              placeholder="Article title"
+            />
+            <TouchableOpacity onPress={handleRename}>
+              <Text style={styles.renameAction}>Save</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setRenaming(false)}>
+              <Text style={styles.renameCancel}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Text style={styles.title}>{article.title ?? "Untitled"}</Text>
+        )}
         <Text style={styles.meta}>{article.siteName ?? article.author ?? article.sourceType}</Text>
+
+        <View style={styles.manageRow}>
+          {STATUSES.map((s) => (
+            <TouchableOpacity
+              key={s.value}
+              style={[styles.statusChip, article.status === s.value && styles.statusChipActive]}
+              onPress={() => handleSetStatus(s.value)}
+            >
+              <Text style={[styles.statusChipText, article.status === s.value && styles.statusChipTextActive]}>
+                {s.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          {!renaming && (
+            <TouchableOpacity
+              onPress={() => {
+                setTitleDraft(article.title ?? "");
+                setRenaming(true);
+              }}
+            >
+              <Text style={styles.renameLink}>Rename</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        {actionError && <Text style={styles.actionError}>{actionError}</Text>}
 
         {selecting ? (
           // A plain multiline Text can't report a user's selection range or
@@ -263,7 +352,34 @@ const styles = StyleSheet.create({
   back: { color: "#b5502f", fontSize: 14, fontWeight: "600" },
   selectToggle: { color: "#1F6F6B", fontSize: 14, fontWeight: "600" },
   title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 4 },
-  meta: { fontSize: 13, color: "#6b6558", marginBottom: 20 },
+  meta: { fontSize: 13, color: "#6b6558", marginBottom: 12 },
+  manageRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" },
+  statusChip: {
+    borderWidth: 1,
+    borderColor: "#ddd6c7",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    backgroundColor: "#fff",
+  },
+  statusChipActive: { borderColor: "#b5502f", backgroundColor: "#fbe9e3" },
+  statusChipText: { fontSize: 12, color: "#6b6558" },
+  statusChipTextActive: { color: "#b5502f", fontWeight: "600" },
+  renameLink: { fontSize: 12, fontWeight: "600", color: "#6b6558", marginLeft: 6 },
+  renameRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 },
+  renameInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#ddd6c7",
+    borderRadius: 6,
+    padding: 8,
+    backgroundColor: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  renameAction: { fontSize: 13, fontWeight: "600", color: "#b5502f" },
+  renameCancel: { fontSize: 13, fontWeight: "600", color: "#6b6558" },
+  actionError: { color: "#b5502f", fontSize: 12, marginBottom: 12 },
   body: { fontSize: 16, lineHeight: 26, color: "#1c1a16" },
   colorBar: {
     flexDirection: "row",
