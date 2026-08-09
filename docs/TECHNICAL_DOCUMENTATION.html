@@ -342,7 +342,7 @@
   <button class="mobile-toc-toggle" id="mobileTocToggle" type="button">☰ Contents</button>
   <nav class="toc" id="toc">
     <div class="toc-title">📖 Booklet</div>
-    <div class="toc-sub">The Coding Bible — v9, living document</div>
+    <div class="toc-sub">The Coding Bible — v10, living document</div>
     <ol>
       <li><a href="#part-0">0. How to Use This Document</a></li>
       <li><a href="#part-1">I. The Big Picture</a>
@@ -1903,9 +1903,12 @@
             paused at the very start", or the resume prompt fires on every
             article nobody has ever played. Every construction site sets it
             to <code>null</code> explicitly, <code>apps/mobile</code>
-            included: mobile has no read-aloud yet, but it shares the
-            <code>Article</code> type and syncs the same rows, so it must not
-            write a position the web reader would then offer to resume from.
+            included. Mobile now has read-aloud of its own, and the invariant
+            survived the addition: its player only ever writes a position
+            through <code>updateArticleListeningPosition</code> after playback
+            has actually started (a <code>startedRef</code> guard), so an
+            article merely opened on a phone still never offers a resume on
+            the web.
           </p>
           <p>
             <code>listeningUpdatedAt DateTime?</code> — a
@@ -3279,8 +3282,9 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           a highlight without one renders and grades exactly as it always
           has — no migration of behavior, no prompt to write before
           resurfacing works. Mobile's Daily Review honors the same reveal
-          step, so a prompt written on the web is respected there too, even
-          though mobile has no prompt-authoring UI yet.
+          step, and since the mobile Highlights screen landed, prompts can be
+          written and edited there as well — the read-only asymmetry this
+          paragraph used to record is gone.
         </p>
         <div class="callout warn">
           <span class="callout-label">Two small things that would have been bugs</span>
@@ -3645,19 +3649,102 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
           page itself, with the article and its highlights sent to Booklet
           together.
         </p>
+        <p>
+          Deployed builds are configured at build time:
+          <code>BOOKLET_API_URL</code> and <code>BOOKLET_WEB_APP_URL</code>
+          (the former is the same variable the e2e suite already reads) are
+          baked into the bundle via esbuild <code>define</code>, and
+          <code>build.mjs</code> rewrites the two manifest entries that must
+          agree with the code in the same pass —
+          <code>host_permissions</code> for the API origin, and the content
+          script's <code>exclude_matches</code> for the web app's own pages.
+          Those used to be a hand-edit-two-files instruction in a comment,
+          and forgetting the manifest half ships a build whose every API
+          fetch the browser silently blocks; the build now refuses to run if
+          the localhost entries it rewrites aren't where it expects them,
+          so the pair cannot drift apart quietly. Unset variables produce a
+          byte-equivalent localhost dev build.
+        </p>
 
         <h3 id="feat-mobile">Mobile App</h3>
         <p>
           Expo / React Native, local-first the same way the web app is
           (AsyncStorage instead of IndexedDB, behind the same repository-
-          pattern seam). Highlighting is a toggled select-then-highlight
-          flow rather than a live text selection — React Native has no
-          single component that both reports a text selection and renders
-          per-range styling the way a browser's own selection API does.
-          PDF/EPUB upload works as extracted text only; real page/CFI
-          rendering would need a WebView bridge to reuse the web app's
-          pdfjs-dist/epub.js code, or a native renderer — real future work,
-          not a scaffold-stage gap.
+          pattern seam). What started as a scaffold is now at
+          <strong>feature parity with the web app everywhere parity makes
+          sense</strong>: library with search, favorites, trash (soft delete,
+          30-day restore), highlights browsing with notes and recall
+          prompts, RSS subscriptions, stats and Recap (computed by the same
+          <code>computeReadingStats</code>/<code>computeRecap</code> from
+          <code>@booklet/shared</code>, so the numbers cannot drift between
+          clients), Daily Review, read-aloud, four themes, a Settings screen,
+          and in-app account deletion. Every feature routes through
+          <code>src/lib/data/*.ts</code> — the same local-vs-synced swap
+          point the web app uses, a PATCH/DELETE when signed in and a
+          read-modify-put against AsyncStorage when not.
+        </p>
+        <p>
+          <strong>Read-aloud</strong> is the server half of the TTS story
+          only: React Native has neither SpeechSynthesis nor a practical
+          on-device Kokoro, so every chunk is <code>POST /api/tts</code> —
+          and because chunking goes through the same
+          <code>toSafeTextChunks</code> the web player uses, mobile requests
+          hit the same server cache entries
+          (<code>sha256(voice, speed, text)</code>). The route is POST-only,
+          so expo-av cannot stream it; bytes are staged per platform (a Blob
+          object-URL on the web target, an <code>expo-file-system</code>
+          cache file on iOS/Android — iOS's AVPlayer does not reliably play
+          <code>data:</code> URLs) and cleaned up on unmount. Speed is
+          applied server-side rather than through expo-av's rate control: no
+          pitch shift, and one cached chunk serves both clients. Listening
+          position syncs both directions through the same
+          last-write-wins <code>listeningFraction</code> the web reader
+          uses.
+        </p>
+        <p>
+          <strong>Theming</strong> is the web's four palettes — Paper, Lamp,
+          Night, Kindle — with the same hex values as
+          <code>globals.css</code>. The web keys palettes off a
+          <code>data-theme</code> attribute and CSS variables; RN has
+          neither, so each theme is a concrete palette object served through
+          context and every screen builds its <code>StyleSheet</code> from
+          it. Two tokens had to be invented: <code>accentSoft</code> (RN
+          cannot composite the web's translucent <code>bg-accent/10</code>
+          over a variable background) and <code>danger</code> (the web lets
+          Kindle's blanket <code>grayscale(1)</code> filter neutralize
+          red-500; RN has no filters, so Kindle's gray is hand-picked).
+          "System" is the stored default, resolved with
+          <code>useColorScheme()</code> — the same behavior the web has when
+          nothing is stored.
+        </p>
+        <p>
+          <strong>Account deletion</strong> uses the identical confirmation
+          contract as the web settings page — the server re-checks a
+          password, or the typed-out email for an OAuth-only account, with
+          <code>UserProfile.hasPassword</code> picking the field — which
+          also satisfies the App Store / Play requirement that published
+          apps offer deletion in-app. The <strong>Daily Review
+          reminder</strong> is a locally-scheduled
+          <code>expo-notifications</code> daily notification rather than
+          remote push: there is no push infrastructure (no sender, no
+          device-token store) and a fixed-time reminder needs none — the OS
+          fires it on-device, and enabling refuses to record an hour if the
+          permission is denied, so the control never claims a reminder that
+          will never fire.
+        </p>
+        <p>
+          Still true from the scaffold days: highlighting is a toggled
+          select-then-highlight flow rather than a live text selection —
+          React Native has no single component that both reports a text
+          selection and renders per-range styling the way a browser's own
+          selection API does. PDF/EPUB upload works as extracted text only;
+          real page/CFI rendering would need a WebView bridge to reuse the
+          web app's pdfjs-dist/epub.js code, or a native renderer — real
+          future work. And the standing verification caveat: this
+          environment has no simulator or device, so the entire mobile
+          build-out is <em>typecheck-verified only</em> — the themes want a
+          visual pass on Night, and read-aloud wants a real device with a
+          running API before either is called done.
         </p>
       </section>
 
@@ -5480,9 +5567,10 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             it properly needs a stored per-user byte count rather than
             walking the disk per upload. With durable storage it stops being
             theoretical and becomes a cost line.</li>
-          <li><strong>Mobile prompt authoring.</strong> Mobile honors recall
-            prompts but cannot write them, so a mobile-only user can never
-            create one.</li>
+          <li><strong>Mobile prompt authoring.</strong> Done — the mobile
+            Highlights screen writes and edits prompts through the same
+            <code>PATCH</code> the web uses, so this stopped being a
+            mobile-only dead end.</li>
         </ul>
 
         <h3 id="post-deploy-roadmap">The roadmap after launch</h3>
@@ -6046,9 +6134,20 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
         <ul>
           <li>Publishing needs Apple, Google Play, Chrome Web Store and
             Mozilla developer accounts. Safari support additionally depends on
-            Apple's own tooling.</li>
-          <li>Mobile needs real device or simulator verification, and a
-            navigation layer once the screen count justifies one.</li>
+            Apple's own tooling. Two former store-policy blockers are now
+            resolved in code: in-app account deletion exists (required by
+            both stores), and both mobile and the extension take their API
+            origin from build-time configuration
+            (<code>EXPO_PUBLIC_API_URL</code> /
+            <code>BOOKLET_API_URL</code>) instead of a hardcoded
+            localhost.</li>
+          <li>Mobile needs real device or simulator verification — this is
+            now the <em>largest</em> unverified surface in the repo, since
+            the full parity build-out (eleven screens, read-aloud, themes,
+            notifications) is typecheck-verified only. The screen count has
+            also long since passed the "worth a navigation library" bar the
+            scaffold set; the hand-rolled union type still works but React
+            Navigation would now pay for its setup cost.</li>
           <li>Native PDF/EPUB <em>page and CFI rendering</em> on mobile needs
             either a WebView bridge back to the browser reader or a dedicated
             native renderer. Displaying extracted text is deliberately
@@ -6100,6 +6199,36 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
         <h2><span class="part-label">Part XIII</span>Changelog of This Document</h2>
         <table>
           <tr><th>Date</th><th>Change</th></tr>
+          <tr>
+            <td>2026-08-09</td>
+            <td>
+              v10 — the mobile app went from scaffold to <strong>feature
+              parity</strong> across six merged waves (#177–#182): library
+              search/favorites/trash, highlights browsing with notes and
+              recall prompts, Stats and Recap, RSS, Settings, read-aloud,
+              the web's four themes, a local Daily Review reminder, and
+              in-app account deletion. The
+              <a href="#feat-mobile">Mobile App</a> chapter was rewritten to
+              match, and three passages elsewhere that recorded mobile's old
+              read-only asymmetries (no read-aloud writing
+              <code>listeningFraction</code>, no prompt authoring) were
+              corrected rather than left as fossils. The
+              <a href="#feat-extension">Browser Extension</a> chapter gained
+              the build-time <code>BOOKLET_API_URL</code> /
+              <code>BOOKLET_WEB_APP_URL</code> configuration, whose build
+              also rewrites the manifest's <code>host_permissions</code> in
+              the same pass — the failure it removes (a deployed bundle the
+              browser silently blocks) is recorded there.
+              <a href="#boundaries-clients">Delivery Boundaries</a> updated:
+              two store-policy blockers (in-app deletion, hardcoded API
+              origins) are resolved in code, and the honest cost of the
+              speed this was built at is named — mobile is now the largest
+              typecheck-only, never-run-on-a-device surface in the repo.
+              First new native dependencies since the scaffold:
+              <code>expo-av</code>, <code>expo-file-system</code>,
+              <code>expo-notifications</code>.
+            </td>
+          </tr>
           <tr>
             <td>2026-08-08</td>
             <td>
@@ -6471,7 +6600,7 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
 
       <footer class="doc-footer">
         <p>
-          Booklet — Technical Documentation, v9. Written collaboratively by
+          Booklet — Technical Documentation, v10. Written collaboratively by
           the project's owner and Claude (Anthropic), grounded in the real
           implementation and real development history rather than written
           from scratch after the fact. Keep it that way: when this file is
