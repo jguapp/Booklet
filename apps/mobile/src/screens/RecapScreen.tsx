@@ -4,6 +4,7 @@ import type { Article } from "@booklet/shared";
 import { computeRecap, type RecapPeriod } from "@booklet/shared";
 import { loadArticles } from "../lib/data/articles";
 import { formatDuration } from "../lib/format";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface RecapScreenProps {
   authenticated: boolean;
@@ -19,7 +20,10 @@ const PERIODS: { value: RecapPeriod; label: string }[] = [
   { value: "month", label: "This month" },
 ];
 
-function BigStat({ value, label }: { value: string; label: string }) {
+// Styles come in as a prop -- they're built per-theme inside the screen.
+type Styles = ReturnType<typeof makeStyles>;
+
+function BigStat({ value, label, styles }: { value: string; label: string; styles: Styles }) {
   return (
     <View style={styles.bigStat}>
       <Text style={styles.bigStatValue}>{value}</Text>
@@ -29,6 +33,8 @@ function BigStat({ value, label }: { value: string; label: string }) {
 }
 
 export function RecapScreen({ authenticated, onBack }: RecapScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -101,10 +107,10 @@ export function RecapScreen({ authenticated, onBack }: RecapScreenProps) {
         <View style={styles.card}>
           <Text style={styles.cardHeading}>{period === "week" ? "This week" : "This month"} in Booklet</Text>
           <View style={styles.statsGrid}>
-            <BigStat value={String(recap.articlesSaved)} label="Saved" />
-            <BigStat value={String(recap.articlesFinished)} label="Finished" />
-            <BigStat value={formatDuration(recap.timeSpentSeconds)} label="Time reading" />
-            <BigStat value={String(recap.currentStreakDays)} label="Day streak" />
+            <BigStat styles={styles} value={String(recap.articlesSaved)} label="Saved" />
+            <BigStat styles={styles} value={String(recap.articlesFinished)} label="Finished" />
+            <BigStat styles={styles} value={formatDuration(recap.timeSpentSeconds)} label="Time reading" />
+            <BigStat styles={styles} value={String(recap.currentStreakDays)} label="Day streak" />
           </View>
           {recap.topTags.length > 0 && (
             <View style={styles.tagsRow}>
@@ -124,40 +130,41 @@ export function RecapScreen({ authenticated, onBack }: RecapScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f4ee", paddingTop: 56, paddingHorizontal: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f4ee" },
-  back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.paper, paddingTop: 56, paddingHorizontal: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.paper },
+  back: { color: t.accent, fontSize: 14, fontWeight: "600", marginBottom: 12 },
   titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16" },
-  periodToggle: { flexDirection: "row", backgroundColor: "#eee8da", borderRadius: 6, padding: 2 },
+  title: { fontSize: 24, fontWeight: "700", color: t.ink },
+  periodToggle: { flexDirection: "row", backgroundColor: t.surface2, borderRadius: 6, padding: 2 },
   periodButton: { borderRadius: 5, paddingHorizontal: 10, paddingVertical: 5 },
-  periodButtonActive: { backgroundColor: "#b5502f" },
-  periodText: { fontSize: 12, fontWeight: "600", color: "#6b6558" },
-  periodTextActive: { color: "#fff" },
-  error: { color: "#b5502f", fontSize: 12, marginBottom: 8 },
+  periodButtonActive: { backgroundColor: t.accent },
+  periodText: { fontSize: 12, fontWeight: "600", color: t.inkMuted },
+  periodTextActive: { color: t.accentContrast },
+  error: { color: t.danger, fontSize: 12, marginBottom: 8 },
   card: {
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#ece6d8",
+    borderColor: t.border,
     paddingVertical: 28,
     paddingHorizontal: 20,
   },
-  cardHeading: { textAlign: "center", fontSize: 13, color: "#6b6558", marginBottom: 24 },
+  cardHeading: { textAlign: "center", fontSize: 13, color: t.inkMuted, marginBottom: 24 },
   statsGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: 24 },
   bigStat: { width: "50%", alignItems: "center" },
-  bigStatValue: { fontSize: 30, fontWeight: "700", color: "#1c1a16" },
-  bigStatLabel: { fontSize: 10, color: "#6b6558", marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 },
+  bigStatValue: { fontSize: 30, fontWeight: "700", color: t.ink },
+  bigStatLabel: { fontSize: 10, color: t.inkMuted, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 },
   tagsRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 6, marginTop: 28 },
   tagChip: {
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: "#f7f4ee",
+    backgroundColor: t.paper,
   },
-  tagText: { fontSize: 12, color: "#6b6558" },
-  footnote: { textAlign: "center", fontSize: 11, color: "#a49d8e", marginTop: 20 },
+  tagText: { fontSize: 12, color: t.inkMuted },
+  footnote: { textAlign: "center", fontSize: 11, color: t.inkFaint, marginTop: 20 },
 });

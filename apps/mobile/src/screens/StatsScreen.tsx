@@ -5,6 +5,7 @@ import { computeReadingStats } from "@booklet/shared";
 import { loadArticles } from "../lib/data/articles";
 import { loadReadingActivity } from "../lib/data/reading-activity";
 import { formatDuration } from "../lib/format";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface StatsScreenProps {
   authenticated: boolean;
@@ -20,10 +21,12 @@ function dayKey(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Web's bg-accent opacity ladder, resolved to concrete hexes over this
-// screen's #f7f4ee background -- RN styles have no CSS alpha-over-token
-// shorthand worth reproducing for five values.
-const HEAT_COLORS = ["#ece6d8", "#eac9b8", "#dfa088", "#cd7355", "#b5502f"];
+// Web's ladder is bg-accent at 30/55/80/100% opacity; RN supports 8-digit
+// hex, so the same ladder is the theme's accent with an alpha suffix over
+// surface2 as the zero level. Built per-palette in the component.
+function heatColors(t: ThemePalette): string[] {
+  return [t.surface2, `${t.accent}4D`, `${t.accent}8C`, `${t.accent}CC`, t.accent];
+}
 
 /** Real per-day reading time -- level buckets are minutes read. */
 function levelFromMinutes(minutes: number): number {
@@ -88,7 +91,11 @@ function computeWeeks(articles: Article[], activity: ReadingActivityDay[] | null
   return weeks;
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+// Styles come in as a prop -- they're built per-theme inside the screen
+// (makeStyles below), so module scope has no `styles` to close over.
+type Styles = ReturnType<typeof makeStyles>;
+
+function StatCard({ label, value, styles }: { label: string; value: string; styles: Styles }) {
   return (
     <View style={styles.statCard}>
       <Text style={styles.statValue}>{value}</Text>
@@ -97,7 +104,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Bar({ fraction }: { fraction: number }) {
+function Bar({ fraction, styles }: { fraction: number; styles: Styles }) {
   return (
     <View style={styles.barTrack}>
       <View style={[styles.barFill, { width: `${Math.round(fraction * 100)}%` }]} />
@@ -106,6 +113,8 @@ function Bar({ fraction }: { fraction: number }) {
 }
 
 export function StatsScreen({ authenticated, onBack, onOpenRecap }: StatsScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [activity, setActivity] = useState<ReadingActivityDay[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -142,6 +151,7 @@ export function StatsScreen({ authenticated, onBack, onOpenRecap }: StatsScreenP
 
   const stats = useMemo(() => computeReadingStats(articles), [articles]);
   const weeks = useMemo(() => computeWeeks(articles, activity), [articles, activity]);
+  const heat = useMemo(() => heatColors(palette), [palette]);
 
   const topTags = useMemo(() => {
     const counts = new Map<string, number>();
@@ -199,12 +209,13 @@ export function StatsScreen({ authenticated, onBack, onOpenRecap }: StatsScreenP
         ) : (
           <>
             <View style={styles.cardsGrid}>
-              <StatCard label="Day streak" value={String(stats.currentStreakDays)} />
-              <StatCard label="Longest streak" value={String(stats.longestStreakDays)} />
-              <StatCard label="Time spent" value={formatDuration(stats.totalReadingSeconds)} />
-              <StatCard label="Completion" value={`${Math.round(stats.completionRate * 100)}%`} />
-              <StatCard label="Finished" value={`${stats.finishedArticles} / ${stats.totalArticles}`} />
+              <StatCard styles={styles} label="Day streak" value={String(stats.currentStreakDays)} />
+              <StatCard styles={styles} label="Longest streak" value={String(stats.longestStreakDays)} />
+              <StatCard styles={styles} label="Time spent" value={formatDuration(stats.totalReadingSeconds)} />
+              <StatCard styles={styles} label="Completion" value={`${Math.round(stats.completionRate * 100)}%`} />
+              <StatCard styles={styles} label="Finished" value={`${stats.finishedArticles} / ${stats.totalArticles}`} />
               <StatCard
+                styles={styles}
                 label="Avg. per article"
                 value={avgSecondsPerFinished > 0 ? formatDuration(avgSecondsPerFinished) : "--"}
               />
@@ -224,7 +235,7 @@ export function StatsScreen({ authenticated, onBack, onOpenRecap }: StatsScreenP
                   {weeks.map((week, i) => (
                     <View key={i} style={styles.heatmapCol}>
                       {week.map((level, j) => (
-                        <View key={j} style={[styles.heatCell, { backgroundColor: HEAT_COLORS[level] }]} />
+                        <View key={j} style={[styles.heatCell, { backgroundColor: heat[level] }]} />
                       ))}
                     </View>
                   ))}
@@ -242,7 +253,7 @@ export function StatsScreen({ authenticated, onBack, onOpenRecap }: StatsScreenP
                     <Text style={styles.breakdownLabel} numberOfLines={1}>
                       {tag}
                     </Text>
-                    <Bar fraction={count / maxTagCount} />
+                    <Bar styles={styles} fraction={count / maxTagCount} />
                     <Text style={styles.breakdownCount}>{count}</Text>
                   </View>
                 ))
@@ -254,7 +265,7 @@ export function StatsScreen({ authenticated, onBack, onOpenRecap }: StatsScreenP
               {sourceEntries.map((type) => (
                 <View key={type} style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>{type}</Text>
-                  <Bar fraction={sourceCounts[type] / sourceTotal} />
+                  <Bar styles={styles} fraction={sourceCounts[type] / sourceTotal} />
                   <Text style={styles.breakdownCount}>{sourceCounts[type]}</Text>
                 </View>
               ))}
@@ -266,53 +277,54 @@ export function StatsScreen({ authenticated, onBack, onOpenRecap }: StatsScreenP
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f4ee", paddingTop: 56, paddingHorizontal: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f4ee" },
-  back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.paper, paddingTop: 56, paddingHorizontal: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.paper },
+  back: { color: t.accent, fontSize: 14, fontWeight: "600", marginBottom: 12 },
   titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16" },
-  recapLink: { color: "#b5502f", fontSize: 13, fontWeight: "600" },
-  error: { color: "#b5502f", fontSize: 12, marginBottom: 8 },
+  title: { fontSize: 24, fontWeight: "700", color: t.ink },
+  recapLink: { color: t.accent, fontSize: 13, fontWeight: "600" },
+  error: { color: t.danger, fontSize: 12, marginBottom: 8 },
   scrollContent: { paddingBottom: 32 },
-  empty: { textAlign: "center", color: "#6b6558", marginTop: 40 },
+  empty: { textAlign: "center", color: t.inkMuted, marginTop: 40 },
   cardsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 20 },
   statCard: {
     flexBasis: "31%",
     flexGrow: 1,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#ece6d8",
+    borderColor: t.border,
     paddingVertical: 14,
     paddingHorizontal: 8,
     alignItems: "center",
   },
-  statValue: { fontSize: 20, fontWeight: "700", color: "#1c1a16" },
-  statLabel: { fontSize: 10, color: "#6b6558", marginTop: 3, textTransform: "uppercase", letterSpacing: 0.5 },
+  statValue: { fontSize: 20, fontWeight: "700", color: t.ink },
+  statLabel: { fontSize: 10, color: t.inkMuted, marginTop: 3, textTransform: "uppercase", letterSpacing: 0.5 },
   sectionHeading: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#6b6558",
+    color: t.inkMuted,
     textTransform: "uppercase",
     letterSpacing: 0.5,
     marginBottom: 8,
   },
   panel: {
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#ece6d8",
+    borderColor: t.border,
     padding: 14,
     marginBottom: 20,
   },
-  panelEmpty: { fontSize: 13, color: "#6b6558" },
+  panelEmpty: { fontSize: 13, color: t.inkMuted },
   heatmapRow: { flexDirection: "row", gap: 3 },
   heatmapCol: { flexDirection: "column", gap: 3 },
   heatCell: { width: 11, height: 11, borderRadius: 2 },
   breakdownRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
-  breakdownLabel: { width: 80, fontSize: 13, color: "#1c1a16" },
-  breakdownCount: { width: 24, textAlign: "right", fontSize: 12, color: "#6b6558" },
-  barTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: "#eee8da", overflow: "hidden" },
-  barFill: { height: "100%", borderRadius: 4, backgroundColor: "#b5502f" },
+  breakdownLabel: { width: 80, fontSize: 13, color: t.ink },
+  breakdownCount: { width: 24, textAlign: "right", fontSize: 12, color: t.inkMuted },
+  barTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: t.surface2, overflow: "hidden" },
+  barFill: { height: "100%", borderRadius: 4, backgroundColor: t.accent },
 });

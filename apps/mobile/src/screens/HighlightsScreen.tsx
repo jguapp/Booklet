@@ -13,6 +13,7 @@ import type { Article, Highlight } from "@booklet/shared";
 import { highlightColorHex } from "@booklet/shared";
 import { loadArticles } from "../lib/data/articles";
 import { deleteHighlight, deleteNote, loadHighlights, saveHighlightPrompt, saveNote } from "../lib/data/highlights";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface HighlightsScreenProps {
   authenticated: boolean;
@@ -29,6 +30,8 @@ interface HighlightsScreenProps {
 type Editing = { id: string; field: "note" | "prompt"; draft: string } | null;
 
 export function HighlightsScreen({ authenticated, onBack, onOpenArticle }: HighlightsScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [loading, setLoading] = useState(true);
@@ -170,6 +173,7 @@ export function HighlightsScreen({ authenticated, onBack, onOpenArticle }: Highl
       )}
       <TextInput
         style={styles.search}
+        placeholderTextColor={palette.inkFaint}
         placeholder="Search highlights and notes"
         autoCapitalize="none"
         value={search}
@@ -247,6 +251,7 @@ export function HighlightsScreen({ authenticated, onBack, onOpenArticle }: Highl
                       style={styles.editorInput}
                       multiline
                       autoFocus
+                      placeholderTextColor={palette.inkFaint}
                       placeholder={isEditingNote ? "Your note" : "e.g. What are the three causes the author gives?"}
                       value={editing!.draft}
                       onChangeText={(draft) => setEditing((prev) => (prev ? { ...prev, draft } : prev))}
@@ -299,65 +304,68 @@ export function HighlightsScreen({ authenticated, onBack, onOpenArticle }: Highl
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f4ee", paddingTop: 56, paddingHorizontal: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f4ee" },
-  back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
-  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 4 },
-  openArticleLink: { color: "#1F6F6B", fontSize: 13, fontWeight: "600", marginBottom: 8 },
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.paper, paddingTop: 56, paddingHorizontal: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.paper },
+  back: { color: t.accent, fontSize: 14, fontWeight: "600", marginBottom: 12 },
+  title: { fontSize: 24, fontWeight: "700", color: t.ink, marginBottom: 4 },
+  openArticleLink: { color: t.accent, fontSize: 13, fontWeight: "600", marginBottom: 8 },
   search: {
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 6,
     padding: 10,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     fontSize: 14,
     marginTop: 8,
     marginBottom: 12,
+      color: t.ink,
   },
-  error: { color: "#b5502f", fontSize: 12, marginBottom: 8 },
-  empty: { textAlign: "center", color: "#6b6558", marginTop: 40 },
+  error: { color: t.danger, fontSize: 12, marginBottom: 8 },
+  empty: { textAlign: "center", color: t.inkMuted, marginTop: 40 },
   groupCard: {
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     borderRadius: 8,
     padding: 14,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#ece6d8",
+    borderColor: t.border,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
   },
-  groupTitle: { flex: 1, fontSize: 16, fontWeight: "600", color: "#1c1a16" },
-  groupCount: { fontSize: 12, color: "#6b6558" },
+  groupTitle: { flex: 1, fontSize: 16, fontWeight: "600", color: t.ink },
+  groupCount: { fontSize: 12, color: t.inkMuted },
   card: {
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     borderRadius: 8,
     padding: 14,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#ece6d8",
+    borderColor: t.border,
   },
   quoteRow: { borderLeftWidth: 3, paddingLeft: 10, marginBottom: 8 },
-  quote: { fontSize: 15, lineHeight: 22, color: "#1c1a16" },
-  quoteMeta: { fontSize: 12, color: "#6b6558", marginTop: 4 },
-  note: { fontSize: 13, color: "#3d3a33", marginBottom: 6, fontStyle: "italic" },
-  prompt: { fontSize: 13, color: "#1F6F6B", marginBottom: 6 },
+  quote: { fontSize: 15, lineHeight: 22, color: t.ink },
+  quoteMeta: { fontSize: 12, color: t.inkMuted, marginTop: 4 },
+  note: { fontSize: 13, color: t.inkMuted, marginBottom: 6, fontStyle: "italic" },
+  prompt: { fontSize: 13, color: t.accent, marginBottom: 6 },
   actionsRow: { flexDirection: "row", alignItems: "center", gap: 16, marginTop: 2 },
-  action: { fontSize: 13, fontWeight: "600", color: "#6b6558" },
-  actionStrong: { fontSize: 13, fontWeight: "600", color: "#b5502f" },
-  actionDanger: { fontSize: 13, fontWeight: "600", color: "#b5502f" },
+  action: { fontSize: 13, fontWeight: "600", color: t.inkMuted },
+  actionStrong: { fontSize: 13, fontWeight: "600", color: t.accent },
+  actionDanger: { fontSize: 13, fontWeight: "600", color: t.danger },
   editorInput: {
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 6,
     padding: 10,
-    backgroundColor: "#fdfcf9",
+    backgroundColor: t.surface,
     fontSize: 14,
     minHeight: 60,
     textAlignVertical: "top",
     marginBottom: 8,
+      color: t.ink,
   },
-  editorHint: { flex: 1, fontSize: 11, color: "#6b6558" },
+  editorHint: { flex: 1, fontSize: 11, color: t.inkMuted },
 });

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { ThemeProvider, useTheme } from "./src/lib/theme";
 import { getSession } from "./src/lib/api";
 import { migrateLocalDataToAccount, PartialMigrationError } from "./src/lib/data/sync";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -35,7 +36,18 @@ type Screen =
   | { name: "settings"; authenticated: boolean }
   | { name: "trash"; authenticated: boolean };
 
+// The provider has to sit above everything that calls useTheme(), including
+// this component's own loading spinner -- hence the App/AppInner split.
 export default function App() {
+  return (
+    <ThemeProvider>
+      <AppInner />
+    </ThemeProvider>
+  );
+}
+
+function AppInner() {
+  const { theme, palette } = useTheme();
   const [checkingSession, setCheckingSession] = useState(true);
   const [screen, setScreen] = useState<Screen>({ name: "login" });
   const [migrationNotice, setMigrationNotice] = useState<string | null>(null);
@@ -66,7 +78,7 @@ export default function App() {
 
   if (checkingSession) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: palette.paper }}>
         <ActivityIndicator />
       </View>
     );
@@ -74,7 +86,11 @@ export default function App() {
 
   return (
     <>
-      <StatusBar style="auto" />
+      {/* "auto" tracks the OS scheme, which is wrong the moment the user
+          picks a theme that disagrees with it (Night on a light-mode phone).
+          Status bar glyphs are light-on-dark for Night, dark-on-light for
+          the three paper-ish themes. */}
+      <StatusBar style={theme === "dark" ? "light" : "dark"} />
       {screen.name === "login" && (
         <LoginScreen
           onLoggedIn={async () => {
