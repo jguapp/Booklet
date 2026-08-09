@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -9,10 +9,20 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Audio } from "expo-av";
 import type { Article, ArticleStatus, Highlight, HighlightColor } from "@booklet/shared";
-import { computeTextPosition, highlightColorHex, LEGACY_HIGHLIGHT_COLORS } from "@booklet/shared";
-import { loadArticle, renameArticle, updateArticleStatus } from "../lib/data/articles";
+import { computeTextPosition, highlightColorHex, LEGACY_HIGHLIGHT_COLORS, toSafeTextChunks } from "@booklet/shared";
+import {
+  ApiError,
+  loadArticle,
+  renameArticle,
+  updateArticleListeningPosition,
+  updateArticleStatus,
+} from "../lib/data/articles";
 import { createHighlight, deleteHighlight, loadHighlights } from "../lib/data/highlights";
+import { fetchTtsChunkAudio, type TtsChunkAudio } from "../lib/reader/read-aloud";
+import { DEFAULT_PREFS, loadDevicePrefs, TEXT_SIZES, type DevicePrefs } from "../lib/device-prefs";
+import { getDeviceId } from "../lib/device-id";
 
 interface ArticleScreenProps {
   articleId: string;
@@ -85,6 +95,29 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [prefs, setPrefs] = useState<DevicePrefs>(DEFAULT_PREFS);
+
+  // Read-aloud player state. `listeningRef` mirrors `listening` for the
+  // async paths: a chunk fetch that resolves after Stop was tapped must not
+  // start playing into a dismissed player.
+  const [listening, setListening] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [chunkIndex, setChunkIndex] = useState(0);
+  const [chunkLoading, setChunkLoading] = useState(false);
+  const [ttsError, setTtsError] = useState<string | null>(null);
+  const listeningRef = useRef(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  // Fetched chunk audio, keyed by chunk index -- also the prefetch
+  // mechanism (playChunk warms i+1). Promises so two callers for the same
+  // index share one fetch. Failures are evicted so retry actually retries.
+  const audioCacheRef = useRef<Map<number, Promise<TtsChunkAudio>>>(new Map());
+  // 0..1 through the whole article; written to the server/local store on
+  // pause, chunk boundaries and unmount -- never on every playback tick.
+  // Only meaningful once playback has started: startedRef guards against
+  // writing a position onto an article that was never listened to (null
+  // listeningFraction means exactly that -- see saveArticleFromUrl).
+  const fractionRef = useRef(0);
+  const startedRef = useRef(false);
 
   useEffect(() => {
     // `cancelled` because tapping Back unmounts this screen while the fetch
@@ -111,9 +144,45 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
     };
   }, [articleId, authenticated]);
 
+  useEffect(() => {
+    let cancelled = false;
+    loadDevicePrefs().then((loaded) => {
+      if (!cancelled) setPrefs(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Unmount teardown for the player: stop audio, release every staged chunk
+  // (blob URLs on web, cache files on native), and flush the last position.
+  // articleId/authenticated are props and fractionRef is a ref, so this
+  // cleanup doesn't close over stale state.
+  useEffect(() => {
+    const audioCache = audioCacheRef.current;
+    return () => {
+      listeningRef.current = false;
+      const sound = soundRef.current;
+      soundRef.current = null;
+      if (sound) void sound.unloadAsync().catch(() => undefined);
+      for (const pending of audioCache.values()) {
+        void pending.then((a) => a.cleanup()).catch(() => undefined);
+      }
+      audioCache.clear();
+      if (startedRef.current) {
+        void getDeviceId()
+          .then((deviceId) => updateArticleListeningPosition(articleId, fractionRef.current, deviceId, authenticated))
+          .catch(() => undefined);
+      }
+    };
+  }, [articleId, authenticated]);
+
   const text = article?.extractedText ?? "";
   const segments = useMemo(() => buildSegments(text, highlights), [text, highlights]);
+  const chunks = useMemo(() => toSafeTextChunks(text), [text]);
   const hasSelection = selection.end > selection.start;
+  const textSize = TEXT_SIZES.find((s) => s.value === prefs.textSize) ?? TEXT_SIZES[1];
+  const bodyStyle = [styles.body, { fontSize: textSize.fontSize, lineHeight: textSize.lineHeight }];
 
   function toggleSelecting() {
     setSelecting((prev) => !prev);
@@ -137,6 +206,120 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
     } finally {
       setSaving(false);
     }
+  }
+
+  function getChunkAudio(i: number): Promise<TtsChunkAudio> {
+    let pending = audioCacheRef.current.get(i);
+    if (!pending) {
+      pending = fetchTtsChunkAudio(chunks[i], prefs.ttsVoice, prefs.ttsRate);
+      pending.catch(() => audioCacheRef.current.delete(i));
+      audioCacheRef.current.set(i, pending);
+    }
+    return pending;
+  }
+
+  async function unloadSound() {
+    const sound = soundRef.current;
+    soundRef.current = null;
+    if (sound) {
+      try {
+        await sound.unloadAsync();
+      } catch {
+        // already unloaded
+      }
+    }
+  }
+
+  function flushListeningPosition() {
+    if (!startedRef.current) return;
+    void getDeviceId()
+      .then((deviceId) => updateArticleListeningPosition(articleId, fractionRef.current, deviceId, authenticated))
+      .catch(() => undefined); // position sync is best-effort, never surfaced
+  }
+
+  async function playChunk(i: number) {
+    if (i < 0 || i >= chunks.length) return;
+    setChunkIndex(i);
+    setChunkLoading(true);
+    setTtsError(null);
+    await unloadSound();
+    try {
+      const audio = await getChunkAudio(i);
+      if (!listeningRef.current) return; // stopped while the fetch was in flight
+      // Warm the next chunk while this one plays, so the boundary is a cache
+      // hit instead of a multi-second silence -- the same reasoning as the
+      // web player's prefetch.
+      if (i + 1 < chunks.length) void getChunkAudio(i + 1).catch(() => undefined);
+
+      const { sound } = await Audio.Sound.createAsync({ uri: audio.uri }, { shouldPlay: true });
+      if (!listeningRef.current) {
+        void sound.unloadAsync().catch(() => undefined);
+        return;
+      }
+      soundRef.current = sound;
+      startedRef.current = true;
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (!status.isLoaded) return;
+        if (status.durationMillis) {
+          fractionRef.current = Math.min(
+            1,
+            (i + (status.positionMillis ?? 0) / status.durationMillis) / chunks.length,
+          );
+        }
+        setPlaying(status.isPlaying);
+        if (status.didJustFinish) {
+          flushListeningPosition();
+          if (i + 1 < chunks.length) void playChunk(i + 1);
+          else void stopListening();
+        }
+      });
+      setPlaying(true);
+    } catch (err) {
+      setTtsError(err instanceof ApiError ? err.message : "Couldn't fetch audio. Check your connection.");
+      setPlaying(false);
+    } finally {
+      setChunkLoading(false);
+    }
+  }
+
+  async function startListening() {
+    listeningRef.current = true;
+    setListening(true);
+    // Without this, iOS's silent switch mutes playback entirely -- read-aloud
+    // is exactly the kind of deliberate audio the silent switch isn't meant
+    // to cover (same category as a podcast app).
+    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true }).catch(() => undefined);
+    // Resume where any device left off -- listeningFraction maps back to a
+    // chunk index. A finished article (fraction 1) starts over instead of
+    // resuming onto the last syllable.
+    const fraction = article?.listeningFraction ?? 0;
+    const resumeChunk = fraction >= 1 ? 0 : Math.min(chunks.length - 1, Math.floor(fraction * chunks.length));
+    await playChunk(resumeChunk);
+  }
+
+  async function togglePlayPause() {
+    const sound = soundRef.current;
+    if (!sound) return;
+    try {
+      const status = await sound.getStatusAsync();
+      if (!status.isLoaded) return;
+      if (status.isPlaying) {
+        await sound.pauseAsync();
+        flushListeningPosition();
+      } else {
+        await sound.playAsync();
+      }
+    } catch {
+      // sound was torn down between the tap and the call
+    }
+  }
+
+  async function stopListening() {
+    listeningRef.current = false;
+    setListening(false);
+    setPlaying(false);
+    await unloadSound();
+    flushListeningPosition();
   }
 
   async function handleSetStatus(status: ArticleStatus) {
@@ -228,9 +411,16 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
           <Text style={styles.back}>← Library</Text>
         </TouchableOpacity>
         {text.length > 0 && (
-          <TouchableOpacity onPress={toggleSelecting}>
-            <Text style={styles.selectToggle}>{selecting ? "Done" : "Select text"}</Text>
-          </TouchableOpacity>
+          <View style={styles.topBarActions}>
+            {!listening && (
+              <TouchableOpacity onPress={startListening}>
+                <Text style={styles.selectToggle}>🔊 Listen</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={toggleSelecting}>
+              <Text style={styles.selectToggle}>{selecting ? "Done" : "Select text"}</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -290,7 +480,7 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
           // highlights as styled Text segments otherwise. See README.md's
           // Verified section for what is and isn't confirmed on native.
           <TextInput
-            style={styles.body}
+            style={bodyStyle}
             multiline
             value={text}
             showSoftInputOnFocus={false}
@@ -300,7 +490,7 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
             onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
           />
         ) : text ? (
-          <Text style={styles.body}>
+          <Text style={bodyStyle}>
             {segments.map((seg) =>
               seg.highlight ? (
                 <Text
@@ -316,9 +506,44 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
             )}
           </Text>
         ) : (
-          <Text style={styles.body}>No readable content for this article.</Text>
+          <Text style={bodyStyle}>No readable content for this article.</Text>
         )}
       </ScrollView>
+
+      {listening && (
+        <View style={styles.playerBar}>
+          {ttsError && <Text style={styles.playerError}>{ttsError}</Text>}
+          <View style={styles.playerControls}>
+            <TouchableOpacity onPress={() => playChunk(chunkIndex - 1)} disabled={chunkIndex === 0}>
+              <Text style={[styles.playerButton, chunkIndex === 0 && styles.playerButtonDisabled]}>⏮</Text>
+            </TouchableOpacity>
+            {chunkLoading ? (
+              <ActivityIndicator />
+            ) : ttsError ? (
+              // Retry re-enters playChunk for the same index; the failed
+              // fetch was evicted from the cache, so this is a real retry.
+              <TouchableOpacity onPress={() => playChunk(chunkIndex)}>
+                <Text style={styles.playerButton}>↻</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity onPress={togglePlayPause}>
+                <Text style={styles.playerButton}>{playing ? "⏸" : "▶"}</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={() => playChunk(chunkIndex + 1)} disabled={chunkIndex >= chunks.length - 1}>
+              <Text style={[styles.playerButton, chunkIndex >= chunks.length - 1 && styles.playerButtonDisabled]}>
+                ⏭
+              </Text>
+            </TouchableOpacity>
+            <Text style={styles.playerProgress}>
+              {chunkIndex + 1} / {chunks.length}
+            </Text>
+            <TouchableOpacity onPress={stopListening}>
+              <Text style={styles.playerClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {selecting && hasSelection && (
         <View style={styles.colorBar}>
@@ -350,7 +575,21 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: { padding: 20, paddingTop: 12 },
   back: { color: "#b5502f", fontSize: 14, fontWeight: "600" },
+  topBarActions: { flexDirection: "row", alignItems: "center", gap: 16 },
   selectToggle: { color: "#1F6F6B", fontSize: 14, fontWeight: "600" },
+  playerBar: {
+    borderTopWidth: 1,
+    borderTopColor: "#ece6d8",
+    backgroundColor: "#fff",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  playerError: { color: "#b5502f", fontSize: 12, marginBottom: 6, textAlign: "center" },
+  playerControls: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 22 },
+  playerButton: { fontSize: 22, color: "#1c1a16" },
+  playerButtonDisabled: { color: "#d8d2c4" },
+  playerProgress: { fontSize: 12, color: "#6b6558", minWidth: 52, textAlign: "center" },
+  playerClose: { fontSize: 16, color: "#6b6558" },
   title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 4 },
   meta: { fontSize: 13, color: "#6b6558", marginBottom: 12 },
   manageRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" },

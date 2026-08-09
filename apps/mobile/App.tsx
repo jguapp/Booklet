@@ -10,6 +10,8 @@ import { DailyReviewScreen } from "./src/screens/DailyReviewScreen";
 import { FavoritesScreen } from "./src/screens/FavoritesScreen";
 import { HighlightsScreen } from "./src/screens/HighlightsScreen";
 import { StatsScreen } from "./src/screens/StatsScreen";
+import { RssScreen } from "./src/screens/RssScreen";
+import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { RecapScreen } from "./src/screens/RecapScreen";
 import { TrashScreen } from "./src/screens/TrashScreen";
 
@@ -29,6 +31,8 @@ type Screen =
   | { name: "highlights"; authenticated: boolean }
   | { name: "stats"; authenticated: boolean }
   | { name: "recap"; authenticated: boolean }
+  | { name: "rss"; authenticated: boolean }
+  | { name: "settings"; authenticated: boolean }
   | { name: "trash"; authenticated: boolean };
 
 export default function App() {
@@ -112,6 +116,8 @@ export default function App() {
           onOpenFavorites={() => setScreen({ name: "favorites", authenticated: screen.authenticated })}
           onOpenHighlights={() => setScreen({ name: "highlights", authenticated: screen.authenticated })}
           onOpenStats={() => setScreen({ name: "stats", authenticated: screen.authenticated })}
+          onOpenRss={() => setScreen({ name: "rss", authenticated: screen.authenticated })}
+          onOpenSettings={() => setScreen({ name: "settings", authenticated: screen.authenticated })}
           onOpenTrash={() => setScreen({ name: "trash", authenticated: screen.authenticated })}
           onSignedOut={() => {
             setMigrationNotice(null);
@@ -157,6 +163,22 @@ export default function App() {
         <RecapScreen
           authenticated={screen.authenticated}
           onBack={() => setScreen({ name: "stats", authenticated: screen.authenticated })}
+        />
+      )}
+      {screen.name === "rss" && (
+        <RssScreen
+          authenticated={screen.authenticated}
+          onBack={() => setScreen({ name: "library", authenticated: screen.authenticated })}
+        />
+      )}
+      {screen.name === "settings" && (
+        <SettingsScreen
+          authenticated={screen.authenticated}
+          onBack={() => setScreen({ name: "library", authenticated: screen.authenticated })}
+          onSignedOut={() => {
+            setMigrationNotice(null);
+            setScreen({ name: "login" });
+          }}
         />
       )}
       {screen.name === "trash" && (
