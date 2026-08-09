@@ -9,6 +9,8 @@ import { ArticleScreen } from "./src/screens/ArticleScreen";
 import { DailyReviewScreen } from "./src/screens/DailyReviewScreen";
 import { FavoritesScreen } from "./src/screens/FavoritesScreen";
 import { HighlightsScreen } from "./src/screens/HighlightsScreen";
+import { StatsScreen } from "./src/screens/StatsScreen";
+import { RecapScreen } from "./src/screens/RecapScreen";
 import { TrashScreen } from "./src/screens/TrashScreen";
 
 // No navigation library -- a handful of screens and a session check don't
@@ -25,6 +27,8 @@ type Screen =
   | { name: "resurface"; authenticated: boolean }
   | { name: "favorites"; authenticated: boolean }
   | { name: "highlights"; authenticated: boolean }
+  | { name: "stats"; authenticated: boolean }
+  | { name: "recap"; authenticated: boolean }
   | { name: "trash"; authenticated: boolean };
 
 export default function App() {
@@ -107,6 +111,7 @@ export default function App() {
           onOpenDailyReview={() => setScreen({ name: "resurface", authenticated: screen.authenticated })}
           onOpenFavorites={() => setScreen({ name: "favorites", authenticated: screen.authenticated })}
           onOpenHighlights={() => setScreen({ name: "highlights", authenticated: screen.authenticated })}
+          onOpenStats={() => setScreen({ name: "stats", authenticated: screen.authenticated })}
           onOpenTrash={() => setScreen({ name: "trash", authenticated: screen.authenticated })}
           onSignedOut={() => {
             setMigrationNotice(null);
@@ -139,6 +144,19 @@ export default function App() {
           authenticated={screen.authenticated}
           onBack={() => setScreen({ name: "library", authenticated: screen.authenticated })}
           onOpenArticle={(id) => setScreen({ name: "article", id, authenticated: screen.authenticated })}
+        />
+      )}
+      {screen.name === "stats" && (
+        <StatsScreen
+          authenticated={screen.authenticated}
+          onBack={() => setScreen({ name: "library", authenticated: screen.authenticated })}
+          onOpenRecap={() => setScreen({ name: "recap", authenticated: screen.authenticated })}
+        />
+      )}
+      {screen.name === "recap" && (
+        <RecapScreen
+          authenticated={screen.authenticated}
+          onBack={() => setScreen({ name: "stats", authenticated: screen.authenticated })}
         />
       )}
       {screen.name === "trash" && (

@@ -1,0 +1,318 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import type { Article, ReadingActivityDay, SourceType } from "@booklet/shared";
+import { computeReadingStats } from "@booklet/shared";
+import { loadArticles } from "../lib/data/articles";
+import { loadReadingActivity } from "../lib/data/reading-activity";
+import { formatDuration } from "../lib/format";
+
+interface StatsScreenProps {
+  authenticated: boolean;
+  onBack: () => void;
+  onOpenRecap: () => void;
+}
+
+// Ported from the web stats page. Same window as /api/stats/reading-activity
+// returns, so both data sources lay out into the same size grid.
+const HEATMAP_WEEKS = 53;
+
+function dayKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+// Web's bg-accent opacity ladder, resolved to concrete hexes over this
+// screen's #f7f4ee background -- RN styles have no CSS alpha-over-token
+// shorthand worth reproducing for five values.
+const HEAT_COLORS = ["#ece6d8", "#eac9b8", "#dfa088", "#cd7355", "#b5502f"];
+
+/** Real per-day reading time -- level buckets are minutes read. */
+function levelFromMinutes(minutes: number): number {
+  if (minutes <= 0) return 0;
+  if (minutes < 10) return 1;
+  if (minutes < 25) return 2;
+  if (minutes < 45) return 3;
+  return 4;
+}
+
+/** Articles *finished* that day -- the only signal without a signed-in
+ * account's server-tracked history. Undercounts (a day spent partway
+ * through an article shows blank) but beats an empty heatmap. */
+function levelFromFinishedCount(count: number): number {
+  if (count <= 0) return 0;
+  if (count === 1) return 1;
+  if (count === 2) return 2;
+  if (count <= 4) return 3;
+  return 4;
+}
+
+/** Last HEATMAP_WEEKS*7 days as level numbers, oldest first, chunked into
+ * 7-day week columns. Same logic as the web page's computeDailyActivity,
+ * minus tooltips -- RN has no hover, and a tap target 11px square isn't
+ * one. */
+function computeWeeks(articles: Article[], activity: ReadingActivityDay[] | null): number[][] {
+  const minutesByDay = new Map<string, number>();
+  const finishedByDay = new Map<string, number>();
+  if (activity) {
+    for (const a of activity) minutesByDay.set(a.date, a.seconds / 60);
+  } else {
+    for (const a of articles) {
+      if (!a.archivedAt) continue;
+      const key = dayKey(new Date(a.archivedAt));
+      finishedByDay.set(key, (finishedByDay.get(key) ?? 0) + 1);
+    }
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(today);
+  end.setDate(end.getDate() + (6 - end.getDay()));
+  const totalDays = HEATMAP_WEEKS * 7;
+  const start = new Date(end);
+  start.setDate(start.getDate() - totalDays + 1);
+
+  const levels: number[] = [];
+  for (let i = 0; i < totalDays; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    if (d > today) {
+      levels.push(0);
+    } else if (activity) {
+      levels.push(levelFromMinutes(minutesByDay.get(dayKey(d)) ?? 0));
+    } else {
+      levels.push(levelFromFinishedCount(finishedByDay.get(dayKey(d)) ?? 0));
+    }
+  }
+
+  const weeks: number[][] = [];
+  for (let i = 0; i < levels.length; i += 7) weeks.push(levels.slice(i, i + 7));
+  return weeks;
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.statCard}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function Bar({ fraction }: { fraction: number }) {
+  return (
+    <View style={styles.barTrack}>
+      <View style={[styles.barFill, { width: `${Math.round(fraction * 100)}%` }]} />
+    </View>
+  );
+}
+
+export function StatsScreen({ authenticated, onBack, onOpenRecap }: StatsScreenProps) {
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [activity, setActivity] = useState<ReadingActivityDay[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const heatmapRef = useRef<ScrollView>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setArticles(await loadArticles(authenticated));
+      setError(null);
+    } catch {
+      setError("Couldn't load your stats. Pull down to retry.");
+    }
+    // Degrades rather than blocks, same as web: the heatmap already treats
+    // null as "no server history" (anonymous mode is that case every time).
+    try {
+      setActivity((await loadReadingActivity(authenticated))?.days ?? null);
+    } catch {
+      setActivity(null);
+    }
+  }, [authenticated]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    refresh().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh]);
+
+  const stats = useMemo(() => computeReadingStats(articles), [articles]);
+  const weeks = useMemo(() => computeWeeks(articles, activity), [articles, activity]);
+
+  const topTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of articles) for (const tag of a.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  }, [articles]);
+
+  const sourceCounts = useMemo(() => {
+    const c: Record<SourceType, number> = { HTML: 0, PDF: 0, EPUB: 0, BOOK: 0 };
+    for (const a of articles) c[a.sourceType]++;
+    return c;
+  }, [articles]);
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  const avgSecondsPerFinished = stats.finishedArticles > 0 ? stats.totalReadingSeconds / stats.finishedArticles : 0;
+  const sourceTotal = articles.length || 1;
+  const sourceEntries = (["HTML", "PDF", "EPUB", "BOOK"] as SourceType[]).filter((t) => sourceCounts[t] > 0);
+  const maxTagCount = topTags[0]?.[1] ?? 1;
+
+  return (
+    <View style={styles.container}>
+      <TouchableOpacity onPress={onBack}>
+        <Text style={styles.back}>← Library</Text>
+      </TouchableOpacity>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>Stats</Text>
+        <TouchableOpacity onPress={onOpenRecap}>
+          <Text style={styles.recapLink}>Your Recap →</Text>
+        </TouchableOpacity>
+      </View>
+      {error && <Text style={styles.error}>{error}</Text>}
+
+      <ScrollView
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              await refresh();
+              setRefreshing(false);
+            }}
+          />
+        }
+        contentContainerStyle={styles.scrollContent}
+      >
+        {stats.totalArticles === 0 ? (
+          <Text style={styles.empty}>Nothing saved yet -- stats show up once you start reading.</Text>
+        ) : (
+          <>
+            <View style={styles.cardsGrid}>
+              <StatCard label="Day streak" value={String(stats.currentStreakDays)} />
+              <StatCard label="Longest streak" value={String(stats.longestStreakDays)} />
+              <StatCard label="Time spent" value={formatDuration(stats.totalReadingSeconds)} />
+              <StatCard label="Completion" value={`${Math.round(stats.completionRate * 100)}%`} />
+              <StatCard label="Finished" value={`${stats.finishedArticles} / ${stats.totalArticles}`} />
+              <StatCard
+                label="Avg. per article"
+                value={avgSecondsPerFinished > 0 ? formatDuration(avgSecondsPerFinished) : "--"}
+              />
+            </View>
+
+            <Text style={styles.sectionHeading}>Days read, past year</Text>
+            <View style={styles.panel}>
+              {/* Newest weeks are what you came to look at -- scroll starts
+                  pinned to the right end, where "now" is. */}
+              <ScrollView
+                ref={heatmapRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                onContentSizeChange={() => heatmapRef.current?.scrollToEnd({ animated: false })}
+              >
+                <View style={styles.heatmapRow}>
+                  {weeks.map((week, i) => (
+                    <View key={i} style={styles.heatmapCol}>
+                      {week.map((level, j) => (
+                        <View key={j} style={[styles.heatCell, { backgroundColor: HEAT_COLORS[level] }]} />
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+
+            <Text style={styles.sectionHeading}>Top tags</Text>
+            <View style={styles.panel}>
+              {topTags.length === 0 ? (
+                <Text style={styles.panelEmpty}>No tags yet.</Text>
+              ) : (
+                topTags.map(([tag, count]) => (
+                  <View key={tag} style={styles.breakdownRow}>
+                    <Text style={styles.breakdownLabel} numberOfLines={1}>
+                      {tag}
+                    </Text>
+                    <Bar fraction={count / maxTagCount} />
+                    <Text style={styles.breakdownCount}>{count}</Text>
+                  </View>
+                ))
+              )}
+            </View>
+
+            <Text style={styles.sectionHeading}>By source</Text>
+            <View style={styles.panel}>
+              {sourceEntries.map((type) => (
+                <View key={type} style={styles.breakdownRow}>
+                  <Text style={styles.breakdownLabel}>{type}</Text>
+                  <Bar fraction={sourceCounts[type] / sourceTotal} />
+                  <Text style={styles.breakdownCount}>{sourceCounts[type]}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#f7f4ee", paddingTop: 56, paddingHorizontal: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f4ee" },
+  back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
+  titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
+  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16" },
+  recapLink: { color: "#b5502f", fontSize: 13, fontWeight: "600" },
+  error: { color: "#b5502f", fontSize: 12, marginBottom: 8 },
+  scrollContent: { paddingBottom: 32 },
+  empty: { textAlign: "center", color: "#6b6558", marginTop: 40 },
+  cardsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 20 },
+  statCard: {
+    flexBasis: "31%",
+    flexGrow: 1,
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ece6d8",
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    alignItems: "center",
+  },
+  statValue: { fontSize: 20, fontWeight: "700", color: "#1c1a16" },
+  statLabel: { fontSize: 10, color: "#6b6558", marginTop: 3, textTransform: "uppercase", letterSpacing: 0.5 },
+  sectionHeading: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#6b6558",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  panel: {
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ece6d8",
+    padding: 14,
+    marginBottom: 20,
+  },
+  panelEmpty: { fontSize: 13, color: "#6b6558" },
+  heatmapRow: { flexDirection: "row", gap: 3 },
+  heatmapCol: { flexDirection: "column", gap: 3 },
+  heatCell: { width: 11, height: 11, borderRadius: 2 },
+  breakdownRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
+  breakdownLabel: { width: 80, fontSize: 13, color: "#1c1a16" },
+  breakdownCount: { width: 24, textAlign: "right", fontSize: 12, color: "#6b6558" },
+  barTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: "#eee8da", overflow: "hidden" },
+  barFill: { height: "100%", borderRadius: 4, backgroundColor: "#b5502f" },
+});
