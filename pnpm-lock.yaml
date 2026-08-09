@@ -163,9 +163,15 @@ importers:
       expo:
         specifier: ~53.0.0
         version: 53.0.27(@babel/core@7.29.7(supports-color@8.1.1))(@expo/dom-webview@57.0.1)(@expo/metro-runtime@5.0.5(react-native@0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1)))(react-native@0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1))(react@19.2.4)(supports-color@8.1.1)
+      expo-av:
+        specifier: ~15.1.7
+        version: 15.1.7(expo@53.0.27)(react-native-web@0.20.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-native@0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1))(react@19.2.4)
       expo-document-picker:
         specifier: ~13.1.6
         version: 13.1.6(expo@53.0.27)
+      expo-file-system:
+        specifier: ~18.1.11
+        version: 18.1.11(expo@53.0.27)(react-native@0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1))
       expo-status-bar:
         specifier: ~2.2.3
         version: 2.2.3(react-native@0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1))(react@19.2.4)
@@ -4280,6 +4286,17 @@ packages:
       expo: '*'
       react: 19.2.4
       react-native: '*'
+
+  expo-av@15.1.7:
+    resolution: {integrity: sha512-NC+JR+65sxXfQN1mOHp3QBaXTL2J+BzNwVO27XgUEc5s9NaoBTdHWElYXrfxvik6xwytZ+a7abrqfNNgsbQzsA==}
+    peerDependencies:
+      expo: '*'
+      react: 19.2.4
+      react-native: '*'
+      react-native-web: '*'
+    peerDependenciesMeta:
+      react-native-web:
+        optional: true
 
   expo-constants@17.1.8:
     resolution: {integrity: sha512-sOCeMN/BWLA7hBP6lMwoEQzFNgTopk6YY03sBAmwT216IHyL54TjNseg8CRU1IQQ/+qinJ2fYWCl7blx2TiNcA==}
@@ -11827,6 +11844,14 @@ snapshots:
       react-native: 0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1)
     transitivePeerDependencies:
       - supports-color
+
+  expo-av@15.1.7(expo@53.0.27)(react-native-web@0.20.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-native@0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1))(react@19.2.4):
+    dependencies:
+      expo: 53.0.27(@babel/core@7.29.7(supports-color@8.1.1))(@expo/dom-webview@57.0.1)(@expo/metro-runtime@5.0.5(react-native@0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1)))(react-native@0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1))(react@19.2.4)(supports-color@8.1.1)
+      react: 19.2.4
+      react-native: 0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1)
+    optionalDependencies:
+      react-native-web: 0.20.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
 
   expo-constants@17.1.8(expo@53.0.27)(react-native@0.79.6(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.0.14)(react@19.2.4)(supports-color@8.1.1))(supports-color@8.1.1):
     dependencies:

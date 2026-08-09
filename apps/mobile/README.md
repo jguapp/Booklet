@@ -2,11 +2,12 @@
 
 An Expo/React Native app: continue without an account or log in, see your
 library, save a URL or upload a PDF/EPUB, organize into collections, search
-your library, favorite and trash articles, read and highlight, browse all
-your highlights with notes and recall prompts, check your reading stats and
-Recap, and run Daily Review. Reuses the same API and `@booklet/shared`
-types as the web app, per the README roadmap's "reusing the same API and
-data model rather than a rewrite."
+your library, favorite and trash articles, read and highlight, listen with
+server-generated read-aloud, browse all your highlights with notes and
+recall prompts, follow RSS feeds, check your reading stats and Recap, tune
+device settings, and run Daily Review. Reuses the same API and
+`@booklet/shared` types as the web app, per the README roadmap's "reusing
+the same API and data model rather than a rewrite."
 
 ## Scope
 
@@ -115,6 +116,49 @@ summary" -- RN's core Clipboard is deprecated and `expo-clipboard` isn't a
 dependency that one button justifies adding. `formatDuration` is copied
 into `src/lib/format.ts` rather than moved to shared, since it's the only
 formatter mobile needs.
+
+**RSS** -- `RssScreen` mirrors the web /rss page: subscribe by URL, each
+subscription lists its live-fetched current items with a per-item Save
+(into the library via the same `saveArticleFromUrl` path a hand-pasted URL
+takes). Items are never stored -- there's no background worker to poll
+them -- and subscriptions deliberately do *not* migrate on signup, because
+the web app doesn't migrate them either; adding it on one client alone
+would make the two disagree about what signup means.
+
+**Read-aloud** -- the mobile counterpart of the web reader's TTS, built on
+the server half only: `POST /api/tts` returns Kokoro-generated WAV per
+chunk (`toSafeTextChunks` from `@booklet/shared`, the same chunking the
+web player and the server cache key on, so mobile requests hit the same
+cache entries). There is no on-device model and no SpeechSynthesis
+fallback -- React Native has neither -- so read-aloud needs a connection,
+and the voice list is the Kokoro set only. The route is POST-only, so
+expo-av can't stream it directly; each chunk's bytes are staged
+per-platform (a Blob object-URL on web, an `expo-file-system` cache file
+on iOS/Android -- iOS's AVPlayer doesn't reliably play `data:` URLs) and
+cleaned up on unmount. The player is a bottom bar (play/pause, chunk
+prev/next, ✕), prefetches the next chunk while one plays, sets
+`playsInSilentModeIOS` so the iOS mute switch doesn't silence it, and
+applies speed server-side via the API's `speed` parameter rather than
+expo-av's rate control (no pitch shift, and cached chunks serve web and
+mobile alike). Listening position: `updateArticleListeningPosition`
+(mirroring web, #152) is written on pauses, chunk boundaries and unmount
+-- never per tick -- and only once playback has actually started, so a
+never-listened article keeps its `null` fraction. Starting the player
+resumes from `listeningFraction`, including a position written by the web
+reader on another device.
+
+**Settings** -- device-level preferences plus a light account section:
+reader text size (small/medium/large, applied in `ArticleScreen`),
+read-aloud voice and speed (`src/lib/device-prefs.ts`, AsyncStorage,
+validated on read like the web's device-prefs loader), and signed-in
+email (fetched fresh from `GET /api/auth/me` -- the profile isn't stored
+beside the token, where it would go stale) with log out. Deliberately much
+smaller than web Settings: Kindle email, the podcast feed URL, session
+management, import/export and account deletion stay web-only -- each
+either needs UI this app doesn't have or shouldn't exist without its full
+confirmation flow. These prefs are device-local on web too: ideal text
+size and which voice sounds best are properties of the screen/ear, not
+the account.
 
 No navigation library -- a handful of screens and a session check don't
 need React Navigation's setup (and its native-linking config) for an app

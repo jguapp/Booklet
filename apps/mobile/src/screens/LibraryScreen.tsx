@@ -36,6 +36,8 @@ interface LibraryScreenProps {
   onOpenFavorites: () => void;
   onOpenHighlights: () => void;
   onOpenStats: () => void;
+  onOpenRss: () => void;
+  onOpenSettings: () => void;
   onOpenTrash: () => void;
   onSignedOut: () => void;
   /** Set when logging in couldn't move this device's local library onto the
@@ -53,6 +55,8 @@ export function LibraryScreen({
   onOpenFavorites,
   onOpenHighlights,
   onOpenStats,
+  onOpenRss,
+  onOpenSettings,
   onOpenTrash,
   onSignedOut,
   migrationNotice,
@@ -317,8 +321,14 @@ export function LibraryScreen({
         <TouchableOpacity onPress={onOpenStats}>
           <Text style={styles.navLink}>▤ Stats</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={onOpenRss}>
+          <Text style={styles.navLink}>◈ RSS</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={onOpenTrash}>
           <Text style={styles.navLink}>🗑 Trash</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onOpenSettings}>
+          <Text style={styles.navLink}>⚙ Settings</Text>
         </TouchableOpacity>
       </View>
 

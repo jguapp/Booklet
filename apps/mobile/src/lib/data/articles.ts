@@ -15,9 +15,9 @@ async function extractContent(url: string): Promise<ExtractedContent> {
 }
 
 /**
- * Still narrower than the web app's articles.ts -- no tags, progress,
- * listening-position or send-to-Kindle, since mobile has no screen that needs
- * them yet -- but the everyday library actions now have counterparts here:
+ * Still narrower than the web app's articles.ts -- no tags, reading
+ * progress or send-to-Kindle, since mobile has no screen that needs them
+ * yet -- but the everyday library actions now have counterparts here:
  * favorite, status, rename, and the whole trash lifecycle
  * (trash / restore / permanentlyDelete / emptyTrash / loadTrash). The trash
  * filter the older comment warned about landed with them, in
@@ -172,6 +172,42 @@ export async function emptyTrash(authenticated: boolean): Promise<void> {
   await localArticles.deleteMany(trashed.map((a) => a.id));
 }
 
+/**
+ * Where the read-aloud player is in an article, 0..1 -- mirrors the web
+ * app's updateArticleListeningPosition, same last-write-wins reasoning (see
+ * UpdateArticleRequest). Called on chunk boundaries and pauses, not every
+ * playback tick. Local mode still records it: the position survives a
+ * reload on this device, which is most of the value even with nothing to
+ * sync to.
+ */
+export async function updateArticleListeningPosition(
+  articleId: string,
+  listeningFraction: number,
+  deviceId: string,
+  authenticated: boolean,
+): Promise<Article | null> {
+  if (authenticated) {
+    return apiFetch<Article>(`/api/articles/${articleId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ listeningFraction, listeningDeviceId: deviceId }),
+    });
+  }
+  const article = await localArticles.get(articleId);
+  // Gone from local storage mid-playback -- recreating the row would
+  // resurrect a deleted article.
+  if (!article) return null;
+  const now = new Date().toISOString();
+  const updated: Article = {
+    ...article,
+    listeningFraction,
+    listeningUpdatedAt: now,
+    listeningDeviceId: deviceId,
+    updatedAt: now,
+  };
+  await localArticles.put(updated);
+  return updated;
+}
+
 export async function saveArticleFromUrl(url: string, authenticated: boolean): Promise<Article> {
   if (authenticated) {
     return apiFetch<Article>("/api/articles", { method: "POST", body: JSON.stringify({ url }) });
@@ -221,9 +257,8 @@ export async function saveArticleFromUrl(url: string, authenticated: boolean): P
     progressFraction: 0,
     activeReadingSeconds: 0,
     // Null rather than 0 -- never listened is distinct from paused at the
-    // start (#152). Mobile doesn't have read-aloud yet, but it shares the
-    // Article type and syncs the same rows, so it must not write a position
-    // that would make the web reader offer to resume from the beginning.
+    // start (#152). Read-aloud only ever writes a position through
+    // updateArticleListeningPosition once playback has actually started.
     listeningFraction: null,
     listeningUpdatedAt: null,
     listeningDeviceId: null,
@@ -324,9 +359,8 @@ export async function saveArticleFromFile(file: PickedFile, authenticated: boole
     progressFraction: 0,
     activeReadingSeconds: 0,
     // Null rather than 0 -- never listened is distinct from paused at the
-    // start (#152). Mobile doesn't have read-aloud yet, but it shares the
-    // Article type and syncs the same rows, so it must not write a position
-    // that would make the web reader offer to resume from the beginning.
+    // start (#152). Read-aloud only ever writes a position through
+    // updateArticleListeningPosition once playback has actually started.
     listeningFraction: null,
     listeningUpdatedAt: null,
     listeningDeviceId: null,

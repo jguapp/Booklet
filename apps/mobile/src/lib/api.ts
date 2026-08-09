@@ -117,15 +117,16 @@ export async function apiFetch<T>(path: string, options: RequestInit & { auth?: 
 }
 
 /**
- * Login is the only auth call this app makes, and that is a scope decision
- * rather than an oversight. Signup, password reset, settings, session
- * management and account deletion (#174, DELETE /api/auth/me) all exist on
- * the API and all have web counterparts in apps/web/src/lib/data/; none has
- * a screen here, and shipping a data function with no caller would just be
- * untested code that looks supported. Account deletion in particular must
- * not be added without its confirmation UI: the route takes a password or a
- * typed-out email depending on UserProfile.hasPassword, and getting that
- * branch wrong on a mobile keyboard deletes a library that cannot come back.
+ * Login and getProfile are the only auth calls this app makes, and that is
+ * a scope decision rather than an oversight. Signup, password reset,
+ * settings updates, session management and account deletion (#174, DELETE
+ * /api/auth/me) all exist on the API and all have web counterparts in
+ * apps/web/src/lib/data/; none has a screen here, and shipping a data
+ * function with no caller would just be untested code that looks supported.
+ * Account deletion in particular must not be added without its confirmation
+ * UI: the route takes a password or a typed-out email depending on
+ * UserProfile.hasPassword, and getting that branch wrong on a mobile
+ * keyboard deletes a library that cannot come back.
  */
 export async function login(email: string, password: string): Promise<UserProfile> {
   const body = await apiFetch<AuthResponse>("/api/auth/login", {
@@ -135,5 +136,13 @@ export async function login(email: string, password: string): Promise<UserProfil
   });
   await setSession({ accessToken: body.accessToken, accessTokenExpiresAt: body.accessTokenExpiresAt });
   return body.user;
+}
+
+/** Who this token belongs to -- the Settings screen's account section. The
+ * profile isn't stored alongside the token (only login ever had it in
+ * hand, and a stored copy would go stale), so the one screen that shows it
+ * fetches it fresh. */
+export async function getProfile(): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/api/auth/me");
 }
 
