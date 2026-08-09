@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import type { Article, Highlight, ResurfaceCandidate, ResurfaceFeedback } from "@booklet/shared";
 import { applySm2Review, feedbackToQuality, selectHighlightsToResurface } from "@booklet/shared";
 import { loadArticles } from "../lib/data/articles";
@@ -56,24 +57,30 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
     setBatchIds(selected.map((c) => c.id));
   }, [authenticated]);
 
-  useEffect(() => {
-    let cancelled = false;
-    refresh()
-      .catch(() => {
-        // A rejection here used to be unhandled, and left batchIds at null --
-        // which renders no cards, no "nothing eligible" box and no "done for
-        // today" box, because all three are gated on batchIds. The screen
-        // just sat there blank, permanently, whether the API was down or the
-        // session had expired.
-        if (!cancelled) setError("Couldn't load your review. Check your connection and try again.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [refresh]);
+  // useFocusEffect for the same reason as every list screen (see
+  // LibraryScreen): a preserved screen no longer reloads on return, and a
+  // review batch graded elsewhere -- or local mode's per-visit re-roll --
+  // must re-run when this screen is looked at again.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      refresh()
+        .catch(() => {
+          // A rejection here used to be unhandled, and left batchIds at null --
+          // which renders no cards, no "nothing eligible" box and no "done for
+          // today" box, because all three are gated on batchIds. The screen
+          // just sat there blank, permanently, whether the API was down or the
+          // session had expired.
+          if (!cancelled) setError("Couldn't load your review. Check your connection and try again.");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [refresh]),
+  );
 
   const articleById = useMemo(() => new Map(articles.map((a) => [a.id, a])), [articles]);
   const batch = useMemo(() => {

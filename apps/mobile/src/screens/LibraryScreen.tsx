@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import type { Article, Collection } from "@booklet/shared";
 import { clearSession } from "../lib/api";
@@ -95,16 +96,24 @@ export function LibraryScreen({
     }
   }, [authenticated]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    refresh().finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [refresh]);
+  // useFocusEffect, not a mount effect: React Navigation keeps stacked
+  // screens mounted, so "the user came back here" no longer implies a
+  // remount. Without this, an edit made on another screen (a rename in the
+  // reader, a restore in Trash) never appeared until a manual
+  // pull-to-refresh -- caught by the Playwright run when the migration
+  // landed. `loading` starts true and is only ever cleared, so the spinner
+  // covers the first load without flashing on every later refocus.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      refresh().finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [refresh]),
+  );
 
   // Membership of the currently-selected collection -- drives both the
   // filtered list and each card's add/remove toggle state. Re-fetched

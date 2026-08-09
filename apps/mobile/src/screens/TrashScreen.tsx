@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useMemo } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import type { Article } from "@booklet/shared";
 import { emptyTrash, loadTrash, permanentlyDeleteArticle, restoreArticle } from "../lib/data/articles";
 import { useTheme, type ThemePalette } from "../lib/theme";
@@ -31,16 +32,24 @@ export function TrashScreen({ authenticated, onBack }: TrashScreenProps) {
     }
   }, [authenticated]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    refresh().finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [refresh]);
+  // useFocusEffect, not a mount effect: React Navigation keeps stacked
+  // screens mounted, so "the user came back here" no longer implies a
+  // remount. Without this, an edit made on another screen (a rename in the
+  // reader, a restore in Trash) never appeared until a manual
+  // pull-to-refresh -- caught by the Playwright run when the migration
+  // landed. `loading` starts true and is only ever cleared, so the spinner
+  // covers the first load without flashing on every later refocus.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      refresh().finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [refresh]),
+  );
 
   async function handleRestore(article: Article) {
     setConfirming(null);
