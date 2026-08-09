@@ -5,6 +5,7 @@ import { applySm2Review, feedbackToQuality, selectHighlightsToResurface } from "
 import { loadArticles } from "../lib/data/articles";
 import { loadCurrentDigest } from "../lib/data/digests";
 import { loadHighlights, updateHighlightFeedback } from "../lib/data/highlights";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface DailyReviewScreenProps {
   authenticated: boolean;
@@ -16,6 +17,8 @@ interface DailyReviewScreenProps {
 const LOCAL_HIGHLIGHTS_PER_DIGEST = 5;
 
 export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [loading, setLoading] = useState(true);
   const [articles, setArticles] = useState<Article[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
@@ -206,24 +209,25 @@ export function DailyReviewScreen({ authenticated, onBack }: DailyReviewScreenPr
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f4ee", paddingTop: 56, paddingHorizontal: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f4ee" },
-  back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
-  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 4 },
-  subtitle: { fontSize: 13, color: "#6b6558", marginBottom: 20 },
-  error: { color: "#b5502f", fontSize: 13, marginBottom: 12 },
-  emptyBox: { borderWidth: 1, borderStyle: "dashed", borderColor: "#ddd6c7", borderRadius: 8, padding: 24, alignItems: "center" },
-  emptyText: { fontSize: 14, color: "#6b6558", textAlign: "center" },
-  card: { backgroundColor: "#fff", borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#ece6d8" },
-  quote: { fontSize: 16, color: "#1c1a16", lineHeight: 22, marginBottom: 8 },
-  // Once revealed, the prompt stays on the card above the passage, smaller
-  // and quieter -- it's the context for the answer, not the answer.
-  prompt: { fontSize: 14, fontWeight: "600", color: "#6b6558", lineHeight: 20, marginBottom: 6 },
-  articleTitle: { fontSize: 12, color: "#6b6558", marginBottom: 12 },
-  actionsRow: { flexDirection: "row", gap: 8 },
-  secondaryButton: { flex: 1, borderWidth: 1, borderColor: "#ddd6c7", borderRadius: 6, paddingVertical: 8, alignItems: "center" },
-  secondaryButtonText: { fontSize: 12, fontWeight: "600", color: "#6b6558" },
-  primaryButton: { flex: 1, backgroundColor: "#b5502f", borderRadius: 6, paddingVertical: 8, alignItems: "center" },
-  primaryButtonText: { fontSize: 12, fontWeight: "600", color: "#fff" },
-});
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: t.paper, paddingTop: 56, paddingHorizontal: 16 },
+    center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.paper },
+    back: { color: t.accent, fontSize: 14, fontWeight: "600", marginBottom: 12 },
+    title: { fontSize: 24, fontWeight: "700", color: t.ink, marginBottom: 4 },
+    subtitle: { fontSize: 13, color: t.inkMuted, marginBottom: 20 },
+    error: { color: t.danger, fontSize: 13, marginBottom: 12 },
+    emptyBox: { borderWidth: 1, borderStyle: "dashed", borderColor: t.border, borderRadius: 8, padding: 24, alignItems: "center" },
+    emptyText: { fontSize: 14, color: t.inkMuted, textAlign: "center" },
+    card: { backgroundColor: t.surface, borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: t.border },
+    quote: { fontSize: 16, color: t.ink, lineHeight: 22, marginBottom: 8 },
+    // Once revealed, the prompt stays on the card above the passage, smaller
+    // and quieter -- it's the context for the answer, not the answer.
+    prompt: { fontSize: 14, fontWeight: "600", color: t.inkMuted, lineHeight: 20, marginBottom: 6 },
+    articleTitle: { fontSize: 12, color: t.inkMuted, marginBottom: 12 },
+    actionsRow: { flexDirection: "row", gap: 8 },
+    secondaryButton: { flex: 1, borderWidth: 1, borderColor: t.border, borderRadius: 6, paddingVertical: 8, alignItems: "center" },
+    secondaryButtonText: { fontSize: 12, fontWeight: "600", color: t.inkMuted },
+    primaryButton: { flex: 1, backgroundColor: t.accent, borderRadius: 6, paddingVertical: 8, alignItems: "center" },
+    primaryButtonText: { fontSize: 12, fontWeight: "600", color: t.accentContrast },
+  });

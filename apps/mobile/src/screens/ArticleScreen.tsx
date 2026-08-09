@@ -23,6 +23,7 @@ import { createHighlight, deleteHighlight, loadHighlights } from "../lib/data/hi
 import { fetchTtsChunkAudio, type TtsChunkAudio } from "../lib/reader/read-aloud";
 import { DEFAULT_PREFS, loadDevicePrefs, TEXT_SIZES, type DevicePrefs } from "../lib/device-prefs";
 import { getDeviceId } from "../lib/device-id";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface ArticleScreenProps {
   articleId: string;
@@ -85,6 +86,8 @@ function buildSegments(text: string, highlights: Highlight[]): Segment[] {
 }
 
 export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [article, setArticle] = useState<Article | null>(null);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [loading, setLoading] = useState(true);
@@ -432,6 +435,7 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
               autoFocus
               value={titleDraft}
               onChangeText={setTitleDraft}
+              placeholderTextColor={palette.inkFaint}
               placeholder="Article title"
             />
             <TouchableOpacity onPress={handleRename}>
@@ -562,9 +566,10 @@ export function ArticleScreen({ articleId, authenticated, onBack }: ArticleScree
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f4ee" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: "#f7f4ee" },
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.paper },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: t.paper },
   topBar: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -574,60 +579,61 @@ const styles = StyleSheet.create({
   },
   scroll: { flex: 1 },
   content: { padding: 20, paddingTop: 12 },
-  back: { color: "#b5502f", fontSize: 14, fontWeight: "600" },
+  back: { color: t.accent, fontSize: 14, fontWeight: "600" },
   topBarActions: { flexDirection: "row", alignItems: "center", gap: 16 },
-  selectToggle: { color: "#1F6F6B", fontSize: 14, fontWeight: "600" },
+  selectToggle: { color: t.accent, fontSize: 14, fontWeight: "600" },
   playerBar: {
     borderTopWidth: 1,
-    borderTopColor: "#ece6d8",
-    backgroundColor: "#fff",
+    borderTopColor: t.border,
+    backgroundColor: t.surface,
     paddingVertical: 10,
     paddingHorizontal: 20,
   },
-  playerError: { color: "#b5502f", fontSize: 12, marginBottom: 6, textAlign: "center" },
+  playerError: { color: t.danger, fontSize: 12, marginBottom: 6, textAlign: "center" },
   playerControls: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 22 },
-  playerButton: { fontSize: 22, color: "#1c1a16" },
-  playerButtonDisabled: { color: "#d8d2c4" },
-  playerProgress: { fontSize: 12, color: "#6b6558", minWidth: 52, textAlign: "center" },
-  playerClose: { fontSize: 16, color: "#6b6558" },
-  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 4 },
-  meta: { fontSize: 13, color: "#6b6558", marginBottom: 12 },
+  playerButton: { fontSize: 22, color: t.ink },
+  playerButtonDisabled: { color: t.inkFaint },
+  playerProgress: { fontSize: 12, color: t.inkMuted, minWidth: 52, textAlign: "center" },
+  playerClose: { fontSize: 16, color: t.inkMuted },
+  title: { fontSize: 24, fontWeight: "700", color: t.ink, marginBottom: 4 },
+  meta: { fontSize: 13, color: t.inkMuted, marginBottom: 12 },
   manageRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" },
   statusChip: {
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
   },
-  statusChipActive: { borderColor: "#b5502f", backgroundColor: "#fbe9e3" },
-  statusChipText: { fontSize: 12, color: "#6b6558" },
-  statusChipTextActive: { color: "#b5502f", fontWeight: "600" },
-  renameLink: { fontSize: 12, fontWeight: "600", color: "#6b6558", marginLeft: 6 },
+  statusChipActive: { borderColor: t.accent, backgroundColor: t.accentSoft },
+  statusChipText: { fontSize: 12, color: t.inkMuted },
+  statusChipTextActive: { color: t.accent, fontWeight: "600" },
+  renameLink: { fontSize: 12, fontWeight: "600", color: t.inkMuted, marginLeft: 6 },
   renameRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 },
   renameInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 6,
     padding: 8,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     fontSize: 16,
     fontWeight: "600",
+      color: t.ink,
   },
-  renameAction: { fontSize: 13, fontWeight: "600", color: "#b5502f" },
-  renameCancel: { fontSize: 13, fontWeight: "600", color: "#6b6558" },
-  actionError: { color: "#b5502f", fontSize: 12, marginBottom: 12 },
-  body: { fontSize: 16, lineHeight: 26, color: "#1c1a16" },
+  renameAction: { fontSize: 13, fontWeight: "600", color: t.accent },
+  renameCancel: { fontSize: 13, fontWeight: "600", color: t.inkMuted },
+  actionError: { color: t.danger, fontSize: 12, marginBottom: 12 },
+  body: { fontSize: 16, lineHeight: 26, color: t.ink },
   colorBar: {
     flexDirection: "row",
     justifyContent: "center",
     gap: 16,
     paddingVertical: 14,
     borderTopWidth: 1,
-    borderTopColor: "#ece6d8",
-    backgroundColor: "#fff",
+    borderTopColor: t.border,
+    backgroundColor: t.surface,
   },
-  swatch: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: "#ddd6c7" },
+  swatch: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: t.border },
 });

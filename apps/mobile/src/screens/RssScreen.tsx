@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import {
   ActivityIndicator,
   RefreshControl,
@@ -12,6 +12,7 @@ import {
 import type { Feed, FeedItem } from "@booklet/shared";
 import { ApiError, loadFeedItems, loadFeeds, subscribeFeed, unsubscribeFeed } from "../lib/data/feeds";
 import { saveArticleFromUrl } from "../lib/data/articles";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface RssScreenProps {
   authenticated: boolean;
@@ -28,6 +29,8 @@ interface ItemsState {
 // same saveArticleFromUrl path a hand-pasted URL takes). Items are never
 // stored -- see data/feeds.ts.
 export function RssScreen({ authenticated, onBack }: RssScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -146,6 +149,7 @@ export function RssScreen({ authenticated, onBack }: RssScreenProps) {
       <View style={styles.subscribeRow}>
         <TextInput
           style={styles.input}
+          placeholderTextColor={palette.inkFaint}
           placeholder="https://example.com/feed.xml"
           autoCapitalize="none"
           autoCorrect={false}
@@ -155,7 +159,7 @@ export function RssScreen({ authenticated, onBack }: RssScreenProps) {
         />
         <TouchableOpacity style={styles.subscribeButton} onPress={handleSubscribe} disabled={subscribing}>
           {subscribing ? (
-            <ActivityIndicator color="#fff" size="small" />
+            <ActivityIndicator color={palette.accentContrast} size="small" />
           ) : (
             <Text style={styles.subscribeButtonText}>Subscribe</Text>
           )}
@@ -238,52 +242,54 @@ export function RssScreen({ authenticated, onBack }: RssScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f4ee", paddingTop: 56, paddingHorizontal: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f4ee" },
-  back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
-  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 16 },
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.paper, paddingTop: 56, paddingHorizontal: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.paper },
+  back: { color: t.accent, fontSize: 14, fontWeight: "600", marginBottom: 12 },
+  title: { fontSize: 24, fontWeight: "700", color: t.ink, marginBottom: 16 },
   subscribeRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 6,
     padding: 10,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     fontSize: 14,
+      color: t.ink,
   },
-  subscribeButton: { backgroundColor: "#b5502f", borderRadius: 6, paddingHorizontal: 14, justifyContent: "center" },
-  subscribeButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
-  error: { color: "#b5502f", fontSize: 12, marginBottom: 8 },
-  notice: { color: "#1F6F6B", fontSize: 12, marginBottom: 8 },
+  subscribeButton: { backgroundColor: t.accent, borderRadius: 6, paddingHorizontal: 14, justifyContent: "center" },
+  subscribeButtonText: { color: t.accentContrast, fontWeight: "600", fontSize: 14 },
+  error: { color: t.danger, fontSize: 12, marginBottom: 8 },
+  notice: { color: t.accent, fontSize: 12, marginBottom: 8 },
   scrollContent: { paddingBottom: 32 },
-  empty: { textAlign: "center", color: "#6b6558", marginTop: 40 },
+  empty: { textAlign: "center", color: t.inkMuted, marginTop: 40 },
   feedSection: { marginBottom: 24 },
   feedHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
-  feedTitle: { fontSize: 17, fontWeight: "700", color: "#1c1a16" },
-  feedUrl: { fontSize: 11, color: "#a49d8e" },
-  unsubscribe: { fontSize: 12, fontWeight: "600", color: "#b5502f" },
-  feedStatus: { fontSize: 13, color: "#6b6558" },
+  feedTitle: { fontSize: 17, fontWeight: "700", color: t.ink },
+  feedUrl: { fontSize: 11, color: t.inkFaint },
+  unsubscribe: { fontSize: 12, fontWeight: "600", color: t.danger },
+  feedStatus: { fontSize: 13, color: t.inkMuted },
   itemCard: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "#fff",
+    backgroundColor: t.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#ece6d8",
+    borderColor: t.border,
     padding: 12,
     marginBottom: 8,
   },
-  itemTitle: { fontSize: 15, fontWeight: "600", color: "#1c1a16" },
-  itemSummary: { fontSize: 12, color: "#6b6558", marginTop: 3 },
+  itemTitle: { fontSize: 15, fontWeight: "600", color: t.ink },
+  itemSummary: { fontSize: 12, color: t.inkMuted, marginTop: 3 },
   saveButton: {
     borderWidth: 1,
-    borderColor: "#ddd6c7",
+    borderColor: t.border,
     borderRadius: 6,
     paddingVertical: 6,
     paddingHorizontal: 12,
   },
-  saveButtonText: { fontSize: 13, fontWeight: "600", color: "#1c1a16" },
+  saveButtonText: { fontSize: 13, fontWeight: "600", color: t.ink },
 });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { Article } from "@booklet/shared";
 import { loadArticles, updateArticleFavorited } from "../lib/data/articles";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface FavoritesScreenProps {
   authenticated: boolean;
@@ -10,6 +11,8 @@ interface FavoritesScreenProps {
 }
 
 export function FavoritesScreen({ authenticated, onBack, onOpenArticle }: FavoritesScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -112,17 +115,18 @@ export function FavoritesScreen({ authenticated, onBack, onOpenArticle }: Favori
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f4ee", paddingTop: 56, paddingHorizontal: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f4ee" },
-  back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
-  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16", marginBottom: 16 },
-  error: { color: "#b5502f", fontSize: 12, marginBottom: 8 },
-  empty: { textAlign: "center", color: "#6b6558", marginTop: 40 },
-  card: { backgroundColor: "#fff", borderRadius: 8, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#ece6d8" },
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.paper, paddingTop: 56, paddingHorizontal: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.paper },
+  back: { color: t.accent, fontSize: 14, fontWeight: "600", marginBottom: 12 },
+  title: { fontSize: 24, fontWeight: "700", color: t.ink, marginBottom: 16 },
+  error: { color: t.danger, fontSize: 12, marginBottom: 8 },
+  empty: { textAlign: "center", color: t.inkMuted, marginTop: 40 },
+  card: { backgroundColor: t.surface, borderRadius: 8, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: t.border },
   cardRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  cardTitle: { fontSize: 16, fontWeight: "600", color: "#1c1a16", marginBottom: 4 },
-  cardMeta: { fontSize: 12, color: "#6b6558" },
+  cardTitle: { fontSize: 16, fontWeight: "600", color: t.ink, marginBottom: 4 },
+  cardMeta: { fontSize: 12, color: t.inkMuted },
   starButton: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
-  starActive: { fontSize: 20, color: "#b5502f" },
+  starActive: { fontSize: 20, color: t.accent },
 });

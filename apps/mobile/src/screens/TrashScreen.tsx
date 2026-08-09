@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { Article } from "@booklet/shared";
 import { emptyTrash, loadTrash, permanentlyDeleteArticle, restoreArticle } from "../lib/data/articles";
+import { useTheme, type ThemePalette } from "../lib/theme";
 
 interface TrashScreenProps {
   authenticated: boolean;
@@ -9,6 +10,8 @@ interface TrashScreenProps {
 }
 
 export function TrashScreen({ authenticated, onBack }: TrashScreenProps) {
+  const { palette } = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -137,22 +140,23 @@ export function TrashScreen({ authenticated, onBack }: TrashScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f4ee", paddingTop: 56, paddingHorizontal: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f7f4ee" },
-  back: { color: "#b5502f", fontSize: 14, fontWeight: "600", marginBottom: 12 },
+const makeStyles = (t: ThemePalette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.paper, paddingTop: 56, paddingHorizontal: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.paper },
+  back: { color: t.accent, fontSize: 14, fontWeight: "600", marginBottom: 12 },
   titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  title: { fontSize: 24, fontWeight: "700", color: "#1c1a16" },
-  emptyLink: { color: "#b5502f", fontSize: 13, fontWeight: "600" },
-  subtitle: { fontSize: 12, color: "#6b6558", marginTop: 4, marginBottom: 16 },
-  error: { color: "#b5502f", fontSize: 12, marginBottom: 8 },
-  empty: { textAlign: "center", color: "#6b6558", marginTop: 40 },
-  card: { backgroundColor: "#fff", borderRadius: 8, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#ece6d8" },
-  cardTitle: { fontSize: 16, fontWeight: "600", color: "#1c1a16", marginBottom: 4 },
-  cardMeta: { fontSize: 12, color: "#6b6558", marginBottom: 10 },
+  title: { fontSize: 24, fontWeight: "700", color: t.ink },
+  emptyLink: { color: t.danger, fontSize: 13, fontWeight: "600" },
+  subtitle: { fontSize: 12, color: t.inkMuted, marginTop: 4, marginBottom: 16 },
+  error: { color: t.danger, fontSize: 12, marginBottom: 8 },
+  empty: { textAlign: "center", color: t.inkMuted, marginTop: 40 },
+  card: { backgroundColor: t.surface, borderRadius: 8, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: t.border },
+  cardTitle: { fontSize: 16, fontWeight: "600", color: t.ink, marginBottom: 4 },
+  cardMeta: { fontSize: 12, color: t.inkMuted, marginBottom: 10 },
   actionsRow: { flexDirection: "row", gap: 8 },
-  restoreButton: { borderWidth: 1, borderColor: "#ddd6c7", borderRadius: 6, paddingVertical: 6, paddingHorizontal: 14 },
-  restoreButtonText: { fontSize: 13, fontWeight: "600", color: "#1c1a16" },
-  deleteButton: { borderWidth: 1, borderColor: "#e2b8ab", borderRadius: 6, paddingVertical: 6, paddingHorizontal: 14 },
-  deleteButtonText: { fontSize: 13, fontWeight: "600", color: "#b5502f" },
+  restoreButton: { borderWidth: 1, borderColor: t.border, borderRadius: 6, paddingVertical: 6, paddingHorizontal: 14 },
+  restoreButtonText: { fontSize: 13, fontWeight: "600", color: t.ink },
+  deleteButton: { borderWidth: 1, borderColor: t.danger, borderRadius: 6, paddingVertical: 6, paddingHorizontal: 14 },
+  deleteButtonText: { fontSize: 13, fontWeight: "600", color: t.danger },
 });
