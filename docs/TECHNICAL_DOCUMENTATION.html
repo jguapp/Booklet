@@ -6172,10 +6172,14 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
             parity build-out itself is no longer typecheck-only — it has
             since been driven end-to-end on the web target (30 Playwright
             steps against the real API, all passing; see
-            <a href="#feat-mobile">Mobile App</a>). The screen count has
-            also long since passed the "worth a navigation library" bar the
-            scaffold set; the hand-rolled union type still works but React
-            Navigation would now pay for its setup cost.</li>
+            <a href="#feat-mobile">Mobile App</a>). The navigation-library
+            bar the scaffold set has since been paid: the hand-rolled union
+            was replaced with a React Navigation native stack (headers
+            hidden -- screens keep their own themed back links), and the
+            migration's one real behavior change -- preserved screens no
+            longer reload on return -- was caught by the Playwright run and
+            fixed by moving every list screen's load effect to
+            <code>useFocusEffect</code>.</li>
           <li>Native PDF/EPUB <em>page and CFI rendering</em> on mobile needs
             either a WebView bridge back to the browser reader or a dedicated
             native renderer. Displaying extracted text is deliberately

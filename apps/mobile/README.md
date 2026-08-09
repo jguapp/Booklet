@@ -196,9 +196,20 @@ removed from Expo Go in SDK 53, but locally-scheduled notifications like
 this one still work there on Android/iOS dev builds -- worth re-checking
 on a real device all the same.
 
-No navigation library -- a handful of screens and a session check don't
-need React Navigation's setup (and its native-linking config) for an app
-this size. Worth adding once there's meaningfully more than this.
+**React Navigation** -- the hand-rolled screen union earned its
+retirement at eleven screens, exactly the "meaningfully more than this"
+bar its own comment set. A native stack (`@react-navigation/native-stack`)
+now owns navigation, with `headerShown: false` everywhere: every screen
+already renders its own themed back link and title, and the native header
+would duplicate both. What the migration bought: Android's hardware back
+and iOS's edge-swipe work with no code, and screen state (a half-typed
+search, a scroll position) survives navigating away and back. What it
+cost, caught by the Playwright run the day it landed: preserved screens
+no longer reload on return, so every list screen's load effect became a
+`useFocusEffect` -- without that, a rename made in the reader never
+appeared back in the Library until a manual pull-to-refresh.
+`authenticated` still travels as a route param, keeping the web app's
+"every read/write takes the caller's auth state" pattern intact.
 
 ## Develop
 

@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import type { Feed, FeedItem } from "@booklet/shared";
 import { ApiError, loadFeedItems, loadFeeds, subscribeFeed, unsubscribeFeed } from "../lib/data/feeds";
 import { saveArticleFromUrl } from "../lib/data/articles";
@@ -70,16 +71,24 @@ export function RssScreen({ authenticated, onBack }: RssScreenProps) {
     }
   }, [authenticated, loadItemsFor]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    refresh().finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [refresh]);
+  // useFocusEffect, not a mount effect: React Navigation keeps stacked
+  // screens mounted, so "the user came back here" no longer implies a
+  // remount. Without this, an edit made on another screen (a rename in the
+  // reader, a restore in Trash) never appeared until a manual
+  // pull-to-refresh -- caught by the Playwright run when the migration
+  // landed. `loading` starts true and is only ever cleared, so the spinner
+  // covers the first load without flashing on every later refocus.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      refresh().finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [refresh]),
+  );
 
   async function handleSubscribe() {
     const trimmed = url.trim();

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import type { Article } from "@booklet/shared";
 import { loadArticles, updateArticleFavorited } from "../lib/data/articles";
 import { useTheme, type ThemePalette } from "../lib/theme";
@@ -30,16 +31,24 @@ export function FavoritesScreen({ authenticated, onBack, onOpenArticle }: Favori
     }
   }, [authenticated]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    refresh().finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [refresh]);
+  // useFocusEffect, not a mount effect: React Navigation keeps stacked
+  // screens mounted, so "the user came back here" no longer implies a
+  // remount. Without this, an edit made on another screen (a rename in the
+  // reader, a restore in Trash) never appeared until a manual
+  // pull-to-refresh -- caught by the Playwright run when the migration
+  // landed. `loading` starts true and is only ever cleared, so the spinner
+  // covers the first load without flashing on every later refocus.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      refresh().finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [refresh]),
+  );
 
   const favorites = useMemo(
     () =>
