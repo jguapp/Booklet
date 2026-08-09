@@ -5413,6 +5413,23 @@ easinessFactor = max(1.3, easinessFactor + <span class="cm">/* quality-based nud
         </p>
 
         <h3 id="ship-blockers">What must be fixed first</h3>
+        <div class="callout">
+          <span class="callout-label">Status as of v10</span>
+          <p>
+            All three blockers below are now <strong>resolved in code</strong>,
+            kept here because their reasoning is the record: #173 has its
+            <code>storage-data</code> volume in <code>docker-compose.yml</code>
+            (and <code>storage-service.ts</code> warns at boot when the path
+            looks ephemeral); #174 has its route, the web confirmation UI,
+            and — since v10 — the mobile one; and CI is a single self-hosted
+            runner configuration (see
+            <a href="#ci-self-hosted">Part VII</a>) with one physical step
+            outstanding: <em>running</em>
+            <code>scripts/register-github-runner.sh</code> on a machine you
+            own. Until that registration happens, every push still queues
+            green-less — config alone verifies nothing.
+          </p>
+        </div>
         <div class="callout warn">
           <span class="callout-label">1. Uploaded files do not survive a deploy (#173)</span>
           <p>
