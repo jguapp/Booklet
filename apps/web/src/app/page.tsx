@@ -6,6 +6,7 @@ import { LandingShowcase } from "@/components/landing/landing-showcase";
 import { LandingLocalFirst } from "@/components/landing/landing-local-first";
 import { LandingFeatures } from "@/components/landing/landing-features";
 import { LandingDevelopers } from "@/components/landing/landing-developers";
+import { LandingFaq } from "@/components/landing/landing-faq";
 import { LandingCta } from "@/components/landing/landing-cta";
 
 /**
@@ -37,6 +38,7 @@ export default function Home() {
         <LandingLocalFirst />
         <LandingFeatures />
         <LandingDevelopers />
+        <LandingFaq />
         <LandingCta />
       </main>
     </div>

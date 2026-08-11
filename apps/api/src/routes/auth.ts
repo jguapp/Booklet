@@ -54,6 +54,14 @@ function toUserProfile(user: UserRow): UserProfile {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Upper bounds, not just the 8-char minimum. Every password below feeds
+// scrypt, whose first stage HMACs the whole input -- without a cap, the
+// only bound on that input is the 1MB body limit. 128 clears every
+// password manager's output with room to spare (NIST asks verifiers to
+// *allow* at least 64); 254 is RFC 5321's address ceiling.
+const MAX_PASSWORD_LENGTH = 128;
+const MAX_EMAIL_LENGTH = 254;
+const MAX_NAME_LENGTH = 200;
 const WEB_ORIGIN = process.env.WEB_ORIGIN ?? "http://localhost:3000";
 // This server's own public URL -- must exactly match the redirect URI
 // registered with each OAuth provider (a mismatch is one of the most common
@@ -320,13 +328,16 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
     const { email, password, name } = request.body ?? {};
 
-    if (typeof email !== "string" || !EMAIL_RE.test(email)) {
+    if (typeof email !== "string" || email.length > MAX_EMAIL_LENGTH || !EMAIL_RE.test(email)) {
       return reply.code(400).send({ error: "invalid_email", message: "Enter a valid email address." });
     }
-    if (typeof password !== "string" || password.length < 8) {
+    if (typeof password !== "string" || password.length < 8 || password.length > MAX_PASSWORD_LENGTH) {
       return reply
         .code(400)
-        .send({ error: "invalid_password", message: "Password must be at least 8 characters." });
+        .send({ error: "invalid_password", message: "Password must be 8-128 characters." });
+    }
+    if (name !== undefined && name !== null && (typeof name !== "string" || name.length > MAX_NAME_LENGTH)) {
+      return reply.code(400).send({ error: "invalid_name", message: "Name is too long." });
     }
 
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -370,7 +381,11 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     const invalid = () =>
       reply.code(401).send({ error: "invalid_credentials", message: "Incorrect email or password." });
 
+    // Length caps use the same invalid() as a wrong password -- an
+    // over-long guess deserves no distinct signal, and rejecting it here
+    // means it never reaches scrypt.
     if (typeof email !== "string" || typeof password !== "string") return invalid();
+    if (email.length > MAX_EMAIL_LENGTH || password.length > MAX_PASSWORD_LENGTH) return invalid();
 
     const user = await prisma.user.findUnique({ where: { email } });
 
@@ -669,6 +684,12 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       const { password, confirmEmail } = request.body ?? {};
       const refused = (message: string) => reply.code(403).send({ error: "confirmation_failed", message });
 
+      // Same cap as login, same reason: an over-long value never reaches
+      // scrypt, and it can't be a correct confirmation anyway.
+      if (typeof password === "string" && password.length > MAX_PASSWORD_LENGTH) {
+        return refused("That password is incorrect.");
+      }
+
       if (user.passwordHash) {
         if (typeof password !== "string" || !verifyPassword(password, user.passwordHash)) {
           return refused("That password is incorrect.");
@@ -779,10 +800,14 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         reply.code(400).send({ error: "invalid_token", message: "That reset link is invalid or has expired." });
 
       if (typeof token !== "string" || !token) return invalid();
-      if (typeof newPassword !== "string" || newPassword.length < 8) {
+      if (
+        typeof newPassword !== "string" ||
+        newPassword.length < 8 ||
+        newPassword.length > MAX_PASSWORD_LENGTH
+      ) {
         return reply
           .code(400)
-          .send({ error: "invalid_password", message: "Password must be at least 8 characters." });
+          .send({ error: "invalid_password", message: "Password must be 8-128 characters." });
       }
 
       const record = await prisma.passwordResetToken.findUnique({ where: { tokenHash: hashOpaqueToken(token) } });
