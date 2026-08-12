@@ -3146,12 +3146,55 @@
             Shipping an unrun script while quietly implying otherwise is worse
             than not shipping it, so the banner says to expect to debug it on
             first run and to trust none of its numbers until someone has
-            watched it run. Until then <strong>#159 is open, and the read-along
-            estimate's real accuracy is unknown</strong> — not
-            "probably fine". It is
-            <a href="#post-deploy-roadmap">phase 1 of the post-launch
-            roadmap</a> for exactly that reason: the blocker is network
-            access, not difficulty.
+            watched it run. The blocker was network access, not difficulty.
+          </p>
+        </div>
+
+        <div class="callout">
+          <p>
+            <strong>Update — it has now been run, and reading its per-word
+            output changed the answer.</strong>
+          </p>
+          <p>
+            The summary said the shipped estimate drifts by 221–451&nbsp;ms RMS
+            (837&nbsp;ms worst) and concluded forced alignment was justified.
+            The per-word numbers underneath say something more specific: the
+            error grows monotonically with word position — 0, 130, 268, 425,
+            575, 770&nbsp;ms across a single chunk. That is a systematic
+            <em>scale</em> error, not speech pacing unevenly, and it has a
+            cheaper cause than the one the issue assumed.
+          </p>
+          <p>
+            Kokoro's output ends with a mean <strong>457&nbsp;ms of trailing
+            silence</strong>, remarkably consistent across samples (401–512&nbsp;ms).
+            The player spreads the chunk's characters across the whole audio
+            <em>duration</em>, silence included, so every word is pushed late
+            by the ratio of padded to spoken length. Anchoring the same
+            estimate to the spoken interval instead — one number, no second
+            inference — roughly halves the drift: worst RMS 451&nbsp;ms →
+            265&nbsp;ms, and the best chunks reach 110&nbsp;ms.
+          </p>
+          <p>
+            That does not clear the 100&nbsp;ms threshold, so alignment is
+            still justified for click-to-seek — but on the residual, not on a
+            padding artifact that was inflating the case roughly twofold.
+            Measured costs, on this machine, with
+            <code>whisper-base.en</code> on CPU: <strong>831&nbsp;ms per chunk
+            mean</strong> (1059&nbsp;ms worst), and storage of
+            <strong>0.019%</strong> against the audio (396&nbsp;B of timings
+            for 1990&nbsp;KB of WAV). Storage is a non-issue; the latency is
+            not, which is why it belongs off the TTFA path.
+          </p>
+          <p>
+            Recommendation, in order: <strong>trim the trailing silence
+            first</strong> — it is free, halves the error, and improves the
+            shipped experience whether or not alignment ever lands. Then, if
+            click-to-seek is wanted, run alignment as a background pass after
+            the audio is returned, cache the timings beside it, and bump the
+            <code>tts:pcm16:v1:</code> key prefix, since the cached value's
+            shape changes. See
+            <code>scripts/analyze-readalong-silence.ts</code>, which
+            decomposes the two effects and prints all of the above.
           </p>
         </div>
         <p>
