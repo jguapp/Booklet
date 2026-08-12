@@ -48,6 +48,22 @@ export interface PodcastChannelInput {
   /** Where <link> points -- the web app, not the API. */
   siteUrl: string;
   authorName: string;
+  /**
+   * Absolute URL of the show's cover art.
+   *
+   * Apple requires channel-level `itunes:image` unconditionally and rejects a
+   * feed without it -- not with an error a client surfaces, but by refusing
+   * the show, which reads as "the feed just doesn't work". It has to be a
+   * JPEG or PNG between 1400x1400 and 3000x3000; an SVG will not do, which is
+   * why this app's own icon.svg cannot be reused for it.
+   *
+   * Null when PODCAST_ARTWORK_URL is unset. The feed stays valid RSS and every
+   * third-party client this was tested against still subscribes and plays --
+   * only Apple's directory is strict about it, and `itunes:block` already asks
+   * not to be listed there. Deliberately not defaulted to a placeholder: a
+   * broken image URL in a feed is worse than none, because clients cache it.
+   */
+  artworkUrl: string | null;
   buildDate: Date;
   episodes: readonly PodcastEpisodeInput[];
 }
@@ -211,6 +227,19 @@ export function buildPodcastFeedXml(channel: PodcastChannelInput): string {
     // submitted anywhere. "News" is the least-wrong bucket for a personal
     // read-it-later queue; nothing reads it.
     '    <itunes:category text="News" />',
+    // Both spellings of the same artwork. itunes:image is what Apple and most
+    // modern clients read; the RSS 2.0 <image> block is what older ones fall
+    // back to, and costs three lines to satisfy.
+    ...(channel.artworkUrl
+      ? [
+          `    <itunes:image href="${text(channel.artworkUrl)}" />`,
+          "    <image>",
+          `      <url>${text(channel.artworkUrl)}</url>`,
+          `      <title>${text(channel.title)}</title>`,
+          `      <link>${text(channel.siteUrl)}</link>`,
+          "    </image>",
+        ]
+      : []),
     ...items,
     "  </channel>",
     "</rss>",

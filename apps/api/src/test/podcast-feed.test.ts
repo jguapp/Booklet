@@ -45,6 +45,7 @@ function channel(overrides: Partial<PodcastChannelInput> = {}): PodcastChannelIn
     selfUrl: "https://api.example.com/podcast/bkpod_abc/feed.xml",
     siteUrl: "https://booklet.example.com",
     authorName: "Booklet",
+    artworkUrl: null,
     buildDate: new Date("2026-08-08T00:00:00Z"),
     episodes: [episode()],
     ...overrides,
@@ -72,6 +73,67 @@ describe("buildPodcastFeedXml", () => {
     // below is a namespace error, not just an unrecognized tag.
     expect(doc.getElementsByTagNameNS(ITUNES_NS, "author").length).toBeGreaterThan(0);
     expect(doc.getElementsByTagNameNS(ATOM_NS, "link").length).toBe(1);
+  });
+
+  it("carries every channel element Apple requires, or the feed is silently rejected", () => {
+    const doc = parse(buildPodcastFeedXml(channel()));
+    const ch = doc.querySelector("channel")!;
+
+    // Apple's directory rejects a feed missing any of these, and a podcast
+    // client's response is an empty subscription rather than an error -- so
+    // dropping one would look like "the feed just doesn't work" with nothing
+    // pointing at the cause. The other tests here prove the document parses;
+    // parsing is not the same as being accepted, which is what this guards.
+    for (const tag of ["title", "link", "description", "language"]) {
+      expect(ch.querySelector(tag)?.textContent?.trim(), `<${tag}> missing`).toBeTruthy();
+    }
+    for (const tag of ["author", "explicit", "category"]) {
+      const el = ch.getElementsByTagNameNS(ITUNES_NS, tag)[0];
+      expect(el, `<itunes:${tag}> missing`).toBeTruthy();
+    }
+
+    // itunes:category carries its value in an attribute, not as text, so "the
+    // element exists" is not enough to be valid.
+    expect(ch.getElementsByTagNameNS(ITUNES_NS, "category")[0].getAttribute("text")).toBeTruthy();
+    // explicit must be the literal "true"/"false" -- Apple rejects "no"/"yes".
+    expect(["true", "false"]).toContain(
+      ch.getElementsByTagNameNS(ITUNES_NS, "explicit")[0].textContent?.trim(),
+    );
+  });
+
+  describe("show artwork", () => {
+    it("emits both spellings of the cover art when one is configured", () => {
+      const url = "https://cdn.example.com/booklet-cover-1400.png";
+      const doc = parse(buildPodcastFeedXml(channel({ artworkUrl: url })));
+      const ch = doc.querySelector("channel")!;
+
+      // Apple reads itunes:image; older clients read the RSS 2.0 <image>
+      // block. Emitting one and not the other loses artwork in whichever set
+      // of clients reads the missing one.
+      expect(ch.getElementsByTagNameNS(ITUNES_NS, "image")[0]?.getAttribute("href")).toBe(url);
+      expect(ch.querySelector("image > url")?.textContent).toBe(url);
+    });
+
+    it("stays valid RSS with no artwork configured, rather than emitting an empty href", () => {
+      const doc = parse(buildPodcastFeedXml(channel({ artworkUrl: null })));
+      const ch = doc.querySelector("channel")!;
+      // A present-but-empty href is worse than absence: clients cache the
+      // broken image and stop retrying.
+      expect(ch.getElementsByTagNameNS(ITUNES_NS, "image").length).toBe(0);
+      expect(ch.querySelector("image")).toBeNull();
+      expect(ch.querySelector("title")?.textContent).toBeTruthy();
+    });
+  });
+
+  it("gives every item the elements a client needs to list and order it", () => {
+    const doc = parse(buildPodcastFeedXml(channel()));
+    const item = doc.querySelector("item")!;
+    for (const tag of ["title", "enclosure", "guid", "pubDate"]) {
+      expect(item.querySelector(tag), `<${tag}> missing from item`).toBeTruthy();
+    }
+    // An unparseable pubDate sorts an episode to the epoch in most clients,
+    // which buries it at the bottom of the list forever.
+    expect(Number.isNaN(Date.parse(item.querySelector("pubDate")!.textContent!))).toBe(false);
   });
 
   it("declares the feed's own URL in atom:link rel=self, which validators require", () => {

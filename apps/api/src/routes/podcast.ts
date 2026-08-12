@@ -548,6 +548,9 @@ export async function registerPodcastRoutes(app: FastifyInstance): Promise<void>
         selfUrl: feedUrl(request, request.params.token, filter),
         siteUrl: process.env.WEB_ORIGIN ?? "http://localhost:3000",
         authorName: "Booklet",
+        // Unset by default: see PodcastChannelInput.artworkUrl. Point it at a
+        // 1400x1400+ JPEG/PNG to satisfy Apple's requirement.
+        artworkUrl: process.env.PODCAST_ARTWORK_URL ?? null,
         buildDate: new Date(),
         episodes,
       });
