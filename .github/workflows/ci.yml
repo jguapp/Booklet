@@ -232,7 +232,22 @@ jobs:
       # job and losing everything else with it. That exclusion is a genuine
       # offline switch: every spec that reaches the public internet carries
       # the tag (#167), which is also what `pnpm verify --e2e` relies on.
-      - run: pnpm --filter @booklet/web test:e2e
+      # `--grep-invert @live` is the switch the note above describes, now
+      # actually needed. On this self-hosted runner the *shell* has outbound
+      # network -- curl reaches huggingface.co and dictionaryapi.dev with 200 --
+      # but Chromium does not: every @live spec fails with "Failed to fetch"
+      # in well under a second, too fast to be a timeout. The evidence that it
+      # is the browser and not the app is that semantic-search.spec.ts's third
+      # test, which asserts the worker bundle loads and deliberately fetches
+      # nothing, passes in the same run while the two that download a model
+      # fail.
+      #
+      # Excluding them keeps every offline spec gating rather than losing the
+      # whole job, which is what the tag was introduced for (#167). What is
+      # given up is real coverage -- live extraction, the dictionary, model
+      # downloads -- so those are worth running by hand before a release:
+      #   pnpm --filter @booklet/web test:e2e -- --grep @live
+      - run: pnpm --filter @booklet/web test:e2e -- --grep-invert @live
 
   bench-tts-ttfa:
     # Measures real Kokoro TTFA (cold pool, warm/uncached, cache hit,

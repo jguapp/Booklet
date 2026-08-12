@@ -33,7 +33,15 @@ test("opening an article with hundreds of highlights renders them all promptly",
 
   await page.evaluate(
     async ({ articleId, count }) => {
-      const req = indexedDB.open("booklet", 5);
+      // No explicit version: the app has already opened this database, so
+      // whatever version it is on is the right one. Naming a number here
+      // pinned the spec to DB_VERSION at the time it was written, and the
+      // next bump (5 -> 6, for #156's embeddings store) broke it with
+      // "The requested version (5) is less than the existing version (6)" --
+      // a failure in a test that has nothing to do with the store that
+      // changed. settings-instant-apply-and-nav-reorder.spec.ts already
+      // opens it this way.
+      const req = indexedDB.open("booklet");
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
