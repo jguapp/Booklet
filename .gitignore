@@ -46,3 +46,7 @@ Thumbs.db
 # misc
 *.tsbuildinfo
 .turbo/
+
+# Personal working documentation -- kept locally, not published.
+# Untracked deliberately when this repository was made public.
+docs/

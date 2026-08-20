@@ -266,14 +266,14 @@ itself.
 | | |
 |---|---|
 | **Source files** | 349 TypeScript across 4 apps + 1 shared package |
-| **Data model** | 19 Prisma models, 20 migrations |
-| **Tests** | Unit (Vitest) in `packages/shared`, `apps/web` and `apps/api`; 48 Playwright e2e specs |
+| **Data model** | 21 Prisma models, 24 migrations |
+| **Tests** | Unit (Vitest) in `packages/shared`, `apps/web` and `apps/api`; 50 Playwright e2e specs |
 | **One command** | `pnpm verify` runs 10 checks and tells you what it *didn't* |
 
-This repo documents its own mistakes on purpose. `docs/TECHNICAL_DOCUMENTATION.html`
-is a long-form technical guide covering not just how things work but what was
-tried, rejected, and got reversed — including the bugs that shipped and how
-they were found.
+This repo documents its own mistakes on purpose — in commit messages and in
+comments that explain not just how something works but what was tried,
+rejected, and reversed, including the bugs that shipped and how they were
+found.
 
 **Known and written down:** the Docker volume behaviour needs one real
 `docker compose` run to verify, the podcast feed has never been subscribed to
@@ -308,9 +308,6 @@ apps/
   extension/   Chrome + Firefox, MV3
 packages/
   shared/      Types, SM-2, chunking, anchoring — the shared vocabulary
-docs/
-  TECHNICAL_DOCUMENTATION.html   The long-form guide
-  ROADMAP.md                     Post-deployment plan
 ```
 
 ## Getting started

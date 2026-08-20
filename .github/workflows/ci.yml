@@ -1,31 +1,23 @@
 # CI for Booklet.
 #
-# This is the one and only pipeline. It runs on a **self-hosted runner** --
-# a machine you own, registered to this repository (see
-# scripts/register-github-runner.sh and docs/CI_GITHUB_RUNNER.md). Self-hosted
-# runner minutes are not metered or billed, which is the whole reason this
-# repo is on one: GitHub-hosted minutes and GitLab's free tier both ran out
-# mid-branch and left pushes unverified. There is no second (GitLab) pipeline
-# to keep in sync anymore -- that was removed when the move happened.
+# Runs on GitHub-hosted runners. This repository is public, and GitHub does
+# not meter Actions minutes for public repositories on standard runners --
+# which is what finally resolved the problem that shaped this file's history:
+# hosted minutes and GitLab's free tier both ran out mid-branch and left
+# pushes unverified, and for a while CI ran on a self-hosted runner instead.
 #
-# Because the runner is a persistent machine rather than a fresh VM per job,
-# two things follow that a GitHub-hosted runner handled for free:
-#   - It needs Docker (for the `services:` Postgres containers and the
-#     docker-build job) and passwordless sudo (for the apt-get/xvfb steps),
-#     provisioned once. docs/CI_GITHUB_RUNNER.md lists the prerequisites.
-#   - One runner runs one job at a time, so the seven jobs serialize. Register
-#     more runners (same script, same labels) to run them in parallel.
-
+# That runner was removed before this repository was made public, and should
+# not come back while it is public. `pull_request` builds run code from forks;
+# on a self-hosted runner that is arbitrary code execution on a machine you
+# own, and no amount of workflow hardening reliably prevents it.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
-    # A commit that only touches prose ties the runner up for the same ~22
-    # minutes as one that touches every app, and buys nothing -- there is no
-    # code in it to typecheck, bundle, or drive a browser against. On a single
-    # self-hosted runner that is 22 minutes the next real push has to wait for.
+    # A commit that only touches prose buys nothing from a full run -- there is
+    # no code in it to typecheck, bundle, or drive a browser against.
     # Note this means a docs-only PR reports *no* checks at all; if required
     # status checks are ever turned on for this repo, this needs to become a
     # no-op job rather than a skipped workflow, or such a PR can never merge.
@@ -38,11 +30,9 @@ on:
   workflow_dispatch:
 
 # Superseded runs are cancelled instead of racing the new one to the finish.
-# This mattered for billed minutes on a hosted runner; on a single self-hosted
-# runner it matters more, not less -- five pushes in an afternoon would queue
-# five full runs back to back, and the newest push (the only one anyone will
-# read) would wait behind ~88 minutes of already-obsolete work. The final push
-# on a branch still gets a complete run; only the ones already obsolete drop.
+# The final push on a branch still gets a complete run; only runs that are
+# already obsolete drop. Note this cancels your own in-flight run when you
+# push again.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -62,7 +52,7 @@ env:
 
 jobs:
   typecheck-and-lint:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -89,7 +79,7 @@ jobs:
 
   # Unit tests that need nothing but Node: @booklet/shared and apps/web.
   test-unit:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -108,7 +98,7 @@ jobs:
       - run: pnpm --filter @booklet/web test
 
   test-api:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16
@@ -142,7 +132,7 @@ jobs:
       - run: pnpm --filter @booklet/api test
 
   test-web-e2e:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16
@@ -232,22 +222,18 @@ jobs:
       # job and losing everything else with it. That exclusion is a genuine
       # offline switch: every spec that reaches the public internet carries
       # the tag (#167), which is also what `pnpm verify --e2e` relies on.
-      # `--grep-invert @live` is the switch the note above describes, now
-      # actually needed. On this self-hosted runner the *shell* has outbound
-      # network -- curl reaches huggingface.co and dictionaryapi.dev with 200 --
-      # but Chromium does not: every @live spec fails with "Failed to fetch"
-      # in well under a second, too fast to be a timeout. The evidence that it
-      # is the browser and not the app is that semantic-search.spec.ts's third
-      # test, which asserts the worker bundle loads and deliberately fetches
-      # nothing, passes in the same run while the two that download a model
-      # fail.
+      # The full suite, @live specs included. They were excluded for a while
+      # because the self-hosted runner's Chromium had no outbound network --
+      # every @live spec failed with "Failed to fetch" in under a second while
+      # curl from the same shell reached those hosts fine. A GitHub-hosted
+      # runner has working egress, so that exclusion no longer has a reason and
+      # carrying it would silently drop real coverage: live extraction, the
+      # dictionary lookup, and the embedding model download.
       #
-      # Excluding them keeps every offline spec gating rather than losing the
-      # whole job, which is what the tag was introduced for (#167). What is
-      # given up is real coverage -- live extraction, the dictionary, model
-      # downloads -- so those are worth running by hand before a release:
-      #   pnpm --filter @booklet/web test:e2e -- --grep @live
-      - run: pnpm --filter @booklet/web test:e2e -- --grep-invert @live
+      # The cost is that a third-party outage can now redden this job. That is
+      # a deliberate trade, and `--grep-invert @live` remains the switch to
+      # reach for if it becomes a nuisance.
+      - run: pnpm --filter @booklet/web test:e2e
 
   bench-tts-ttfa:
     # Measures real Kokoro TTFA (cold pool, warm/uncached, cache hit,
@@ -263,7 +249,7 @@ jobs:
     # be asked for on any branch via workflow_dispatch -- which is exactly
     # how #162's before/after numbers were taken.
     if: github.event_name != 'pull_request'
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -283,7 +269,7 @@ jobs:
       - run: pnpm --filter @booklet/api exec tsx scripts/bench-tts-ttfa.ts
 
   docker-build:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # Build only, no push -- this is here to catch exactly the kind of
@@ -327,7 +313,7 @@ jobs:
           docker logs booklet-api
 
   test-extension-e2e:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16

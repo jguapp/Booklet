@@ -313,8 +313,7 @@ restart -- out of scope to do unilaterally. Two things stand in for that:
 
 - A `docker-build` job builds both images and boots the api one against a
   real throwaway Postgres container. It lives in `.github/workflows/ci.yml`
-  and runs on a self-hosted runner -- see "CI: the self-hosted runner" below
-  for whether one is actually registered and Idle.
+  and runs on GitHub-hosted runners.
 - The api image's actual production execution path -- `pnpm --filter
   @booklet/api build` (esbuild, see `apps/api/scripts/build.mjs`) then
   `node dist/index.js` under plain Node, no tsx or bundler doing module
@@ -402,32 +401,22 @@ JWT_ACCESS_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toStr
   this environment doesn't have (no `gh` CLI, no API token) or you checking
   the pipeline yourself. Which one to check is the next section.
 
-## CI: the self-hosted runner
+## CI
 
-There is **one** pipeline, `.github/workflows/ci.yml` -- the same seven jobs
-that have gone green on real hardware. It runs on a **self-hosted runner**
-rather than GitHub-hosted VMs, and the two-pipeline GitHub/GitLab split that
-used to live here is gone: the GitLab config was removed with the move.
+There is **one** pipeline, `.github/workflows/ci.yml` -- seven jobs running on
+**GitHub-hosted runners**. Because this repository is public, GitHub does not
+meter Actions minutes for it on standard runners, so there is no allowance to
+run out of.
 
-The reason is metering. GitHub-hosted minutes and GitLab.com's (smaller) free
-tier both ran out mid-branch and left pushes silently unverified. GitHub does
-**not** meter self-hosted runners, so a machine you own has no allowance to
-run out of -- an old laptop, a spare box, or a small always-on VPS all work.
-The cost moves from a per-minute bill to keeping that machine running.
+That was not always true. Hosted minutes on a private repo and GitLab.com's
+smaller free tier both ran out mid-branch and left pushes silently unverified,
+and for a period CI ran on a self-hosted runner instead. That runner was
+removed before this repository was made public.
 
-**Whether pushes are verified right now depends on one thing: is a runner
-registered and Idle?** Setup is a single script:
+**It should not come back while the repository is public.** `pull_request`
+builds execute code from forks; on a machine you own that is arbitrary code
+execution by anyone who can open a pull request, and workflow-level hardening
+does not reliably prevent it.
 
-```bash
-RUNNER_TOKEN=<token from Settings > Actions > Runners > New> \
-  ./scripts/register-github-runner.sh
-```
-
-Full instructions, prerequisites (Docker + passwordless sudo, which the
-`services:` and e2e jobs need), parallelism (register more runners), and the
-security notes are in [`docs/CI_GITHUB_RUNNER.md`](docs/CI_GITHUB_RUNNER.md).
-
-Until a runner is Idle, `pnpm verify` is the stand-in: it runs everything
-checkable without a running service and names what it skipped, including
-`docker-build`, which is the check that has caught the most real bugs and
-which no local command fully covers.
+`pnpm verify` remains the local stand-in: it runs everything checkable without
+a running service and names what it skipped.

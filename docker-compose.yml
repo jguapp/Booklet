@@ -11,10 +11,8 @@
 # file's own header comment) directly, by running the equivalent commands
 # without Docker in between; and both Dockerfiles building, plus the api
 # image actually booting against a real Postgres and answering a request, in
-# CI's docker-build job (.github/workflows/ci.yml), which runs on a
-# self-hosted runner -- see DEPLOYMENT.md's "CI: the self-hosted runner" and
-# docs/CI_GITHUB_RUNNER.md. Until a runner is registered and Idle, nothing is
-# re-verifying this automatically; `pnpm verify` is the local stand-in.
+# CI's docker-build job (.github/workflows/ci.yml), which runs on
+# GitHub-hosted runners. `pnpm verify` is the local stand-in.
 #
 #   cp apps/api/.env.example apps/api/.env.docker   # fill in JWT_ACCESS_SECRET etc.
 #   docker compose up --build
